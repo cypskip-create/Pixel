@@ -159,27 +159,23 @@ nsis('installer directory preflight', () => {
 
 describe('installer script shape', () => {
   const script = readFileSync(join(root, 'build', 'installer.nsh'), 'utf8');
+  // Comments explain the removals; only directives matter for these assertions.
+  const code = script
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith(';'))
+    .join('\n');
 
-  it('no longer validates in .onVerifyInstDir', () => {
-    // This callback fired while the path was being typed and rejected writable
-    // directories on real hardware. Its history is documented in a comment, so
-    // assert on the definition rather than on any mention of the name.
-    expect(script).not.toContain('Function .onVerifyInstDir');
+  it('keeps only legacy cleanup, with no behavioural overrides', () => {
+    // The directory preflight and the process-check override were both removed
+    // after field evidence contradicted them.
+    expect(code).not.toContain('customCheckAppRunning');
+    expect(code).not.toContain('customInit');
+    expect(code).not.toContain('onVerifyInstDir');
+    expect(code).toContain('!macro customInstall');
+    expect(code).toContain('!macro customUnInstall');
   });
 
-  it('validates once, in customInit', () => {
-    expect(script).toContain('!macro customInit');
-    expect(script).toContain('PIXEL_CHECK_DIR_WRITABLE');
-  });
-
-  it('preserves registers the installer relies on', () => {
-    // The old callback clobbered $0 inside MUI's own page code.
-    expect(script).toContain('Push $0');
-    expect(script).toContain('Pop $0');
-  });
-
-  it('only inserts the check macro once, avoiding duplicate NSIS labels', () => {
-    const insertions = script.split('!insertmacro PIXEL_CHECK_DIR_WRITABLE').length - 1;
-    expect(insertions).toBe(1);
+  it('never terminates a process', () => {
+    expect(code).not.toContain('taskkill');
   });
 });
