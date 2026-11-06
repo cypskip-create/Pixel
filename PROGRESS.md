@@ -238,3 +238,48 @@ to prove the reader itself is correct.
 2. Confirm the first-launch experience and complete
    `docs/WINDOWS-VALIDATION.md`.
 3. Only then start Wave 3.
+
+## Repository and push identity
+
+Requirement: commits and pushes belong to the GitHub account
+**cypriankiprop41@gmail.com**.
+
+Configured (repo-local, so it always wins over any global setting):
+
+```
+user.name  = Cyprian Kiprop
+user.email = cypriankiprop41@gmail.com
+```
+
+Commits are made with that identity - do not override it with `-c user.name=...`.
+
+**Push authentication is separate from commit identity.** Git Credential Manager
+holds the credentials, and only one account is currently stored for github.com:
+
+```
+$ git-credential-manager github list
+cypskip-create
+```
+
+So every push up to `0193964` authenticated as **cypskip-create**, even though the
+commits were authored by the address above. To push as the requested account, that
+account must be authenticated once, interactively:
+
+```powershell
+# 1. sign in as the account for cypriankiprop41@gmail.com
+& "C:\Program Files\Git\mingw64\bin\git-credential-manager.exe" github login
+
+# 2. confirm the stored account list
+& "C:\Program Files\Git\mingw64\bin\git-credential-manager.exe" github list
+```
+
+If the stored list still shows only `cypskip-create`, remove the old entry first
+(`... github logout`) and log in again. If the account has no write access to
+`cypskip-create/Lore`, the remote must change as well:
+
+```powershell
+git remote set-url origin https://github.com/<account>/<repo>.git
+```
+
+Verify after the next push with `git-credential-manager github list`, or by
+checking the commit author and pusher on GitHub.
