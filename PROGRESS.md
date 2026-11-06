@@ -283,3 +283,58 @@ git remote set-url origin https://github.com/<account>/<repo>.git
 
 Verify after the next push with `git-credential-manager github list`, or by
 checking the commit author and pusher on GitHub.
+
+## Wave 3 (branch `wave3`, not pushed)
+
+Multi-language foundation, kept isolated from the installer work on `main`.
+
+**Verified:** 392 tests across 17 files pass; both TypeScript programs typecheck;
+four SQLite migrations apply; real Python extraction and indexing run end to end.
+
+### 3A Memory - complete
+SQLite (`node:sqlite`, no native module) with WAL, versioned transactional
+migrations, FTS5. Project-scoped memory store with duplicate detection by content
+hash, edit/delete/retention, ranking (confidence + usage + recency + bm25), and a
+budgeted context builder that labels each record's provenance so an inference is
+never presented as a confirmed fact. Tools: `memory_save/search/list/forget`, with
+writes approved and reads scoped to the active project. 39 tests: persistence,
+restart recovery, project isolation, duplicates, expiry, ranking, context budget,
+tool behaviour.
+
+### 3B Documents - complete
+Supervised Python worker (stdio JSON-RPC, protocol version, timeouts, restart
+budget, capability discovery) extracting txt/md/JSON/CSV/source, plus PDF (PyMuPDF),
+DOCX (python-docx), XLSX (openpyxl) and optional OCR when installed; missing
+dependencies produce a precise capability error rather than a crash. TypeScript
+side: bounded directory discovery, deterministic overlapping chunking, incremental
+re-indexing by size+mtime signature, FTS5 search with source attribution, removal of
+missing files, cancellation. Tools: `documents_index/search/list`. 28 tests,
+including a live Python round trip and a live index/search run.
+
+### 3C Workflows - engine complete
+Semantic steps (locator + action + expectation), stored with a definition hash so a
+tampered workflow is refused. Replay re-checks the central policy per step, requests
+approval when needed, stops on a failed expectation, and honours cancellation.
+Secrets are redacted and typing into password fields is never recorded.
+
+### 3D Subagents - complete
+Six specialists (research, browser, systems, infrastructure, knowledge, code) with
+explicit allowlists and step/token/time budgets. The coordinator enforces the
+allowlist, budgets and the emergency stop, and refuses tools outside the plan.
+Guide mode withholds state-changing tools. Infrastructure and Pixel Code are
+deliberately granted nothing because their adapters do not exist yet.
+
+### 3E Offline AI + cost control - complete
+Ollama provider: status, model discovery, fail-closed capability detection,
+streaming generation, honest "no model installed" guidance, memory-aware model
+recommendation. Task-aware routing (capability beats cost; vision never routed to a
+blind model; offline falls back locally), daily token/spend ceilings, loop
+detection, tool-output truncation and history summarisation.
+
+### Deliberately not done
+Rust (no benchmark justifies it). C#/.NET UI Automation service (contract designed,
+not written). VirtualBox/SSH adapters. The compact Wave 3 UI panels and the IPC
+surface for memory/documents/workflows/models. Conversation-level memory injection.
+See `WAVE3_HANDOFF.md` for the ordered next steps.
+
+Installer, `appId`, NSIS scripts and migration logic were not touched.

@@ -20,6 +20,8 @@ import type { ChildProcess } from 'node:child_process';
 import { arch, cpus, freemem, platform, release, totalmem } from 'node:os';
 import type { ImageAttachment } from '../../shared/types';
 import { BrowserSession } from './browser';
+import type { MemoryTools } from '../memory/toolset';
+import type { DocumentTools } from '../documents/toolset';
 
 export interface ToolResult {
   ok: boolean;
@@ -66,6 +68,10 @@ export interface ExecutorDeps {
   describeImage?: (image: ImageAttachment, question: string) => Promise<string>;
   /** Shared browser session, created lazily on first use. */
   browser?: BrowserSession;
+  /** Wave 3 memory tools, scoped to the active project. */
+  memory?: MemoryTools;
+  /** Wave 3 document tools. */
+  documents?: DocumentTools;
 }
 
 export class ToolExecutors {
@@ -97,6 +103,15 @@ export class ToolExecutors {
   /** Dispatch one call. Never throws: failures become ToolResult. */
   async run(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     try {
+      // Wave 3 tool sets own their own dispatch; they are composed here so the
+      // agent loop keeps a single execution entry point.
+      if (this.deps.memory?.handles(name)) {
+        return this.deps.memory.run(name, args);
+      }
+      if (this.deps.documents?.handles(name)) {
+        return await this.deps.documents.run(name, args);
+      }
+
       switch (name) {
         case 'get_current_time':
           return this.getCurrentTime();
