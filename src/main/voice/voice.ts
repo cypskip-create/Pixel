@@ -221,6 +221,13 @@ function runPowerShell(
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    // A signal that is already aborted never fires its listener, so check first.
+    // Without this, cancelling before the process starts would still record.
+    if (signal?.aborted) {
+      reject(new Error('Listening was cancelled.'));
+      return;
+    }
+
     let settled = false;
     const child = execFile(
       'powershell.exe',

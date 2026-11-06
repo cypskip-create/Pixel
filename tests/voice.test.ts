@@ -125,6 +125,8 @@ describe('VoiceService', () => {
   }, 30_000);
 
   it('returns a structured failure when listening is cancelled immediately', async () => {
+    // Regression: an already-aborted AbortSignal never fires its listener, so
+    // the service must check signal.aborted before spawning a recognizer.
     const controller = new AbortController();
     controller.abort();
     const result = await service.listen({ timeoutMs: 1000, signal: controller.signal });
