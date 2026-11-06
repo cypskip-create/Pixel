@@ -69,9 +69,9 @@ identifiers. It updated 106 references across 33 files.
 | Start menu shortcut | Pixel |
 | Tray tooltip and menu | Pixel |
 | Settings window title | Pixel Settings |
-| Installer | `Pixel-Setup-0.2.0.exe` |
-| Portable | `Pixel-Portable-0.2.0.exe` |
-| Unpacked ZIP | `Pixel-Windows-Unpacked-0.2.0.zip` |
+| Installer | `Pixel-Setup-0.2.1.exe` |
+| Portable | `Pixel-Portable-0.2.1.exe` |
+| Unpacked ZIP | `Pixel-Windows-Unpacked-0.2.1.zip` |
 | Uninstall display name | Pixel |
 | Spoken/written assistant identity | Pixel |
 | Data directory | `%APPDATA%\Pixel` |

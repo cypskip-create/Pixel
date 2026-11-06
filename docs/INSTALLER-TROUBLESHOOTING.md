@@ -193,3 +193,50 @@ Select-String -Path node_modules\app-builder-lib\out\targets\nsis\NsisTarget.js 
 # Prove our installer script is compiled:
 #   add "!error PIXEL_PROBE" to build/installer.nsh, rebuild, and read the error.
 ```
+
+## Follow-up: the directory preflight was itself broken (0.2.1)
+
+On real hardware the 0.2.0 installer rejected a directory that Windows could
+demonstrably write to (`%LOCALAPPDATA%\Programs\Pixel`), and changing the location
+made no difference.
+
+**Cause.** The check lived in `.onVerifyInstDir`. That callback belongs to MUI's
+directory page and NSIS invokes it **while the path is still being edited**, not
+once when the page is left. The shipped code then:
+
+- showed a modal `MessageBox` from inside that callback, so a transient or
+  partially typed path produced an error dialog mid-typing;
+- called `Abort`, which cancels the directory change - and the page may not call
+  the callback again for the same final value, leaving a valid directory in a
+  rejected state;
+- used `$0` without saving it, and `$0` is a general-purpose register the MUI page
+  code relies on around that callback.
+
+**Fix.** `.onVerifyInstDir` is gone. Validation now runs exactly once, in
+`customInit`, after `$INSTDIR` has been initialised, using
+`build/dir-check.nsh: PIXEL_CHECK_DIR_WRITABLE`. That macro treats the
+**file-creation attempt as the only authority**, ignores the `CreateDirectory`
+result (treating "already exists" as an error is what broke the old check), and
+normalises a trailing separator. Registers are pushed and popped around it. If a
+directory really is unwritable the user gets one accurate message offering Retry
+or Cancel; a writable directory never prompts at all.
+
+**Regression test.** `tests/nsis.test.ts` compiles the real NSIS macro with the
+same `makensis` electron-builder uses, executes it, and reads the verdict. It
+asserts:
+
+| Case | Expected |
+| --- | --- |
+| existing writable directory | accepted |
+| directory that does not exist yet but can be created | accepted, and created |
+| path with a trailing separator (what Browse produces) | accepted |
+| path on a nonexistent drive | rejected - the check still has teeth |
+| probe file cleanup | no `.pixel-write-test` left behind |
+| old vs new implementation | agree on bad paths, both accept good ones |
+
+The suite is skipped with an explicit message if `makensis` is unavailable, so it
+can never pass silently. Observed output: 11 tests, all passing.
+
+This also documents *why the macro was not the original culprit*: the old logic
+passes the same writable-directory cases in the harness. The rejection came from
+where and when the callback ran, not from the write test itself.

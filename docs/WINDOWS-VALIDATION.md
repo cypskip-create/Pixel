@@ -20,7 +20,7 @@ npm run dist
 You should end up with:
 
 - `release\win-unpacked\Pixel.exe`
-- `release\Pixel-Setup-0.2.0.exe`
+- `release\Pixel-Setup-0.2.1.exe`
 
 If `ELECTRON_RUN_AS_NODE` is set in your environment, Electron runs as plain
 Node and **no window can appear**. Unset it first:

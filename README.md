@@ -46,14 +46,14 @@ Every build produces three files in `release\`:
 
 | File | Use it when |
 | --- | --- |
-| `Pixel-Setup-0.2.0.exe` | Normal installation. Per-user, no administrator prompt, Start menu entry, uninstallable. |
-| `Pixel-Portable-0.2.0.exe` | You want to try Pixel without installing anything. Double-click and run. |
-| `Pixel-Windows-Unpacked-0.2.0.zip` | You want to inspect or run the app with no NSIS involvement at all. Extract, then run `Pixel.exe`. |
+| `Pixel-Setup-0.2.1.exe` | Normal installation. Per-user, no administrator prompt, Start menu entry, uninstallable. |
+| `Pixel-Portable-0.2.1.exe` | You want to try Pixel without installing anything. Double-click and run. |
+| `Pixel-Windows-Unpacked-0.2.1.zip` | You want to inspect or run the app with no NSIS involvement at all. Extract, then run `Pixel.exe`. |
 
-**Install:** run `Pixel-Setup-0.2.0.exe`, follow the wizard, then launch Pixel
+**Install:** run `Pixel-Setup-0.2.1.exe`, follow the wizard, then launch Pixel
 from the Start menu or the tray.
 
-**Portable:** double-click `Pixel-Portable-0.2.0.exe`. It extracts to a temporary
+**Portable:** double-click `Pixel-Portable-0.2.1.exe`. It extracts to a temporary
 folder and runs; nothing is registered with Windows.
 
 **Unpacked:** extract the ZIP anywhere and run `Pixel.exe`. This is the

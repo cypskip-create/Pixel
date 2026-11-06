@@ -1,6 +1,6 @@
 # Pixel progress (formerly Cyps)
 
-Updated: installer repair + rebrand. Product name **Pixel**; version **0.2.0**.
+Updated: installer preflight fix + startup diagnostics. Product name **Pixel**; version **0.2.0**.
 
 ## Current milestone
 
@@ -11,13 +11,94 @@ On-device GUI verification is still outstanding and is the gate for Wave 3.
 Waves 1A-1D are preserved: floating shell, DeepSeek streaming, agent tool loop,
 browser automation, voice, and the security model are unchanged.
 
+## Round 2: preflight rejection and silent startup (latest)
+
+Two defects were reported from the laptop. Both are fixed; the second is
+diagnosable now even where it cannot be reproduced.
+
+### 1. Installer rejected a writable directory
+
+`%LOCALAPPDATA%\Programs\Pixel` was demonstrably writable from PowerShell, yet the
+installer showed the "cannot write" dialog, and changing the location changed
+nothing.
+
+Cause: the check sat in `.onVerifyInstDir`, which MUI calls **while the path is
+being typed**. It raised a modal dialog from inside that callback, called `Abort`
+(which can leave a valid directory rejected), and clobbered `$0` without saving
+it, a register the page code uses.
+
+Fix: `.onVerifyInstDir` removed entirely. Validation runs once in `customInit`
+through `build/dir-check.nsh`, where the **file-creation attempt is the only
+authority** and `CreateDirectory`'s result is ignored. A writable directory never
+prompts. Registers are pushed and popped.
+
+Verified by `tests/nsis.test.ts`, which compiles the real macro with makensis and
+executes it: existing directory, not-yet-existing directory, trailing separator
+and trailing-backslash cases all pass; a nonexistent drive is rejected; no probe
+file is left behind. 11 tests, all passing. The harness also proved the old logic
+passes those same cases, so the fault was *when* the callback ran, not the write
+test.
+
+### 2. Silent startup failure
+
+Nothing appeared: no window, no `%APPDATA%\Pixel\pixel-startup.log`, no event-log
+entry.
+
+Structure changed so this cannot be silent again:
+
+- `src/main/startup/boot.ts` loads **first** and imports only Node built-ins. It
+  writes a log line, mirrors everything to stderr, and installs handlers for
+  uncaught exceptions, unhandled rejections, signals and `process.exit`.
+- `src/main/main.ts` now does one thing: start boot logging, then `await
+  import('./app')` inside a try/catch. A failure anywhere in the dependency graph
+  is recorded instead of vanishing. (Previously the whole app was imported
+  statically, so an import-time failure produced exactly the reported symptom.)
+- The log location falls back `%APPDATA%\Pixel` -> `%APPDATA%\cyps` ->
+  `%TEMP%\Pixel` -> `%USERPROFILE%\Pixel-logs` -> working directory, and the chosen
+  path is written as the first log line so it can be found.
+- A `pixel-last-exit.json` marker records the exit code.
+- `Pixel.exe --pixel-selfcheck` runs without a window: it verifies the main
+  bundle, preload, renderer entry, Electron initialisation, user-data
+  writability, and reports `ELECTRON_RUN_AS_NODE`, then writes
+  `pixel-selfcheck.json` next to the log (GUI stdout is unreliable) and exits with
+  a meaningful code.
+- The window now shows itself after 8 seconds even if `ready-to-show` never
+  fires, and logs that it did, so a renderer that fails to paint cannot leave an
+  invisible process.
+
+Bugs found while building this, all fixed:
+- the self-check resolved its bundle directory one level too deep and reported
+  every file as missing;
+- `await import('electron')` compiles to a `__importStar` wrapper that loses
+  Electron's API, producing a false "Electron did not initialise"; it now uses a
+  direct `require`, which is correct for the CommonJS bundle;
+- GUI-subsystem executables are not attached to the parent console, so the JSON
+  report is written to a file as well as stdout.
+
+`scripts/capture-startup.ps1` ties it together on Windows: it runs the self-check,
+launches the GUI with `--enable-logging --log-file=...`, waits, then reports the
+exit code, whether a window exists and its bounds, always-on-top and layered
+styles, the startup log from every possible location, the exit marker, the
+Chromium log, and a plain-language verdict.
+
+### What is still uncertain
+
+The packaged executable could not be exercised here: in this environment it
+produces no log and no event-log entry at all, and Chromium cannot initialise
+(`app.whenReady()` faults with `0xc0000005`). That is the same wall documented
+before, not new evidence about the laptop. The **development** bundle does run and
+its self-check passes end to end, which is why the diagnostics are trustworthy.
+Whether the laptop failure was Electron failing before our code, a Node-mode
+environment variable, or a missing resource will be answered by
+`capture-startup.ps1` on the next run.
+
 ## Distributions
 
 | File | Size | What it is |
 | --- | --- | --- |
-| `release/Pixel-Setup-0.2.0.exe` | 118.3 MB | NSIS installer, per-user, no admin prompt |
-| `release/Pixel-Portable-0.2.0.exe` | 107.5 MB | Portable build, runs without installing |
-| `release/Pixel-Windows-Unpacked-0.2.0.zip` | 149.6 MB | Unpacked app + Electron runtime, extract and run |
+| `release/Pixel-Setup-0.2.1.exe` | 118.3 MB | NSIS installer, per-user, no admin prompt |
+| `release/Pixel-Portable-0.2.1.exe` | 107.5 MB | Portable build, runs without installing |
+| `release/Pixel-Windows-Unpacked-0.2.1.zip` | 149.6 MB | Unpacked app + Electron runtime, extract and run |
 
 Install: run the setup, then launch Pixel from the Start menu.
 Portable: double-click; nothing is installed.
@@ -111,9 +192,9 @@ collapse back to the orb - tray-resident, no dashboard, no sidebar.
 | `tsc` renderer program | pass |
 | `vitest` (12 files) | **255 tests pass** |
 | `vite build` | pass |
-| NSIS installer build | pass (`Pixel-Setup-0.2.0.exe`) |
-| Portable build | pass (`Pixel-Portable-0.2.0.exe`) |
-| Unpacked ZIP build | pass (`Pixel-Windows-Unpacked-0.2.0.zip`) |
+| NSIS installer build | pass (`Pixel-Setup-0.2.1.exe`) |
+| Portable build | pass (`Pixel-Portable-0.2.1.exe`) |
+| Unpacked ZIP build | pass (`Pixel-Windows-Unpacked-0.2.1.zip`) |
 | ZIP contains `Pixel.exe` + `resources/app.asar` | pass (central-directory read in tests) |
 | Installer script compiled | pass (include proven by a deliberate compile error) |
 | `diagnose-installer.ps1` | ran: read-only, found the recorded Electron crash in the event log |
@@ -152,7 +233,7 @@ to prove the reader itself is correct.
 
 ## Next step
 
-1. Install `Pixel-Setup-0.2.0.exe` on the laptop; if it fails, run
+1. Install `Pixel-Setup-0.2.1.exe` on the laptop; if it fails, run
    `scripts/diagnose-installer.ps1` and attach the report.
 2. Confirm the first-launch experience and complete
    `docs/WINDOWS-VALIDATION.md`.

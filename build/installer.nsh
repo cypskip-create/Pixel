@@ -16,23 +16,34 @@
 ;   3. include/installUtil.nsh:219                   - the previous version's
 ;      uninstaller failed five times during an upgrade. Same misleading text.
 ;
-; So the message is NOT evidence that the app is running. These customisations
-; fix the two causes the installer can control:
+; So the message is NOT evidence that the app is running.
 ;
-;   * customCheckAppRunning - replaces the built-in probe with an exact
-;     image-name match against Pixel's own executables only. When PowerShell is
-;     available the stock probe matches by "$_.Path.StartsWith($INSTDIR)", which
-;     cannot see elevated processes yet still asks the user to close them
-;     forever. Detection is made precise, not disabled.
-;   * .onVerifyInstDir - rejects a directory we cannot write to at the moment it
-;     is chosen, with an accurate message, so cause 2 never reaches the
-;     misleading retry dialog.
+; HISTORY, AND WHY THERE IS NO .onVerifyInstDir ANY MORE
 ;
-; Only Pixel's own executables are ever terminated, and only for the current
-; user. No user data is deleted by this script.
+; Version 0.2.0 shipped a directory preflight in .onVerifyInstDir. On real
+; hardware that callback rejected a directory Windows could demonstrably write
+; to. The callback is invoked from inside MUI's directory page - potentially many
+; times while the path is being typed, and with the page's own register state
+; live. That made it both noisy (a modal dialog mid-typing) and unsafe (it used
+; $0, a general-purpose register the page code owns).
+;
+; The preflight now runs exactly once instead: in customInit, after $INSTDIR has
+; been initialised, and it only ever informs the user - it never blocks a
+; directory that passes the write test. The authoritative failure path remains
+; NSIS's own extraction error, which this cannot make worse.
+;
+; Process detection is NOT disabled: it is made exact. Only Pixel's own
+; executables are ever terminated, and only for the current user.
 ; ---------------------------------------------------------------------------
 
 !include "LogicLib.nsh"
+; electron-builder puts the build-resources directory on the include path; when
+; compiled directly (the regression harness) the caller supplies the path.
+!ifdef PIXEL_BUILD_DIR
+  !include "${PIXEL_BUILD_DIR}\dir-check.nsh"
+!else
+  !include "dir-check.nsh"
+!endif
 
 ; How many automatic close attempts before involving the user.
 !define PIXEL_KILL_ATTEMPTS 3
@@ -147,38 +158,61 @@
 !macroend
 
 ; ---------------------------------------------------------------------------
-; Directory validation.
+; customInit - one deterministic directory check.
 ;
-; The stock flow accepts any directory and only discovers an unwritable one when
-; CopyFiles fails, five retries later, with the unrelated "cannot be closed"
-; message. Test writability as soon as the path is entered instead.
+; Runs inside .onInit after initMultiUser has set $INSTDIR. It is informational:
+; a writable directory always proceeds without a prompt, so it can never produce
+; the false rejection that .onVerifyInstDir caused.
 ; ---------------------------------------------------------------------------
-Function .onVerifyInstDir
-  ; A silent install has no user to correct the path; do not block it.
-  IfSilent pixel_dir_ok
+!macro customInit
+  Push $0
+  Push $1
+  Push $R5
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $9
 
-  ClearErrors
-  CreateDirectory "$INSTDIR"
-  IfErrors pixel_dir_unwritable
+  ; One insertion only: NSIS labels inside a macro are global, so a second
+  ; insertion would be a duplicate-label error. The retry loops back here.
+  pixel_dir_recheck:
+    !insertmacro PIXEL_CHECK_DIR_WRITABLE "$INSTDIR" $R8
 
-  ClearErrors
-  FileOpen $0 "$INSTDIR\.pixel-write-test" w
-  IfErrors pixel_dir_unwritable
-  FileClose $0
-  Delete "$INSTDIR\.pixel-write-test"
-  Goto pixel_dir_ok
+    ${If} $R8 == 1
+      Goto pixel_dir_checked
+    ${EndIf}
 
-  pixel_dir_unwritable:
-    MessageBox MB_OK|MB_ICONEXCLAMATION \
-      "Pixel cannot write to:$\r$\n$INSTDIR$\r$\n$\r$\n\
-       Windows blocked it, which usually means a protected system folder such as Program Files.$\r$\n$\r$\n\
-       Choose a folder you own - for example inside your user folder - and the installation will continue normally."
-    ; Abort keeps the user on the directory page with a path we can write to.
-    Abort
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
+      "Pixel may not be able to install into:$\r$\n$INSTDIR$\r$\n$\r$\n\
+       Windows did not allow a test file to be created there. This is usually a protected folder such as Program Files.$\r$\n$\r$\n\
+       Click Retry to check again, or Cancel and restart the installer choosing a folder inside your user profile.$\r$\n$\r$\n\
+       Nothing has been changed on this computer." \
+      /SD IDCANCEL IDRETRY pixel_dir_retry IDCANCEL pixel_dir_cancel
 
-  pixel_dir_ok:
-    ClearErrors
-FunctionEnd
+    Goto pixel_dir_checked
+
+    pixel_dir_retry:
+      Goto pixel_dir_recheck
+
+    pixel_dir_cancel:
+      Pop $9
+      Pop $R8
+      Pop $R7
+      Pop $R6
+      Pop $R5
+      Pop $1
+      Pop $0
+      Quit
+
+  pixel_dir_checked:
+  Pop $9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $1
+  Pop $0
+!macroend
 
 ; ---------------------------------------------------------------------------
 ; Upgrade from Cyps: remove only the stale legacy executable and shortcuts.

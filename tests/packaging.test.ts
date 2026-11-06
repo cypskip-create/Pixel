@@ -12,7 +12,6 @@ import {
   migrateLegacyData,
 } from '../src/main/startup/user-data';
 import type { MigrationFileSystem } from '../src/main/startup/user-data';
-import { StartupLog, describeError } from '../src/main/startup/log';
 
 const root = process.cwd();
 
@@ -117,7 +116,7 @@ describe('package.json', () => {
   });
 
   it('uses the next version after the Cyps build', () => {
-    expect(pkg.version).toBe('0.2.0');
+    expect(pkg.version).toBe('0.2.1');
   });
 
   it('still points at the compiled main bundle', () => {
@@ -163,10 +162,13 @@ describe('installer.nsh', () => {
     expect(script).not.toContain('deleteAppData');
   });
 
-  it('validates the chosen directory before extracting', () => {
-    expect(script).toContain('Function .onVerifyInstDir');
-    expect(script).toContain('FileOpen $0 "$INSTDIR\\.pixel-write-test" w');
-    expect(script).toContain('Abort');
+  it('validates the install directory once, without blocking on a writable path', () => {
+    // The old .onVerifyInstDir callback rejected writable directories on real
+    // hardware; validation now happens exactly once, in customInit, through the
+    // shared macro that tests/nsis.test.ts compiles and executes.
+    expect(script).toContain('!macro customInit');
+    expect(script).toContain('PIXEL_CHECK_DIR_WRITABLE');
+    expect(script).not.toContain('Function .onVerifyInstDir');
   });
 
   it('only removes legacy shortcuts and the legacy executable on upgrade', () => {
@@ -373,35 +375,3 @@ describe('user-data migration', () => {
 /* ------------------------------------------------------------------ *
  * Startup logging
  * ------------------------------------------------------------------ */
-
-describe('StartupLog', () => {
-  it('writes readable lines and can tail them', () => {
-    const dir = join(
-      root,
-      'node_modules',
-      '.cache',
-      `pixel-log-test-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    );
-    const log = new StartupLog(dir);
-    log.info('first');
-    log.warn('second');
-    log.error('third');
-
-    const tail = log.tail(10);
-    expect(tail).toHaveLength(3);
-    expect(tail[0]).toContain('[info] first');
-    expect(tail[1]).toContain('[warn] second');
-    expect(tail[2]).toContain('[error] third');
-  });
-
-  it('returns an empty list before anything is written', () => {
-    const log = new StartupLog(join(root, 'node_modules', '.cache', 'pixel-log-none'));
-    expect(log.tail(5)).toEqual([]);
-  });
-
-  it('describes errors with their stack', () => {
-    const described = describeError(new Error('boom'));
-    expect(described).toContain('Error: boom');
-    expect(describeError('plain')).toBe('plain');
-  });
-});
