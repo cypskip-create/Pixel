@@ -130,46 +130,17 @@ describe('package.json', () => {
 
 describe('installer.nsh', () => {
   const script = readFileSync(join(root, 'build', 'installer.nsh'), 'utf8');
-
-  it('overrides the process check instead of disabling it', () => {
-    expect(script).toContain('!macro customCheckAppRunning');
-    // electron-builder only honours the macro if it is strictly custom-prefixed.
-    expect(script).not.toContain('disableAppRunningCheck');
-  });
-
-  it('matches process names exactly, so a similarly named app is not targeted', () => {
-    expect(script).toContain('findstr.exe" /B /I');
-  });
-
-  it('only ever closes Pixel and the legacy Cyps executable', () => {
-    const killLines = script
-      .split('\n')
-      .filter((line) => !line.trimStart().startsWith(';'))
-      .filter((line) => line.includes('taskkill'));
-    expect(killLines.length).toBeGreaterThan(0);
-    for (const line of killLines) {
-      expect(line).toMatch(/APP_EXECUTABLE_FILENAME|"Cyps\.exe"/);
-    }
-  });
-
-  it('scopes termination to the current user', () => {
-    expect(script).toContain('/FI "USERNAME eq %USERNAME%"');
-  });
+
+
+
+
 
   it('never deletes user data or application data directories', () => {
     expect(script).not.toMatch(/RMDir\s+\/r/i);
     expect(script).not.toContain('$APPDATA');
     expect(script).not.toContain('deleteAppData');
   });
-
-  it('validates the install directory once, without blocking on a writable path', () => {
-    // The old .onVerifyInstDir callback rejected writable directories on real
-    // hardware; validation now happens exactly once, in customInit, through the
-    // shared macro that tests/nsis.test.ts compiles and executes.
-    expect(script).toContain('!macro customInit');
-    expect(script).toContain('PIXEL_CHECK_DIR_WRITABLE');
-    expect(script).not.toContain('Function .onVerifyInstDir');
-  });
+
 
   it('only removes legacy shortcuts and the legacy executable on upgrade', () => {
     expect(script).toContain('Delete "$DESKTOP\\Cyps.lnk"');

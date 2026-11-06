@@ -284,57 +284,61 @@ git remote set-url origin https://github.com/<account>/<repo>.git
 Verify after the next push with `git-credential-manager github list`, or by
 checking the commit author and pusher on GitHub.
 
-## Wave 3 (branch `wave3`, not pushed)
+## Installer/startup repair (branch `fix/installer-diagnostics`)
 
-Multi-language foundation, kept isolated from the installer work on `main`.
+Investigated with REA (see `docs/debug/REA_INTEGRATION.md`), read-only.
 
-**Verified:** 392 tests across 17 files pass; both TypeScript programs typecheck;
-four SQLite migrations apply; real Python extraction and indexing run end to end.
+### Verified root causes
 
-### 3A Memory - complete
-SQLite (`node:sqlite`, no native module) with WAL, versioned transactional
-migrations, FTS5. Project-scoped memory store with duplicate detection by content
-hash, edit/delete/retention, ranking (confidence + usage + recency + bm25), and a
-budgeted context builder that labels each record's provenance so an inference is
-never presented as a confirmed fact. Tools: `memory_save/search/list/forget`, with
-writes approved and reads scoped to the active project. 39 tests: persistence,
-restart recovery, project isolation, duplicates, expiry, ranking, context budget,
-tool behaviour.
+1. **"cannot be closed" is a misleading shared message.** In electron-builder
+   26.18.0 it is emitted from three unrelated paths (process kill, CopyFiles
+   failure, old-uninstaller failure). It is not evidence that Pixel was running.
+2. **The directory rejection was self-inflicted.** The 0.2.0 preflight lived in
+   `.onVerifyInstDir`, which MUI calls while the path is being typed; the 0.2.1
+   replacement ran in `customInit` before the page has a reliable `$INSTDIR`.
+   Both rejected directories Windows can write to.
+3. **Portable no-window was caused by the `RunAsNode` fuse being enabled.**
+   REA `inspect_electron_fuses` on the 0.2.1 binary (`ev_1d1ce82f…`) shows
+   `RunAsNode: enabled`; with a global `ELECTRON_RUN_AS_NODE=1` the exe becomes a
+   plain Node interpreter: no Chromium, no window, no startup log.
 
-### 3B Documents - complete
-Supervised Python worker (stdio JSON-RPC, protocol version, timeouts, restart
-budget, capability discovery) extracting txt/md/JSON/CSV/source, plus PDF (PyMuPDF),
-DOCX (python-docx), XLSX (openpyxl) and optional OCR when installed; missing
-dependencies produce a precise capability error rather than a crash. TypeScript
-side: bounded directory discovery, deterministic overlapping chunking, incremental
-re-indexing by size+mtime signature, FTS5 search with source attribution, removal of
-missing files, cancellation. Tools: `documents_index/search/list`. 28 tests,
-including a live Python round trip and a live index/search run.
+### Repairs
 
-### 3C Workflows - engine complete
-Semantic steps (locator + action + expectation), stored with a definition hash so a
-tampered workflow is refused. Replay re-checks the central policy per step, requests
-approval when needed, stops on a failed expectation, and honours cancellation.
-Secrets are redacted and typing into password fields is never recorded.
+- Removed both custom NSIS behaviours: `customCheckAppRunning` and the
+  `customInit` directory preflight. Maintained electron-builder behaviour restored;
+  `build/installer.nsh` now only cleans up legacy Cyps shortcuts/executable.
+- Added `electronFuses` disabling `runAsNode`,
+  `enableNodeOptionsEnvironmentVariable` and `enableNodeCliImportArguments`
+  (verified applied: build log runs `@electron/fuses`; the rebuilt exe no longer
+  behaves as Node under `ELECTRON_RUN_AS_NODE=1`).
+- Added `--diagnostic-window`: an ordinary opaque resizable window loading the same
+  renderer, skipping tray/shortcuts/floating window, to separate renderer faults
+  from overlay faults.
+- Kept identity: `appId` and NSIS GUID unchanged, so this upgrades in place.
 
-### 3D Subagents - complete
-Six specialists (research, browser, systems, infrastructure, knowledge, code) with
-explicit allowlists and step/token/time budgets. The coordinator enforces the
-allowlist, budgets and the emergency stop, and refuses tools outside the plan.
-Guide mode withholds state-changing tools. Infrastructure and Pixel Code are
-deliberately granted nothing because their adapters do not exist yet.
+### Fixed during the work
 
-### 3E Offline AI + cost control - complete
-Ollama provider: status, model discovery, fail-closed capability detection,
-streaming generation, honest "no model installed" guidance, memory-aware model
-recommendation. Task-aware routing (capability beats cost; vision never routed to a
-blind model; offline falls back locally), daily token/spend ceilings, loop
-detection, tool-output truncation and history summarisation.
+- YAML indentation defect (`nsis:  oneClick: false`) that broke packaging.
+- Test suites asserted the removed overrides; replaced with the restored-default
+  contract (no process override, no directory preflight, no data deletion).
 
-### Deliberately not done
-Rust (no benchmark justifies it). C#/.NET UI Automation service (contract designed,
-not written). VirtualBox/SSH adapters. The compact Wave 3 UI panels and the IPC
-surface for memory/documents/workflows/models. Conversation-level memory injection.
-See `WAVE3_HANDOFF.md` for the ordered next steps.
+### Test results (this branch)
 
-Installer, `appId`, NSIS scripts and migration logic were not touched.
+| Check | Result |
+| --- | --- |
+| `tsc` main + renderer | pass |
+| `vitest` | **273 passed** (14 files) |
+| Distributions rebuilt | installer, portable, unpacked ZIP (0.2.1) |
+| Fuses applied | verified in build log + behaviour change |
+
+### Not verified (requires the laptop)
+
+Gates A–H that need a real desktop: unpacked app starting with a window,
+`--diagnostic-window` visible, floating orb visible, clean install, launch,
+reinstall, upgrade, uninstall, and data preservation. This environment cannot
+start any Chromium GUI process (`app.whenReady()` access violation), and the
+packaged exe produces no output here.
+
+Laptop sequence: `scripts\diagnose-pixel.ps1`, then
+`scripts\capture-startup.ps1` (GUI), then the installer; attach the report if it
+fails. `docs/debug/PIXEL_STARTUP_DIAGNOSTICS.md` lists every gate and its status.

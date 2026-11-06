@@ -134,6 +134,60 @@ export async function start(): Promise<void> {
   // floating window would be visual noise.
   Menu.setApplicationMenu(null);
 
+  /*
+   * --diagnostic-window
+   *
+   * An ordinary, opaque, resizable Electron window that loads the same renderer.
+   * It exists to separate "the renderer is broken" from "the floating window is
+   * broken": transparency, frameless geometry and always-on-top can each fail on
+   * their own, and this window uses none of them.
+   *
+   * It deliberately skips the tray, global shortcuts and the floating window so a
+   * diagnosis cannot be confused by them.
+   */
+  if (process.argv.includes('--diagnostic-window')) {
+    const { join } = await import('node:path');
+    const rendererIndex = join(__dirname, '..', '..', 'renderer', 'index.html');
+    boot.stage('diagnostic window', `renderer=${rendererIndex}`);
+
+    const diagnostic = new BrowserWindow({
+      width: 960,
+      height: 680,
+      title: 'Pixel diagnostics',
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#101319',
+      webPreferences: {
+        preload: join(__dirname, '..', 'preload', 'index.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+    diagnostic.once('ready-to-show', () => {
+      diagnostic.show();
+      boot.info('Diagnostic window is visible.');
+    });
+    diagnostic.webContents.on('did-fail-load', (_event, code, description, url) => {
+      boot.error(`Diagnostic renderer failed to load (${String(code)} ${description}) for ${url}`);
+    });
+    diagnostic.webContents.on('preload-error', (_event, preload, error) => {
+      boot.error(`Diagnostic preload failed (${preload}): ${describeError(error)}`);
+    });
+
+    try {
+      await diagnostic.loadFile(rendererIndex);
+      boot.stage('diagnostic window loaded');
+    } catch (error) {
+      boot.fatal(error);
+      boot.error('The diagnostic window could not load the renderer.');
+      app.exit(1);
+      return;
+    }
+    return;
+  }
+
   settings = new SettingsStore(app.getPath('userData'));
   const store = settings;
 
