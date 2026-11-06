@@ -1,7 +1,7 @@
 /**
  * IPC wiring.
  *
- * Every `ipcMain.handle` in Cyps is registered here, and every one of them
+ * Every `ipcMain.handle` in Pixel is registered here, and every one of them
  * implements a method of the `CypsBridge` contract from src/shared/types.ts.
  * Keeping them in one file makes the trust boundary reviewable: anything not
  * registered here cannot be reached from the renderer.
@@ -440,7 +440,7 @@ export function registerIpcHandlers(context: IpcContext): {
   });
 
   // Audit the start so the trail always has a first line.
-  audit.record('system', 'Cyps started', 'ok', `version ${app.getVersion()}`);
+  audit.record('system', 'Pixel started', 'ok', `version ${app.getVersion()}`);
 
   return { emergency, tasks };
 }

@@ -1,10 +1,10 @@
-# Cyps
+# Pixel
 
 A personal AI companion that lives at the top of your Windows screen. It is a
 small orb that stays out of the way, expands into a compact input bar when you
 need it, and talks to DeepSeek.
 
-Cyps is **not** a dashboard, not a chat application, and not a sidebar. The
+Pixel is **not** a dashboard, not a chat application, and not a sidebar. The
 largest surface it ever draws is 480 logical pixels wide.
 
 ## Status
@@ -40,9 +40,45 @@ confirmed on a normal Windows desktop. No part of this README claims otherwise.
 
 ## Install and run
 
+### The three Windows distributions
+
+Every build produces three files in `release\`:
+
+| File | Use it when |
+| --- | --- |
+| `Pixel-Setup-0.2.0.exe` | Normal installation. Per-user, no administrator prompt, Start menu entry, uninstallable. |
+| `Pixel-Portable-0.2.0.exe` | You want to try Pixel without installing anything. Double-click and run. |
+| `Pixel-Windows-Unpacked-0.2.0.zip` | You want to inspect or run the app with no NSIS involvement at all. Extract, then run `Pixel.exe`. |
+
+**Install:** run `Pixel-Setup-0.2.0.exe`, follow the wizard, then launch Pixel
+from the Start menu or the tray.
+
+**Portable:** double-click `Pixel-Portable-0.2.0.exe`. It extracts to a temporary
+folder and runs; nothing is registered with Windows.
+
+**Unpacked:** extract the ZIP anywhere and run `Pixel.exe`. This is the
+recommended first test because it bypasses the installer entirely.
+
+Upgrading from the previous Cyps build works in place: the installer keeps the
+same application identity, so it replaces Cyps rather than installing a second
+copy. Your settings, conversations and encrypted API key are migrated from
+`%APPDATA%\cyps` to `%APPDATA%\Pixel` on first launch, and the old folder is kept
+as a backup. See [docs/REBRANDING.md](docs/REBRANDING.md).
+
+If an installation fails, run the read-only diagnostics before changing anything:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\diagnose-installer.ps1
+```
+
+See [docs/INSTALLER-TROUBLESHOOTING.md](docs/INSTALLER-TROUBLESHOOTING.md).
+
+### Building from source
+
 ```powershell
 npm install --ignore-scripts   # see note below
 node node_modules\electron\install.js   # fetch the Electron binary
+npx playwright install chromium  # only needed for browser tools
 npm run build
 npm start
 ```
@@ -57,10 +93,10 @@ npm's script runner cannot spawn child processes. On a normal machine a plain
 npm run dev     # Vite dev server + Electron with hot reload of the renderer
 ```
 
-### Package a Windows installer
+### Package the Windows distributions
 
 ```powershell
-npm run dist    # produces release/Cyps-Setup-0.1.0.exe
+npm run dist    # installer + portable + unpacked ZIP, all under release/
 ```
 
 The installer is per-user and does not require administrator rights. No code
@@ -69,20 +105,20 @@ Signing is the distributor's responsibility and has not been faked.
 
 ## Adding your API key
 
-Cyps never asks for the key in a chat and never writes it in plaintext.
+Pixel never asks for the key in a chat and never writes it in plaintext.
 
 1. Open the tray menu and choose **Settings...**, or press `Ctrl+,`.
 2. Paste the key into **DeepSeek API key** and save.
 3. The key is encrypted with Windows DPAPI through Electron's `safeStorage`.
 
-If Windows reports that credential encryption is unavailable, Cyps **refuses to
+If Windows reports that credential encryption is unavailable, Pixel **refuses to
 store the key** rather than falling back to plaintext.
 
 ## Controls
 
 | Action | Shortcut |
 | --- | --- |
-| Summon or hide Cyps | `Ctrl+Shift+C` |
+| Summon or hide Pixel | `Ctrl+Shift+C` |
 | Emergency stop | `Ctrl+Shift+Escape` |
 | Open settings | `Ctrl+,` |
 | Collapse to the orb | `Esc` |
@@ -92,7 +128,7 @@ display, so unplugging a monitor cannot strand it off-screen.
 
 ## Modes
 
-Cyps has three modes. Switching **up** in capability always asks first, and the
+Pixel has three modes. Switching **up** in capability always asks first, and the
 confirmation states what becomes possible.
 
 | Mode | What it may do |
@@ -162,9 +198,9 @@ Tests cover behaviour rather than markup: real SSE chunk parsing, error mapping
 for each HTTP status, history trimming under budget, the exact rules for when a
 tool may run, and the invariants that keep the processes separated.
 
-## What Cyps can do
+## What Pixel can do
 
-Cyps can answer questions, look at your screen (with approval), open a small
+Pixel can answer questions, look at your screen (with approval), open a small
 allowlist of applications, type into the focused window, and drive a web page in
 a controlled browser: navigate, read it, click, type, scroll, screenshot, and
 verify that an action actually worked.
@@ -175,7 +211,7 @@ Guide mode cannot run such actions at all.
 ## Validating on Windows
 
 The desktop behaviour cannot be verified in a headless build machine. Run this on
-the machine where you installed Cyps:
+the machine where you installed Pixel:
 
 ```powershell
 node scripts\diagnose.mjs

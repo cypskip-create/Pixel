@@ -89,7 +89,7 @@ export class SettingsStore {
       return {
         ok: false,
         error:
-          'Windows credential encryption is unavailable on this account, so Cyps will not store the key. It would have to be saved unencrypted.',
+          'Windows credential encryption is unavailable on this account, so Pixel will not store the key. It would have to be saved unencrypted.',
       };
     }
 
@@ -104,7 +104,7 @@ export class SettingsStore {
     } catch {
       // Deliberately does not include the key or the underlying error text,
       // which could contain fragments of the secret.
-      return { ok: false, error: 'Cyps could not save the API key securely.' };
+      return { ok: false, error: 'Pixel could not save the API key securely.' };
     }
   }
 

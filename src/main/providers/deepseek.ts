@@ -1,7 +1,7 @@
 /**
  * DeepSeek API adapter.
  *
- * Provider-neutral surface: `ModelProvider` is the interface Cyps codes
+ * Provider-neutral surface: `ModelProvider` is the interface Pixel codes
  * against. DeepSeek is the only implementation today; adding OpenAI, Anthropic,
  * or a local Ollama provider later means adding an implementation, not
  * rewriting the agent.
@@ -128,7 +128,7 @@ export function mapHttpError(status: number, bodyText: string): CypsError {
       return makeError(
         'RATE_LIMITED',
         'Too many requests were sent to DeepSeek.',
-        'Wait a moment and try again — Cyps will back off automatically.',
+        'Wait a moment and try again — Pixel will back off automatically.',
         true,
       );
     case 500:
@@ -249,7 +249,7 @@ export function validateRequest(input: BuildRequestBodyInput): ValidationFailure
       error: makeError(
         'MODEL_CAPABILITY',
         `${caps.label} does not accept images.`,
-        `Cyps will use "${VISION_MODEL}" for screen analysis, since it is the only vision-capable DeepSeek model.`,
+        `Pixel will use "${VISION_MODEL}" for screen analysis, since it is the only vision-capable DeepSeek model.`,
         false,
       ),
     };
@@ -283,7 +283,7 @@ export function validateRequest(input: BuildRequestBodyInput): ValidationFailure
     };
   }
 
-  // tool_choice "required"/named is unsupported in thinking mode; Cyps uses
+  // tool_choice "required"/named is unsupported in thinking mode; Pixel uses
   // "auto", which is always safe, so nothing to check here. Documented so the
   // constraint is not silently forgotten when tool forces are added later.
   return { ok: true };

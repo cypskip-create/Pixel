@@ -1,28 +1,28 @@
 <#
 .SYNOPSIS
-    Validates a Cyps installation on a real Windows desktop.
+    Validates a Pixel installation on a real Windows desktop.
 
 .DESCRIPTION
-    Checks the parts of Cyps that cannot be verified in a headless build
+    Checks the parts of Pixel that cannot be verified in a headless build
     environment: that the packaged app launches, that its window really is a
     frameless always-on-top transparent overlay near the top of the screen, that
     it remembers and clamps its position, and that its logs show a clean startup.
 
-    Run this on the machine where you installed Cyps, from the repository root:
+    Run this on the machine where you installed Pixel, from the repository root:
 
         powershell -ExecutionPolicy Bypass -File scripts\validate-windows.ps1
 
     Add -Launch to start the packaged app first (or let it start it for you with
-    -ExePath). Add -KeepRunning to leave Cyps running afterwards.
+    -ExePath). Add -KeepRunning to leave Pixel running afterwards.
 
 .PARAMETER ExePath
-    Path to Cyps.exe. Defaults to release\win-unpacked\Cyps.exe.
+    Path to Pixel.exe. Defaults to release\win-unpacked\Pixel.exe.
 
 .PARAMETER Launch
-    Start Cyps if it is not already running.
+    Start Pixel if it is not already running.
 
 .PARAMETER KeepRunning
-    Do not stop Cyps when the checks finish.
+    Do not stop Pixel when the checks finish.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\validate-windows.ps1 -Launch
@@ -77,12 +77,12 @@ function Write-Section {
 }
 
 # ---------------------------------------------------------------------------
-# Window inspection through user32. Cyps is frameless, so MainWindowTitle is
+# Window inspection through user32. Pixel is frameless, so MainWindowTitle is
 # unreliable; the window is located by process id instead.
 # ---------------------------------------------------------------------------
 
-if (-not ('Cyps.WindowProbe' -as [type])) {
-    Add-Type -Namespace Cyps -Name WindowProbe -MemberDefinition @'
+if (-not ('Pixel.WindowProbe' -as [type])) {
+    Add-Type -Namespace Pixel -Name WindowProbe -MemberDefinition @'
 [StructLayout(LayoutKind.Sequential)]
 public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 
@@ -103,16 +103,16 @@ $WS_EX_TOPMOST = 0x8
 $WS_EX_LAYERED = 0x80000
 $WS_EX_TOOLWINDOW = 0x80
 
-function Get-CypsWindow {
+function Get-PixelWindow {
     param([int]$ProcessId)
 
     $found = [IntPtr]::Zero
-    $callback = [Cyps.WindowProbe+EnumWindowsProc]{
+    $callback = [Pixel.WindowProbe+EnumWindowsProc]{
         param($hWnd, $lParam)
 
         $owner = 0
-        [void][Cyps.WindowProbe]::GetWindowThreadProcessId($hWnd, [ref]$owner)
-        if ($owner -eq $ProcessId -and [Cyps.WindowProbe]::IsWindowVisible($hWnd)) {
+        [void][Pixel.WindowProbe]::GetWindowThreadProcessId($hWnd, [ref]$owner)
+        if ($owner -eq $ProcessId -and [Pixel.WindowProbe]::IsWindowVisible($hWnd)) {
             $script:foundWindow = $hWnd
             return $false
         }
@@ -120,12 +120,12 @@ function Get-CypsWindow {
     }
 
     $script:foundWindow = [IntPtr]::Zero
-    [void][Cyps.WindowProbe]::EnumWindows($callback, [IntPtr]::Zero)
+    [void][Pixel.WindowProbe]::EnumWindows($callback, [IntPtr]::Zero)
     return $script:foundWindow
 }
 
-function Get-CypsProcess {
-    Get-Process -Name 'Cyps' -ErrorAction SilentlyContinue
+function Get-PixelProcess {
+    Get-Process -Name 'Pixel' -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ $arch = if ([Environment]::Is64BitOperatingSystem) { '64-bit' } else { '32-bit' 
 Add-Check 'OS architecture' 'pass' $arch
 
 if ($env:ELECTRON_RUN_AS_NODE) {
-    Add-Check 'ELECTRON_RUN_AS_NODE' 'warn' 'It is set. Cyps would run as plain Node. Removing it for this session.'
+    Add-Check 'ELECTRON_RUN_AS_NODE' 'warn' 'It is set. Pixel would run as plain Node. Removing it for this session.'
     Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 } else {
     Add-Check 'ELECTRON_RUN_AS_NODE' 'pass' 'Not set.'
@@ -159,25 +159,25 @@ Write-Section '2. Packaged application'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ExePath)) {
-    $ExePath = Join-Path $repoRoot 'release\win-unpacked\Cyps.exe'
+    $ExePath = Join-Path $repoRoot 'release\win-unpacked\Pixel.exe'
 }
 
 if (Test-Path $ExePath) {
     $sizeMb = [math]::Round((Get-Item $ExePath).Length / 1MB, 1)
-    Add-Check 'Cyps.exe present' 'pass' ("{0} ({1} MB)" -f $ExePath, $sizeMb)
+    Add-Check 'Pixel.exe present' 'pass' ("{0} ({1} MB)" -f $ExePath, $sizeMb)
 } else {
-    Add-Check 'Cyps.exe present' 'fail' ("Not found at {0}. Run: npm run dist" -f $ExePath)
+    Add-Check 'Pixel.exe present' 'fail' ("Not found at {0}. Run: npm run dist" -f $ExePath)
     Write-Host ''
     Write-Host 'Cannot continue without the executable.' -ForegroundColor Red
     exit 1
 }
 
-$installer = Get-ChildItem (Join-Path $repoRoot 'release') -Filter 'Cyps-Setup-*.exe' -ErrorAction SilentlyContinue |
+$installer = Get-ChildItem (Join-Path $repoRoot 'release') -Filter 'Pixel-Setup-*.exe' -ErrorAction SilentlyContinue |
     Select-Object -First 1
 if ($installer) {
     Add-Check 'Installer present' 'pass' ("{0} ({1} MB)" -f $installer.Name, [math]::Round($installer.Length / 1MB, 1))
 } else {
-    Add-Check 'Installer present' 'warn' 'No Cyps-Setup-*.exe in release\. Run: npm run dist'
+    Add-Check 'Installer present' 'warn' 'No Pixel-Setup-*.exe in release\. Run: npm run dist'
 }
 
 # ---------------------------------------------------------------------------
@@ -186,14 +186,14 @@ if ($installer) {
 
 Write-Section '3. Launch'
 
-$process = Get-CypsProcess | Select-Object -First 1
+$process = Get-PixelProcess | Select-Object -First 1
 
 if (-not $process -and $Launch) {
-    Write-Host '  Starting Cyps...' -ForegroundColor DarkGray
+    Write-Host '  Starting Pixel...' -ForegroundColor DarkGray
     Start-Process -FilePath $ExePath | Out-Null
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 500
-        $process = Get-CypsProcess | Select-Object -First 1
+        $process = Get-PixelProcess | Select-Object -First 1
         if ($process) { break }
     }
 }
@@ -201,7 +201,7 @@ if (-not $process -and $Launch) {
 if ($process) {
     Add-Check 'Process running' 'pass' ("pid {0}" -f $process.Id)
 } else {
-    Add-Check 'Process running' 'skip' 'Cyps is not running. Re-run with -Launch to start it.'
+    Add-Check 'Process running' 'skip' 'Pixel is not running. Re-run with -Launch to start it.'
 }
 
 Start-Sleep -Seconds 3
@@ -214,14 +214,14 @@ Write-Section '4. Floating window'
 
 $windowHandle = [IntPtr]::Zero
 if ($process) {
-    $windowHandle = Get-CypsWindow -ProcessId $process.Id
+    $windowHandle = Get-PixelWindow -ProcessId $process.Id
 }
 
 if ($windowHandle -ne [IntPtr]::Zero) {
     Add-Check 'Window created' 'pass' ("handle 0x{0:X}" -f $windowHandle.ToInt64())
 
-    $rect = New-Object Cyps.WindowProbe+RECT
-    [void][Cyps.WindowProbe]::GetWindowRect($windowHandle, [ref]$rect)
+    $rect = New-Object Pixel.WindowProbe+RECT
+    [void][Pixel.WindowProbe]::GetWindowRect($windowHandle, [ref]$rect)
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
 
@@ -246,7 +246,7 @@ if ($windowHandle -ne [IntPtr]::Zero) {
         Add-Check 'Floats near the top of the screen' 'skip' 'Screen metrics unavailable (System.Windows.Forms not loaded).'
     }
 
-    $exStyle = [Cyps.WindowProbe]::GetWindowLong($windowHandle, -20)
+    $exStyle = [Pixel.WindowProbe]::GetWindowLong($windowHandle, -20)
     if ($exStyle -band $WS_EX_TOPMOST) {
         Add-Check 'Always on top' 'pass' 'WS_EX_TOPMOST is set.'
     } else {
@@ -262,10 +262,10 @@ if ($windowHandle -ne [IntPtr]::Zero) {
     if ($exStyle -band $WS_EX_TOOLWINDOW) {
         Add-Check 'Hidden from the taskbar' 'pass' 'WS_EX_TOOLWINDOW is set.'
     } else {
-        Add-Check 'Hidden from the taskbar' 'warn' 'No WS_EX_TOOLWINDOW; Cyps may appear in the taskbar.'
+        Add-Check 'Hidden from the taskbar' 'warn' 'No WS_EX_TOOLWINDOW; Pixel may appear in the taskbar.'
     }
 
-    $dpi = [Cyps.WindowProbe]::GetDpiForWindow($windowHandle)
+    $dpi = [Pixel.WindowProbe]::GetDpiForWindow($windowHandle)
     if ($dpi -gt 0) {
         $scale = [math]::Round($dpi / 96.0, 2)
         Add-Check 'DPI awareness' 'pass' ("window DPI {0} ({1}x scaling)" -f $dpi, $scale)
@@ -274,9 +274,9 @@ if ($windowHandle -ne [IntPtr]::Zero) {
     }
 } else {
     if ($process) {
-        Add-Check 'Window created' 'fail' 'No visible top-level window was found for the Cyps process.'
+        Add-Check 'Window created' 'fail' 'No visible top-level window was found for the Pixel process.'
     } else {
-        Add-Check 'Window created' 'skip' 'Cyps is not running.'
+        Add-Check 'Window created' 'skip' 'Pixel is not running.'
     }
 }
 
@@ -300,7 +300,7 @@ if ($process) {
     $childCount = ($process.Modules | Measure-Object).Count
     Add-Check 'Modules loaded' 'pass' ("{0} modules" -f $childCount)
 } else {
-    Add-Check 'Process health' 'skip' 'Cyps is not running.'
+    Add-Check 'Process health' 'skip' 'Pixel is not running.'
 }
 
 # ---------------------------------------------------------------------------
@@ -309,7 +309,7 @@ if ($process) {
 
 Write-Section '6. Stored data'
 
-$userData = Join-Path $env:APPDATA 'Cyps'
+$userData = Join-Path $env:APPDATA 'Pixel'
 if (Test-Path $userData) {
     Add-Check 'User data directory' 'pass' $userData
 
@@ -317,7 +317,7 @@ if (Test-Path $userData) {
     if (Test-Path $settingsFile) {
         Add-Check 'Settings written' 'pass' ('{0} bytes' -f (Get-Item $settingsFile).Length)
     } else {
-        Add-Check 'Settings written' 'warn' 'No settings.json yet; Cyps writes it after the first change.'
+        Add-Check 'Settings written' 'warn' 'No settings.json yet; Pixel writes it after the first change.'
     }
 
     $keyFile = Join-Path $userData 'credentials\deepseek.key'
@@ -329,7 +329,7 @@ if (Test-Path $userData) {
             Add-Check 'API key stored encrypted' 'pass' 'Encrypted blob present, no plaintext key.'
         }
     } else {
-        Add-Check 'API key stored encrypted' 'skip' 'No key saved yet. Add one in Cyps Settings.'
+        Add-Check 'API key stored encrypted' 'skip' 'No key saved yet. Add one in Pixel Settings.'
     }
 } else {
     Add-Check 'User data directory' 'skip' ("Not created yet: {0}" -f $userData)
@@ -365,7 +365,7 @@ $reportPath = Join-Path $repoRoot ("validation-report-{0}.json" -f (Get-Date -Fo
 Write-Host ("  Report written to {0}" -f $reportPath) -ForegroundColor DarkGray
 
 if (-not $KeepRunning -and $process -and $Launch) {
-    Write-Host '  Stopping Cyps (use -KeepRunning to leave it open)...' -ForegroundColor DarkGray
+    Write-Host '  Stopping Pixel (use -KeepRunning to leave it open)...' -ForegroundColor DarkGray
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
 }
 

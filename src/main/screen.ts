@@ -1,7 +1,7 @@
 /**
  * Screen capture.
  *
- * Capture is the most privacy-sensitive capability in Cyps, so the rules are
+ * Capture is the most privacy-sensitive capability in Pixel, so the rules are
  * enforced here rather than left to the UI:
  *
  *  - Nothing is captured unless `isAuthorized()` returns true. The caller must
@@ -212,7 +212,7 @@ export class ScreenCapture {
       error: {
         code: 'UNAUTHORIZED',
         message:
-          'Cyps is not allowed to look at your screen right now. Ask it to look, then approve the request.',
+          'Pixel is not allowed to look at your screen right now. Ask it to look, then approve the request.',
         retryable: false,
       },
     };

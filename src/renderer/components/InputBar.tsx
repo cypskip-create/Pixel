@@ -43,9 +43,9 @@ interface InputBarProps {
 }
 
 const PLACEHOLDER: Record<Mode, string> = {
-  guide: 'Ask Cyps to explain something…',
-  hybrid: 'Ask Cyps, or tell it what you need…',
-  agent: 'Tell Cyps what to do on this computer…',
+  guide: 'Ask Pixel to explain something…',
+  hybrid: 'Ask Pixel, or tell it what you need…',
+  agent: 'Tell Pixel what to do on this computer…',
 };
 
 export function InputBar(props: InputBarProps) {
@@ -137,7 +137,7 @@ export function InputBar(props: InputBarProps) {
 
   return (
     <section
-      aria-label="Cyps input"
+      aria-label="Pixel input"
       style={{ width: BAR_WIDTH }}
       className="glass-raised animate-slide-down relative flex flex-col gap-2 rounded-[var(--cyps-radius)] p-2.5"
     >
@@ -183,7 +183,7 @@ export function InputBar(props: InputBarProps) {
           rows={1}
           disabled={disabled}
           placeholder={disabled ? 'Native bridge unavailable' : PLACEHOLDER[mode]}
-          aria-label="Message Cyps"
+          aria-label="Message Pixel"
           className="selectable min-h-[34px] flex-1 resize-none bg-transparent py-1.5 text-[13.5px] leading-relaxed text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-dim)] disabled:cursor-not-allowed"
         />
 

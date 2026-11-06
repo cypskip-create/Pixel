@@ -43,7 +43,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
  *
  * It expands in place to at most ~200px. It is not a sidebar, not a panel, and
  * never a full-screen view - the whole point is that the answer stays legible
- * while Cyps works.
+ * while Pixel works.
  */
 export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps) {
   const [open, setOpen] = useState(false);
@@ -175,7 +175,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps)
         <ol className="selectable max-h-48 overflow-y-auto border-t border-[var(--color-glass-border)] px-2.5 py-2">
           {task.steps.length === 0 ? (
             <li className="py-1 text-[11px] text-[var(--color-ink-dim)]">
-              Cyps has not planned any steps yet.
+              Pixel has not planned any steps yet.
             </li>
           ) : (
             task.steps.map((step) => (

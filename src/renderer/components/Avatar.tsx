@@ -14,7 +14,7 @@ interface AvatarProps {
 }
 
 /**
- * The Cyps orb.
+ * The Pixel orb.
  *
  * This is the whole product at rest: a single round avatar floating at the top
  * of the screen. It renders the state as a *shape* (core / ring / diamond /
@@ -33,7 +33,7 @@ export const Avatar = memo(function Avatar({ state, size = 30, halo = false }: A
       className="relative inline-flex shrink-0 items-center justify-center"
       style={{ width: size, height: size }}
       role="img"
-      aria-label={`Cyps is ${visual.label.toLowerCase()}`}
+      aria-label={`Pixel is ${visual.label.toLowerCase()}`}
       data-state={state}
     >
       {/* Halo: a soft ring that signals "the bar is open". */}

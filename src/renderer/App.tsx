@@ -191,7 +191,7 @@ function Companion(): React.JSX.Element {
     const text = draft.trim();
     if (text.length === 0 && attachments.length === 0) return;
     if (stopped) {
-      showNotice('Cyps is stopped. Clear the emergency stop before asking again.');
+      showNotice('Pixel is stopped. Clear the emergency stop before asking again.');
       return;
     }
     if (chat.streaming) return;
@@ -244,7 +244,7 @@ function Companion(): React.JSX.Element {
       const api = bridge.bridge.permissions;
       void api
         .respond(decision)
-        .catch(() => showNotice('Cyps could not record that decision.'))
+        .catch(() => showNotice('Pixel could not record that decision.'))
         .finally(() => {
           setPermissionPending(false);
           setPermission(null);
@@ -263,12 +263,12 @@ function Companion(): React.JSX.Element {
       .captureDisplay()
       .then((result) => {
         if (!result.ok || !result.image) {
-          showNotice(result.error?.message ?? 'Cyps could not capture the screen.');
+          showNotice(result.error?.message ?? 'Pixel could not capture the screen.');
           return;
         }
         setAttachments((prev) => [...prev, result.image as ImageAttachment]);
       })
-      .catch(() => showNotice('Cyps could not capture the screen.'));
+      .catch(() => showNotice('Pixel could not capture the screen.'));
   }, [bridge, showNotice]);
 
   const pickFile = useCallback(() => {
@@ -280,7 +280,7 @@ function Companion(): React.JSX.Element {
       if (!files || files.length === 0) return;
       const images = [...files].filter((file) => file.type.startsWith('image/')).slice(0, 4);
       if (images.length === 0) {
-        showNotice('Those files are not images. Cyps can look at screenshots and images.');
+        showNotice('Those files are not images. Pixel can look at screenshots and images.');
         return;
       }
       for (const file of images) {
@@ -341,7 +341,7 @@ function Companion(): React.JSX.Element {
         }
         showNotice(
           result.noSpeech
-            ? 'Cyps did not hear anything. Try again, a little closer to the microphone.'
+            ? 'Pixel did not hear anything. Try again, a little closer to the microphone.'
             : (result.error ?? 'Speech recognition failed.'),
         );
       } catch (error) {
@@ -390,7 +390,7 @@ function Companion(): React.JSX.Element {
 
   const clearStop = useCallback(() => {
     setStopped(false);
-    showNotice('Emergency stop cleared. Cyps will ask before acting again.');
+    showNotice('Emergency stop cleared. Pixel will ask before acting again.');
   }, [showNotice]);
 
   const collapseRef = useRef(collapse);
@@ -445,7 +445,7 @@ function Companion(): React.JSX.Element {
         >
           <WifiOff aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <span>
-            {bridge.reason} Cyps is running without its desktop shell, so it cannot answer.
+            {bridge.reason} Pixel is running without its desktop shell, so it cannot answer.
           </span>
         </div>
       ) : null}
@@ -455,7 +455,7 @@ function Companion(): React.JSX.Element {
           type="button"
           onPointerDown={drag.onPointerDown}
           onClick={() => setInputOpen(true)}
-          aria-label={`Open Cyps. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
+          aria-label={`Open Pixel. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
           className="group relative grid size-[76px] cursor-grab place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.04] active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-sky-400/70"
           style={{
@@ -523,7 +523,7 @@ function Companion(): React.JSX.Element {
                 Switch to {getModeDescriptor(pendingMode).label}?
               </p>
               <p className="mb-2 text-[var(--color-ink-soft)]">
-                {getModeDescriptor(pendingMode).summary} Cyps will ask for approval before each
+                {getModeDescriptor(pendingMode).summary} Pixel will ask for approval before each
                 action that changes something on this computer. Nothing is approved in advance.
               </p>
               <div className="flex justify-end gap-2">
@@ -596,7 +596,7 @@ function Companion(): React.JSX.Element {
               <button
                 type="button"
                 onClick={openSettings}
-                aria-label="Cyps settings"
+                aria-label="Pixel settings"
                 className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)] focus-visible:ring-2 focus-visible:ring-sky-400/70"
               >
                 <Settings aria-hidden="true" className="size-3.5" />

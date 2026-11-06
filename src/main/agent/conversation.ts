@@ -43,7 +43,7 @@ import { estimateTokens, trimHistory } from '../providers/deepseek';
  * model that ignores the prompt still cannot exceed its authority.
  */
 export const SYSTEM_PROMPT = [
-  "You are Cyps, a small desktop companion that floats at the top of the user's screen.",
+  "You are Pixel, a small desktop companion that floats at the top of the user's screen.",
   'You are concise, warm and practical. Default to two or three sentences unless the user asks for depth.',
   'You are often answering while the user is in the middle of something else, so lead with the answer.',
   '',
@@ -129,7 +129,7 @@ export class ConversationEngine {
 
     if (this.running) {
       emit(
-        errorEvent(requestId, 'BAD_REQUEST', 'Cyps is already answering. Wait, or press stop.'),
+        errorEvent(requestId, 'BAD_REQUEST', 'Pixel is already answering. Wait, or press stop.'),
       );
       return failedTurn();
     }
@@ -139,7 +139,7 @@ export class ConversationEngine {
         errorEvent(
           requestId,
           'ABORTED',
-          'Emergency stop is active. Clear it before asking Cyps to do anything.',
+          'Emergency stop is active. Clear it before asking Pixel to do anything.',
         ),
       );
       return failedTurn();
@@ -151,7 +151,7 @@ export class ConversationEngine {
         errorEvent(
           requestId,
           'NO_API_KEY',
-          'Cyps needs a DeepSeek API key before it can answer. Add one in Settings - it is stored encrypted on this computer.',
+          'Pixel needs a DeepSeek API key before it can answer. Add one in Settings - it is stored encrypted on this computer.',
         ),
       );
       return failedTurn();

@@ -14,7 +14,7 @@ export type BridgeStatus =
 /** Probe for the preload-injected bridge. Safe to call at module load. */
 export function readBridge(): BridgeStatus {
   if (typeof window === 'undefined') {
-    return { kind: 'missing', reason: 'There is no browser window to host Cyps.' };
+    return { kind: 'missing', reason: 'There is no browser window to host Pixel.' };
   }
   const bridge = window.cyps;
   if (bridge === undefined || bridge === null) {

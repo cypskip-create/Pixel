@@ -4,7 +4,7 @@
  * The icon is drawn at runtime rather than shipped as a binary asset, so the
  * repository stays free of opaque blobs and the icon cannot go missing from the
  * package. Every step is defensive: a tray that fails to appear must not stop
- * Cyps from running.
+ * Pixel from running.
  */
 
 import { Menu, Tray, nativeImage } from 'electron';
@@ -38,7 +38,7 @@ export class TrayController {
     try {
       const image = buildTrayIcon();
       this.tray = new Tray(image);
-      this.tray.setToolTip('Cyps');
+      this.tray.setToolTip('Pixel');
       this.rebuild();
       this.tray.on('click', () => this.callbacks.onToggle());
       this.tray.on('double-click', () => this.callbacks.onToggle());
@@ -64,7 +64,7 @@ export class TrayController {
     const mode = this.callbacks.getMode();
     return Menu.buildFromTemplate([
       {
-        label: this.callbacks.isVisible() ? 'Hide Cyps' : 'Show Cyps',
+        label: this.callbacks.isVisible() ? 'Hide Pixel' : 'Show Pixel',
         click: () => this.callbacks.onToggle(),
       },
       { type: 'separator' },
@@ -87,7 +87,7 @@ export class TrayController {
         click: () => this.callbacks.onEmergencyStop(),
       },
       { type: 'separator' },
-      { label: 'Quit Cyps', click: () => this.callbacks.onQuit() },
+      { label: 'Quit Pixel', click: () => this.callbacks.onQuit() },
     ]);
   }
 

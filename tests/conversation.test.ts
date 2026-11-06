@@ -337,7 +337,7 @@ describe('error helpers', () => {
     });
   });
 
-  it('maps a Cyps error to its own code', () => {
+  it('maps a Pixel error to its own code', () => {
     expect(toErrorParts({ code: 'UNAUTHORIZED', message: 'bad key', retryable: false })).toEqual([
       'UNAUTHORIZED',
       'bad key',

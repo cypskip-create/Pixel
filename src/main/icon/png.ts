@@ -1,5 +1,5 @@
 /**
- * Dependency-free PNG encoding for the Cyps mark.
+ * Dependency-free PNG encoding for the Pixel mark.
  *
  * Kept free of Electron imports on purpose: the encoder is pure, so it can be
  * unit-tested, and the tray/window modules only convert the bytes into a
@@ -31,7 +31,7 @@ export function crc32(buffer: Buffer): number {
 }
 
 /**
- * RGBA pixels for the Cyps mark: a bright core inside an anti-aliased ring.
+ * RGBA pixels for the Pixel mark: a bright core inside an anti-aliased ring.
  * The mark reads clearly at 16px in the notification area.
  */
 export function renderIconPixels(size: number): Buffer {

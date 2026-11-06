@@ -1,5 +1,5 @@
 /**
- * The floating Cyps window.
+ * The floating Pixel window.
  *
  * Design rules this module enforces:
  *  - The window is frameless, transparent, and always on top of normal windows
@@ -83,7 +83,7 @@ export class WindowManager {
       },
     });
 
-    // 'floating' keeps Cyps above normal apps. Deliberately not
+    // 'floating' keeps Pixel above normal apps. Deliberately not
     // 'screen-saver', which would cover UAC and system permission dialogs.
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
@@ -116,7 +116,7 @@ export class WindowManager {
     const win = new BrowserWindow({
       width: 560,
       height: 680,
-      title: 'Cyps Settings',
+      title: 'Pixel Settings',
       show: false,
       resizable: true,
       minimizable: true,

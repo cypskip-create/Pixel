@@ -7,7 +7,7 @@
  *  - synthesis uses the installed system voices.
  *
  * If no recognizer or voice is installed, the capability check says exactly
- * that. Cyps never returns invented transcription.
+ * that. Pixel never returns invented transcription.
  *
  * Audio never leaves the machine: recognition runs entirely locally.
  */

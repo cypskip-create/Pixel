@@ -174,7 +174,7 @@ export function useChat() {
         activeId.current = null;
         setState({
           ...EMPTY,
-          error: `Could not reach Cyps: ${cause instanceof Error ? cause.message : 'unknown error'}`,
+          error: `Could not reach Pixel: ${cause instanceof Error ? cause.message : 'unknown error'}`,
         });
         return false;
       }
@@ -225,7 +225,7 @@ function describeStreamError(message: string, code: string): string {
     case 'INSUFFICIENT_BALANCE':
       return 'Your DeepSeek account has no remaining balance.';
     case 'RATE_LIMITED':
-      return 'Too many requests. Cyps will wait a moment - try again shortly.';
+      return 'Too many requests. Pixel will wait a moment - try again shortly.';
     case 'TIMEOUT':
       return 'The request timed out. Try again, or ask something smaller.';
     case 'NETWORK':

@@ -106,7 +106,7 @@ export const ORB_VISUALS: Record<AssistantState, OrbVisual> = {
   },
   paused: {
     label: 'Paused',
-    blurb: 'Stopped. Cyps will not act until you resume.',
+    blurb: 'Stopped. Pixel will not act until you resume.',
     tone: 'var(--color-state-paused)',
     shape: 'pause',
     motion: '',

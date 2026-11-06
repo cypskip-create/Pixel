@@ -1,7 +1,7 @@
 /**
  * Tool registry and permission policy.
  *
- * The registry is the single source of truth for what Cyps can do to the
+ * The registry is the single source of truth for what Pixel can do to the
  * machine. Two rules are enforced here, in code, rather than by convention:
  *
  *  1. Guide mode can never execute a state-changing tool.

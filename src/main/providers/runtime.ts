@@ -1,7 +1,7 @@
 /**
  * Runtime provider facade.
  *
- * `DeepSeekProvider` takes its API key at construction, but in Cyps the key is
+ * `DeepSeekProvider` takes its API key at construction, but in Pixel the key is
  * entered at runtime (and can be replaced or cleared) without restarting the
  * app. This facade resolves the key at call time and builds a provider for that
  * one operation, so a newly saved key works immediately and a cleared key stops
@@ -37,7 +37,7 @@ export class RuntimeProvider implements ModelProvider {
       // produces a NO_API_KEY event rather than an opaque UNKNOWN.
       throw {
         code: 'NO_API_KEY',
-        message: 'Cyps needs a DeepSeek API key before it can answer.',
+        message: 'Pixel needs a DeepSeek API key before it can answer.',
         retryable: false,
       };
     }

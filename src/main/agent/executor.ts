@@ -123,7 +123,7 @@ export class AgentExecutor {
     const { tasks, audit, emit, isStopped } = this.deps;
 
     if (this.active) {
-      emit(errorEvent(requestId, 'BAD_REQUEST', 'Cyps is already working on something. Wait, or press stop.'));
+      emit(errorEvent(requestId, 'BAD_REQUEST', 'Pixel is already working on something. Wait, or press stop.'));
       return this.emptyResult('BAD_REQUEST');
     }
 
@@ -132,7 +132,7 @@ export class AgentExecutor {
         errorEvent(
           requestId,
           'ABORTED',
-          'Emergency stop is active. Clear it before asking Cyps to do anything.',
+          'Emergency stop is active. Clear it before asking Pixel to do anything.',
         ),
       );
       return this.emptyResult('ABORTED');
@@ -244,7 +244,7 @@ export class AgentExecutor {
         'failed',
         false,
         'BAD_REQUEST',
-        `Cyps stopped after ${MAX_STEPS} steps without finishing. Ask it to continue, or narrow the request.`,
+        `Pixel stopped after ${MAX_STEPS} steps without finishing. Ask it to continue, or narrow the request.`,
       );
     } finally {
       this.active = false;
@@ -300,7 +300,7 @@ export class AgentExecutor {
 
     // 1. Unknown tool.
     if (!tool) {
-      const text = `Error: Cyps has no tool named "${call.name}".`;
+      const text = `Error: Pixel has no tool named "${call.name}".`;
       this.failStep(step, task, text);
       audit.record('tool', `Unknown tool: ${call.name}`, 'denied');
       return {
@@ -486,7 +486,7 @@ export function parseArgs(call: ToolCall): Record<string, unknown> {
   }
 }
 
-/** Human sentence for the task rail: what Cyps is about to do. */
+/** Human sentence for the task rail: what Pixel is about to do. */
 export function describeCall(name: string, args: Record<string, unknown>): string {
   switch (name) {
     case 'get_current_time':
@@ -572,7 +572,7 @@ export async function withTimeout(
 
 function deriveTitle(text: string): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
-  if (collapsed.length === 0) return 'Cyps task';
+  if (collapsed.length === 0) return 'Pixel task';
   return collapsed.length <= 60 ? collapsed : `${collapsed.slice(0, 59)}...`;
 }
 

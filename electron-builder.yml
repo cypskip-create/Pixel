@@ -1,11 +1,30 @@
-# electron-builder configuration for Cyps.
+# electron-builder configuration for Pixel.
 #
-# Cyps is a small tray-resident companion, so the installer is a standard
-# per-user NSIS install with no admin prompt and no background services.
+# Pixel is a small tray-resident companion, so the installer is a per-user NSIS
+# install with no admin prompt and no background services.
+#
+# ---------------------------------------------------------------------------
+# INSTALLATION IDENTITY - read before changing appId or nsis.guid
+# ---------------------------------------------------------------------------
+# appId is the stable installation identity, not branding. electron-builder
+# derives the uninstall GUID from it:
+#
+#     guid = UUID.v5(appId, ELECTRON_BUILDER_NS_UUID)
+#
+# The Cyps 0.1.0 build was shipped with appId "com.cyps.companion", which
+# derives to a5745318-c98a-51f9-87f5-f1c32713b276. That GUID keys the
+# HKCU uninstall entry and the installer's single-instance mutex.
+#
+# Keeping the same appId and pinning the same GUID is what makes Pixel upgrade
+# over an existing Cyps installation instead of creating a second, conflicting
+# installation next to it. The product is renamed; its installation identity is
+# not. Changing either value below WILL produce side-by-side installs and orphan
+# the previous uninstall entry.
+# ---------------------------------------------------------------------------
 
 appId: com.cyps.companion
-productName: Cyps
-copyright: Copyright (c) 2026 Cyps
+productName: Pixel
+copyright: Copyright (c) 2026 Pixel
 
 directories:
   output: release
@@ -28,14 +47,23 @@ compression: normal
 
 win:
   icon: build/icon.png
+  # Must match productName: the installer's process check looks for this file.
+  executableName: Pixel
   target:
     - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+    - target: zip
       arch:
         - x64
   # No code signing certificate is configured; signing is the distributor's
   # responsibility and must not be faked.
   signAndEditExecutable: true
   requestedExecutionLevel: asInvoker
+  artifactName: 'Pixel-Windows-Unpacked-${version}.${ext}'
 
 nsis:
   oneClick: false
@@ -43,11 +71,25 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Cyps
-  # A per-user install needs no elevation, which keeps the "no admin prompt"
-  # promise honest.
-  artifactName: 'Cyps-Setup-${version}.${ext}'
+  shortcutName: Pixel
+  uninstallDisplayName: Pixel
+  # Pinned so the uninstall key can never drift from the value Cyps 0.1.0
+  # registered. See the identity note at the top of this file.
+  guid: a5745318-c98a-51f9-87f5-f1c32713b276
+  include: build/installer.nsh
+  artifactName: 'Pixel-Setup-${version}.${ext}'
+  # Upgrade and repair must never destroy the user's data.
   deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  # Keep the installer's own log available for support without asking the user
+  # to reproduce the failure.
+  warningsAsErrors: false
+
+portable:
+  artifactName: 'Pixel-Portable-${version}.${ext}'
+  # The portable build extracts to a temporary directory and runs from there;
+  # it must not attempt to register anything with Windows.
+  unpackDirName: Pixel
 
 # Nothing is published automatically.
 publish: null

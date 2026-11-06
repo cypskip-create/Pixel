@@ -25,7 +25,7 @@ export type DeepPartial<T> = {
  * Compact settings sheet.
  *
  * Anchored under the bar and capped at ~60vh, because the constraint is that
- * Cyps must never become a dashboard. Only the settings that actually change
+ * Pixel must never become a dashboard. Only the settings that actually change
  * behaviour of the floating companion are exposed here - not a full preferences
  * application.
  */
@@ -48,7 +48,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
   return (
     <section
-      aria-label="Cyps settings"
+      aria-label="Pixel settings"
       className="glass-raised animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
       style={{ maxHeight: 'min(62vh, 440px)' }}
     >
@@ -108,7 +108,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </Group>
 
         <Group icon={Keyboard} title="Keys">
-          <Row label="Summon or hide Cyps">
+          <Row label="Summon or hide Pixel">
             <Accelerator value={settings.globalAccelerator} />
           </Row>
           <Row label="Emergency stop">
@@ -119,7 +119,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </Row>
           <p className="mt-1 px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
             Change these in your system settings file. The emergency stop always works, even
-            while Cyps is mid-task.
+            while Pixel is mid-task.
           </p>
         </Group>
 

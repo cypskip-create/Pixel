@@ -60,7 +60,7 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
             id={`perm-title-${request.id}`}
             className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold text-[var(--color-ink)]"
           >
-            Cyps wants to
+            Pixel wants to
             <span
               className={`rounded-full border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${RISK_CLASSES[request.risk]}`}
             >
@@ -147,7 +147,7 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
       </div>
 
       <p className="text-[10px] leading-snug text-[var(--color-ink-dim)]">
-        Cyps is paused until you choose. Nothing runs on its own.
+        Pixel is paused until you choose. Nothing runs on its own.
       </p>
     </section>
   );

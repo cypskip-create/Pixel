@@ -16,9 +16,9 @@ import { ToolRegistry } from '../src/main/agent/tools';
 
 const PAGE = `<!doctype html>
 <html lang="en">
-  <head><title>Cyps test page</title></head>
+  <head><title>Pixel test page</title></head>
   <body style="height: 3000px">
-    <h1 id="title">Cyps local fixture</h1>
+    <h1 id="title">Pixel local fixture</h1>
     <button id="greet" onclick="document.getElementById('title').textContent='Button worked'">
       Greet
     </button>
@@ -116,8 +116,8 @@ live('browser automation (live chromium)', () => {
 
   it('navigates and reports the real page title and text', async () => {
     const page = await session.snapshot();
-    expect(page.title).toBe('Cyps test page');
-    expect(page.text).toContain('Cyps local fixture');
+    expect(page.title).toBe('Pixel test page');
+    expect(page.text).toContain('Pixel local fixture');
     expect(page.url).toBe(`${baseUrl}/`);
   });
 
@@ -212,11 +212,11 @@ live('browser tools through ToolExecutors', () => {
   it('navigates and inspects through the tool surface', async () => {
     const navigate = await executors.run('browser_navigate', { url: baseUrl });
     expect(navigate.ok).toBe(true);
-    expect(navigate.content).toContain('Cyps local fixture');
+    expect(navigate.content).toContain('Pixel local fixture');
 
     const inspect = await executors.run('browser_inspect', {});
     expect(inspect.ok).toBe(true);
-    expect(inspect.content).toContain('Cyps test page');
+    expect(inspect.content).toContain('Pixel test page');
     expect(inspect.content).toContain('Buttons:');
   });
 

@@ -2,7 +2,7 @@
  * Global shortcuts.
  *
  * Registration is best-effort by design: another application may already own a
- * combination, and a shortcut failing must never prevent Cyps from starting.
+ * combination, and a shortcut failing must never prevent Pixel from starting.
  * Failures are reported so the Settings UI can show which one is unavailable.
  */
 

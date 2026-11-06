@@ -94,8 +94,8 @@ describe('crc32', () => {
   });
 
   it('is stable for identical input', () => {
-    const a = Buffer.from('Cyps', 'utf8');
-    expect(crc32(a)).toBe(crc32(Buffer.from('Cyps', 'utf8')));
+    const a = Buffer.from('Pixel', 'utf8');
+    expect(crc32(a)).toBe(crc32(Buffer.from('Pixel', 'utf8')));
   });
 });
 

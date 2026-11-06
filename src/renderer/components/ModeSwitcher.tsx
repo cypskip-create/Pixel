@@ -59,7 +59,7 @@ export function ModeSwitcher({
     <div
       ref={ref}
       role="radiogroup"
-      aria-label="Cyps operating mode"
+      aria-label="Pixel operating mode"
       className={[
         isPopover
           ? 'glass-raised animate-slide-down absolute left-0 top-[calc(100%+8px)] z-40 w-[288px] rounded-2xl p-2'
@@ -68,7 +68,7 @@ export function ModeSwitcher({
     >
       {isPopover ? (
         <p className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ink-dim)]">
-          How much may Cyps do?
+          How much may Pixel do?
         </p>
       ) : null}
 

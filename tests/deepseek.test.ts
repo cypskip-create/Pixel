@@ -391,7 +391,7 @@ describe('provider streaming end to end', () => {
     expect(events.map((e) => (e as { type: string }).type)).toContain('done');
   });
 
-  it('surfaces an HTTP error as a Cyps error event', async () => {
+  it('surfaces an HTTP error as a Pixel error event', async () => {
     const provider = new DeepSeekProvider({
       apiKey: 'bad',
       fetchImpl: fakeFetch('nope', 401),

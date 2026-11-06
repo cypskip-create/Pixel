@@ -1,94 +1,107 @@
-# Cyps progress
+# Pixel progress (formerly Cyps)
 
-Updated: Waves 1A-1D complete, plus browser automation, voice, and the Windows
-validation kit.
+Updated: installer repair + rebrand. Product name **Pixel**; version **0.2.0**.
 
 ## Current milestone
 
-**Wave 1D (agent execution) is complete**, along with browser automation
-(Priority 2), voice (Priority 3) and the Windows validation procedure
-(Priority 4). The remaining work is on-device verification, which cannot be done
-in this environment, and Wave 1E polish.
+**Windows installer repair and rebrand to Pixel** - complete in code, built into
+three distributions, and verified as far as a headless environment allows.
+On-device GUI verification is still outstanding and is the gate for Wave 3.
 
-## Completed
+Waves 1A-1D are preserved: floating shell, DeepSeek streaming, agent tool loop,
+browser automation, voice, and the security model are unchanged.
 
-### Wave 1A - foundation
-- TypeScript strict, Vite 8, React 19, Tailwind v4, Vitest.
-- `src/shared/types.ts` as the cross-process contract (frozen).
-- `src/shared/channels.ts` IPC names, `src/shared/surfaces.ts` geometry.
-- DeepSeek provider: wire format, SSE, thinking mode, vision gating, error
-  mapping, cost estimates, history trimming.
-- Environment findings in `docs/ENVIRONMENT.md`, `docs/DEEPSEEK-API.md`,
-  `docs/ELECTRON-CONSTRAINTS.md`.
+## Distributions
 
-### Wave 1B - floating UI
-- Frameless transparent always-on-top window at `floating` level (below system
-  dialogs), 96 px orb, 480 px expanded surfaces, position persistence with
-  work-area clamping and display-change re-clamping.
-- Tray with mode submenu and emergency stop; runtime-generated icon.
-- Global shortcuts with conflict tolerance.
-- React UI: 8-state orb, compact input bar, streaming bubble with separate
-  reasoning view, mode switcher, permission card, task strip, settings window.
-- Accessibility: labelled controls, focus rings, `aria-live`, reduced motion.
+| File | Size | What it is |
+| --- | --- | --- |
+| `release/Pixel-Setup-0.2.0.exe` | 118.3 MB | NSIS installer, per-user, no admin prompt |
+| `release/Pixel-Portable-0.2.0.exe` | 107.5 MB | Portable build, runs without installing |
+| `release/Pixel-Windows-Unpacked-0.2.0.zip` | 149.6 MB | Unpacked app + Electron runtime, extract and run |
 
-### Wave 1C - working AI
-- DPAPI-encrypted key via `safeStorage`; refuses plaintext fallback.
-- Conversation engine with hard safety rules, stop checks before and during a
-  turn, vision-model auto-upgrade, typed error events.
-- Streaming to the UI with requestId pairing and pre-resolve event buffering.
-- History persistence with caps and corrupt-file recovery.
-- Screen capture with per-action authorization and DPI-correct sizing.
+Install: run the setup, then launch Pixel from the Start menu.
+Portable: double-click; nothing is installed.
+ZIP: extract, then run `Pixel.exe`. This is the recommended first test because it
+bypasses NSIS entirely.
 
-### Wave 1D - agent execution (this milestone)
-- **Real tool-calling loop**: model -> tool calls -> policy -> approval ->
-  execution -> tool results -> model continuation, up to 8 steps.
-- **Real executors**, no simulation: `get_current_time`, `get_system_info`,
-  `open_application` (allowlist + `cmd start`), `type_text` (PowerShell
-  `SendKeys` with the text passed via environment, not interpolated into the
-  script), `analyze_screen` (capture + vision model).
-- **Policy enforcement**: Guide mode cannot run a state-changing tool even if
-  approved; single-use grants are consumed; denials are reported to the model.
-- **Limits**: 8 steps, 5-minute wall clock, 30-second per tool, cancellation,
-  emergency stop checked between and during steps.
-- **Progress**: task records with real steps and timings; terminal `done`/
-  `aborted`/`error` events carry the chat request id so the UI stops streaming
-  at the right moment (a bug found and fixed: `done` fired per step).
-- **Persistence**: last 50 runs written to `%APPDATA%\Cyps\executions\`, audit
-  trail in memory (500 entries, newest first).
-- **25 integration tests**: approval, denial, execution, unknown tool, tool
-  failure with model recovery, step-limit, cancellation between steps,
-  emergency stop mid-run, re-entrancy, persistence, argument parsing.
+## Installer failure investigation
 
-### Priority 2 - browser automation
-- `BrowserSession` over Playwright: navigate, inspect (title/text/links/buttons/
-  inputs), click, fill, press, scroll, screenshot, text verification.
-- URL policy: only http/https (file:// only when explicitly enabled); refuses
-  `javascript:` and `data:` URLs with an explanation.
-- 7 browser tools registered, mode-gated (Guide gets only the read-only ones).
-- **22 tests, including 14 against a live headless Chromium** driving a real
-  page served from 127.0.0.1: clicking changes the DOM, typing submits a form,
-  screenshots decode as PNG, scrolling moves the page, bad selectors return tool
-  failures rather than throwing.
+The reported error was "Cyps cannot be closed. Please close it manually and click
+Retry to continue", with no process visible and `taskkill` finding nothing.
 
-### Priority 3 - voice
-- Windows `System.Speech` through PowerShell: local dictation and system voices.
-- Real capability probe (`stt=true tts=true` on this machine: 2 recognizers,
-  3 voices), cancellation, honest no-speech handling.
-- Push-to-talk in the UI: listening state, transcript into the draft, precise
-  errors when speech is unavailable; optional spoken replies.
-- **18 tests** including a live capability probe against the real machine.
+**Verified** (by reading electron-builder 26.18.0, the pinned version):
 
-### Priority 4 - Windows validation
-- `scripts/validate-windows.ps1` - launches Cyps and inspects the real window via
-  `user32`: compact size, top-of-screen position, WS_EX_TOPMOST, WS_EX_LAYERED,
-  WS_EX_TOOLWINDOW, DPI, process health, stored-data encryption. Writes a JSON
-  report. Verified here (4 checks pass, window checks skip without a process).
-- `scripts/diagnose.mjs` - environment, dependencies, build artifacts, Playwright
-  browsers, speech recognizers and voices, credential encryption, DeepSeek
-  reachability. Verified here: 19 pass, 1 fail (ELECTRON_RUN_AS_NODE is set in
-  this sandbox, which is the correct diagnosis).
-- `docs/WINDOWS-VALIDATION.md` - step-by-step manual procedure covering every
-  item that cannot be verified headlessly.
+- That exact string is emitted from **three** different places:
+  process check (`allowOnlyOneInstallerInstance.nsh:156`), a `CopyFiles` failure
+  into the install directory (`extractAppPackage.nsh:116`), and a failed old
+  uninstaller during upgrade (`installUtil.nsh:219`). Only the first involves a
+  running application, so the message is not trustworthy evidence.
+- With PowerShell present, the process check matches by
+  `$_.Path.StartsWith($INSTDIR)` rather than by executable name, and cannot see
+  elevated processes (their `Win32_Process.Path` is empty).
+- This version already contains the exact-name `findstr /B` fix
+  ([#6865](https://github.com/electron-userland/electron-builder/issues/6865),
+  [PR #9784](https://github.com/electron-userland/electron-builder/pull/9784)),
+  so the upstream substring-match bug is not our cause.
+- [PR #6547](https://github.com/electron-userland/electron-builder/pull/6547) is
+  what introduced the extract-then-copy stage whose failure raises the dialog.
+- Our custom NSIS include really is compiled: an intentional error in
+  `build/installer.nsh` aborted the build from that file.
+
+**Not verified** - which path actually fired on the laptop. This environment
+cannot run the GUI installer, so the laptop's state could not be inspected.
+Most likely, in order: a partial Cyps installation whose uninstaller is missing
+or unusable (retries then fail forever, exactly as observed), or a locked or
+unwritable target directory.
+
+Full analysis: `docs/INSTALLER-TROUBLESHOOTING.md`.
+
+### Fixes applied
+
+1. `build/installer.nsh` defines `customCheckAppRunning` (a supported
+   electron-builder hook): exact image-name match for `Pixel.exe` and legacy
+   `Cyps.exe` only, current-user scoped, bounded retries, and a message that
+   explains the real possibilities instead of looping silently. Detection is
+   precise, not disabled.
+2. `.onVerifyInstDir` tests writability as soon as a directory is chosen and
+   returns the user to the page with an accurate message, so an unwritable path
+   never reaches the misleading copy-failure dialog.
+3. Installation identity pinned (`appId` unchanged,
+   `nsis.guid: a5745318-c98a-51f9-87f5-f1c32713b276`) so Pixel upgrades over
+   Cyps in place. A test asserts the pin equals the derivation.
+4. Upgrade removes only the stale `Cyps.exe` and old `Cyps.lnk` shortcuts, and
+   only after `Pixel.exe` exists. No script touches `%APPDATA%`.
+5. `scripts/diagnose-installer.ps1` added: read-only report of processes,
+   install locations, uninstall entries, shortcut targets, startup log, event
+   log and partial-install detection.
+
+## Rebranding
+
+Product name, executable, installer, shortcuts, tray, window titles, settings,
+assistant identity and documentation now say Pixel. `Pixel Code` is reserved and
+not implemented.
+
+Deliberately unchanged: `appId`, the uninstall GUID, `CypsBridge` /
+`CypsError` / `CypsErrorCode`, `window.cyps`, `cyps:` IPC channels, `CYPS_*`
+environment variables, `--cyps-*` CSS properties. See `docs/REBRANDING.md`.
+
+User data: pinned to `%APPDATA%\Pixel`, migrated by copy from `%APPDATA%\cyps`
+(or `%APPDATA%\Cyps`), with the source left untouched as a backup.
+
+## First-launch reliability
+
+- `app.setName('Pixel')` and an explicit `userData` path, resolved before the
+  settings store is created.
+- Migration runs before anything reads settings, and reports itself in the log.
+- Startup log at `%APPDATA%\Pixel\pixel-startup.log`: version, data directory,
+  migration outcome, tray/shortcut/IPC completion, quit, and failures.
+- Handlers for `uncaughtException`, `unhandledRejection`,
+  `render-process-gone`, `child-process-gone`, `did-fail-load` and
+  `preload-error` all write to that log before anything exits.
+
+Desired first launch is unchanged and still the design: orb near the top of the
+screen, click to expand a 480 px bar, add the DeepSeek key in Settings, chat, and
+collapse back to the orb - tray-resident, no dashboard, no sidebar.
 
 ## Verification status
 
@@ -96,53 +109,51 @@ in this environment, and Wave 1E polish.
 | --- | --- |
 | `tsc` main program | pass |
 | `tsc` renderer program | pass |
-| `vitest` | **212 tests pass** (10 files) |
-| live headless Chromium tests | 14 pass |
-| live speech capability probe | pass (2 recognizers, 3 voices) |
+| `vitest` (12 files) | **255 tests pass** |
 | `vite build` | pass |
-| compiled main bundle loads as CJS | pass |
-| `electron-builder --win` | pass (`Cyps-Setup-0.1.0.exe`) |
-| `validate-windows.ps1` (dry run) | 4 pass, 1 warn, 4 skip |
-| `diagnose.mjs` | 19 pass, 1 fail (correct: ELECTRON_RUN_AS_NODE set) |
-| GUI window, tray, shortcuts, drag, capture | **not verifiable here** |
+| NSIS installer build | pass (`Pixel-Setup-0.2.0.exe`) |
+| Portable build | pass (`Pixel-Portable-0.2.0.exe`) |
+| Unpacked ZIP build | pass (`Pixel-Windows-Unpacked-0.2.0.zip`) |
+| ZIP contains `Pixel.exe` + `resources/app.asar` | pass (central-directory read in tests) |
+| Installer script compiled | pass (include proven by a deliberate compile error) |
+| `diagnose-installer.ps1` | ran: read-only, found the recorded Electron crash in the event log |
+| `validate-windows.ps1` | ran: 4 pass, 1 warn, window checks skipped (no process) |
+| **Installing, launching and using the GUI** | **not verifiable here** |
 
-The machine used for development cannot start any Chromium GUI process
-(`app.whenReady()` crashes, packaged app exits on crashpad "not connected").
-Everything above marked "not verifiable" is compiled, packaged and reviewed, and
-must be confirmed with `docs/WINDOWS-VALIDATION.md`. No document claims those
-paths are tested.
+The development machine still cannot start any Chromium GUI process
+(`app.whenReady()` faults with `0xc0000005`; the packaged app exits on Chromium's
+crash handler). Nothing in this document claims the window, tray, shortcuts,
+drag, capture or the installer UI were exercised. `docs/WINDOWS-VALIDATION.md` is
+the procedure for doing that on the laptop.
 
-## Architectural decisions
+## Tests added this milestone
 
-1. **Electron instead of Tauri.** Rust could not be installed. The renderer talks
-   only to `window.cyps`, so a Tauri migration touches `src/main` + `src/preload`.
-2. **CommonJS for main/preload**, marked by a generated `dist/main/package.json`.
-3. **IPC names in `shared`.** Importing them from the preload into main executed
-   `contextBridge` in main and killed startup; an architecture test guards this.
-4. **Permissions are a local policy table**, never model-generated.
-5. **`done` is deferred until the turn is known to be final**, so multi-step runs
-   do not end the UI's streaming state early.
-6. **Voice, not transcript theatre**: absent recognizers produce a capability
-   error, never invented text.
-7. **Honest diagnostics**: failed probes yield `null` plus a warning, never a
-   fabricated number.
+`tests/packaging.test.ts` (32 tests): identity pin and GUID derivation, artifact
+naming and targets, per-user + no-data-loss settings, installer-script safety
+(exact-name matching, current-user scoping, no `RMDir /r`, no data deletion), and
+the full user-data migration matrix including corrupt/partial legacy installs and
+copy failures.
+
+`tests/artifacts.test.ts` (11 tests): the three distributions exist with the
+documented names, no artifact is named after the old product, the unpacked tree
+contains `Pixel.exe`/`app.asar`/runtime files and no `Cyps.exe`, and the ZIP's
+central directory lists the executable and resources. Includes a hand-built ZIP
+to prove the reader itself is correct.
 
 ## Remaining issues
 
-- On-device GUI verification outstanding (see `docs/WINDOWS-VALIDATION.md`).
-- Browser binaries are not bundled; `npx playwright install chromium` is required
-  per machine, and the app reports a capability error until then.
-- `type_text` cannot inject into elevated windows (Windows integrity levels).
-- `open_application` is an allowlist by design; arbitrary launches are refused.
-- Disk/battery reporting is `null` where WMI is blocked.
-- Audit trail is in memory only (execution history is persisted; audit is not).
-- No signed installer.
+- Installer UI, window, tray, global shortcuts, drag, DPI and screen capture still
+  need on-device verification.
+- Playwright's Chromium is not bundled; browser tools report a capability error
+  until `npx playwright install chromium` is run once.
+- No code signing certificate; SmartScreen may warn on first run.
+- Typing into elevated windows is blocked by Windows integrity levels.
+- Audit trail is in memory only (execution history is persisted).
 
-## Next implementation step
+## Next step
 
-Wave 1E:
-1. Run `docs/WINDOWS-VALIDATION.md` on a real laptop and fix whatever it finds.
-2. Persist the audit trail alongside executions so it survives restarts.
-3. Bundle Playwright's Chromium into the installer (or download on first use with
-   a visible progress state), removing the manual install step.
-4. Add the reserved Cyps Code integration point (contract only, no workspace).
+1. Install `Pixel-Setup-0.2.0.exe` on the laptop; if it fails, run
+   `scripts/diagnose-installer.ps1` and attach the report.
+2. Confirm the first-launch experience and complete
+   `docs/WINDOWS-VALIDATION.md`.
+3. Only then start Wave 3.

@@ -1,7 +1,7 @@
 /**
  * Browser automation.
  *
- * Playwright is loaded lazily: if it (or its browser binaries) is missing, Cyps
+ * Playwright is loaded lazily: if it (or its browser binaries) is missing, Pixel
  * reports a precise capability error instead of pretending a page was opened.
  *
  * Safety rules enforced here rather than in the UI:
@@ -65,7 +65,7 @@ interface PlaywrightBrowser {
 }
 
 export interface BrowserOptions {
-  /** Headed browsers need a desktop session; Cyps defaults to headless. */
+  /** Headed browsers need a desktop session; Pixel defaults to headless. */
   headless?: boolean;
   /** Allow file:// URLs. Off in the app, on for local tests. */
   allowFileUrls?: boolean;
@@ -102,7 +102,7 @@ export class BrowserSession {
     }
   }
 
-  /** Reject URLs Cyps will not visit. Returns null when the URL is acceptable. */
+  /** Reject URLs Pixel will not visit. Returns null when the URL is acceptable. */
   validateUrl(raw: string): string | null {
     let parsed: URL;
     try {
@@ -114,7 +114,7 @@ export class BrowserSession {
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return null;
     if (parsed.protocol === 'file:' && this.options.allowFileUrls) return null;
 
-    return `Cyps will not open ${parsed.protocol} URLs. Only http and https pages are allowed.`;
+    return `Pixel will not open ${parsed.protocol} URLs. Only http and https pages are allowed.`;
   }
 
   /** Load a page and return its snapshot. */

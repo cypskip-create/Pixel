@@ -1,5 +1,5 @@
 /**
- * Environment and build diagnostics for Cyps.
+ * Environment and build diagnostics for Pixel.
  *
  * Read-only: it inspects the machine, the build output and the network path to
  * DeepSeek, then prints a report. It never reads, prints or transmits the API
@@ -55,7 +55,7 @@ if (process.env.ELECTRON_RUN_AS_NODE) {
   record(
     'ELECTRON_RUN_AS_NODE',
     'fail',
-    'It is set. Electron would run as plain Node and Cyps cannot show a window. Unset it before launching.',
+    'It is set. Electron would run as plain Node and Pixel cannot show a window. Unset it before launching.',
   );
 } else {
   record('ELECTRON_RUN_AS_NODE', 'pass', 'Not set.');
@@ -82,7 +82,7 @@ const expected = [
   ['dist/main/main/main.js', 'main process bundle'],
   ['dist/main/preload/index.js', 'preload bridge'],
   ['dist/renderer/index.html', 'renderer entry'],
-  ['release/win-unpacked/Cyps.exe', 'packaged executable'],
+  ['release/win-unpacked/Pixel.exe', 'packaged executable'],
 ];
 
 for (const [path, label] of expected) {
@@ -154,9 +154,9 @@ section('Stored credentials');
 
 const appData = process.env.APPDATA;
 if (appData) {
-  const keyFile = join(appData, 'Cyps', 'credentials', 'deepseek.key');
+  const keyFile = join(appData, 'Pixel', 'credentials', 'deepseek.key');
   if (!existsSync(keyFile)) {
-    record('DeepSeek API key', 'info', 'Not saved yet. Add one in Cyps Settings.');
+    record('DeepSeek API key', 'info', 'Not saved yet. Add one in Pixel Settings.');
   } else {
     const raw = readFileSync(keyFile, 'utf8');
     // Never print the contents: only whether a plaintext key leaked.

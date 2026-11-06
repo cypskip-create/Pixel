@@ -1,5 +1,5 @@
 /**
- * Cyps application entry point.
+ * Pixel application entry point.
  *
  * Assembly only: creates the settings store, the floating window, the tray, the
  * global shortcuts and the IPC surface, then keeps them in sync. Platform
@@ -9,6 +9,14 @@
 import { app, BrowserWindow, Menu, shell } from 'electron';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/channels';
+import { describeError, StartupLog } from './startup/log';
+import {
+  APP_NAME,
+  LEGACY_APP_NAMES,
+  describeMigration,
+  migrateLegacyData,
+  realFileSystem,
+} from './startup/user-data';
 import { registerIpcHandlers } from './ipc';
 import { RuntimeProvider } from './providers/runtime';
 import { ScreenCapture } from './screen';
@@ -20,17 +28,46 @@ import { WindowManager } from './window';
 /** Set by `npm run dev:electron`. */
 const DEV_SERVER_URL = process.env.CYPS_DEV_SERVER_URL ?? null;
 
-/** Globally, only one Cyps may run: two floating orbs would fight over the tray. */
+/** Globally, only one Pixel may run: two floating orbs would fight over the tray. */
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 }
 
 // Windows uses this to group and identify the app correctly in the taskbar and
-// notification area, including in development.
+// notification area, including in development. The id is an installation
+// identity and intentionally unchanged across the Cyps -> Pixel rename.
+app.setName(APP_NAME);
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.cyps.companion');
 }
+
+/**
+ * Pin the data directory instead of letting Electron derive it from the app
+ * name. Renaming the product would otherwise relocate settings, credentials,
+ * history and task records, which looks to the user like data loss.
+ *
+ * Legacy Cyps data is copied (never moved, never deleted) on first launch.
+ */
+function resolveUserDataDir(): { dir: string; log: StartupLog } {
+  const roaming = app.getPath('appData');
+  const target = join(roaming, APP_NAME);
+  const legacy = LEGACY_APP_NAMES.map((name) => join(roaming, name));
+
+  const migration = migrateLegacyData({ targetDir: target, legacyDirs: [...legacy], fs: realFileSystem });
+  app.setPath('userData', target);
+
+  const log = new StartupLog(target);
+  log.info(`Pixel ${app.getVersion()} starting (electron ${process.versions.electron})`);
+  log.info(`User data: ${target}`);
+  log.info(describeMigration(migration));
+  for (const warning of migration.warnings) log.warn(warning);
+
+  return { dir: target, log };
+}
+
+const userData = resolveUserDataDir();
+const startupLog = userData.log;
 
 let windows: WindowManager | null = null;
 let shortcuts: ShortcutManager | null = null;
@@ -84,7 +121,7 @@ async function bootstrap(): Promise<void> {
 
   await app.whenReady();
 
-  // No application menu: Cyps is not a document application and a menu bar in a
+  // No application menu: Pixel is not a document application and a menu bar in a
   // floating window would be visual noise.
   Menu.setApplicationMenu(null);
 
@@ -146,7 +183,7 @@ async function bootstrap(): Promise<void> {
     },
   });
 
-  // The tray may fail on some desktop configurations; Cyps still runs.
+  // The tray may fail on some desktop configurations; Pixel still runs.
   tray = new TrayController({
     onToggle: () => windows?.toggle(),
     onSetMode: (mode) => {
@@ -179,7 +216,14 @@ async function bootstrap(): Promise<void> {
   });
   shortcuts.apply(store.get());
 
-  windows.createMainWindow();
+  const mainWindow = windows.createMainWindow();
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+    startupLog.error(`Renderer failed to load (${String(code)} ${description}) for ${url}`);
+  });
+  mainWindow.webContents.on('preload-error', (_event, preloadPathValue, error) => {
+    startupLog.error(`Preload failed (${preloadPathValue}): ${describeError(error)}`);
+  });
+  startupLog.info('Tray, shortcuts and IPC registered; main window created.');
 
   // Keep launch-on-startup in sync with settings.
   try {
@@ -207,13 +251,14 @@ app.on('second-instance', () => {
 });
 
 app.on('window-all-closed', () => {
-  // Cyps is a tray-resident companion: closing the window hides it rather than
+  // Pixel is a tray-resident companion: closing the window hides it rather than
   // ending the process. Quitting goes through the tray or the app.
   if (quitting) app.quit();
 });
 
 app.on('before-quit', () => {
   quitting = true;
+  startupLog.info('Quitting.');
   shortcuts?.unregisterAll();
   tray?.destroy();
 });
@@ -222,10 +267,38 @@ app.on('will-quit', () => {
   shortcuts?.unregisterAll();
 });
 
+/**
+ * Failure reporting.
+ *
+ * Every fatal path writes to the startup log before exiting, so a launch that
+ * never shows a window still leaves evidence in %APPDATA%\Pixel.
+ */
+process.on('uncaughtException', (error) => {
+  startupLog.error(`Uncaught exception: ${describeError(error)}`);
+  console.error('Uncaught exception:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  startupLog.error(`Unhandled rejection: ${describeError(reason)}`);
+});
+
+app.on('render-process-gone', (_event, _contents, details) => {
+  startupLog.error(
+    `Renderer process gone: reason=${details.reason} exitCode=${String(details.exitCode)}`,
+  );
+});
+
+app.on('child-process-gone', (_event, details) => {
+  startupLog.error(
+    `Child process gone: type=${details.type} reason=${details.reason} exitCode=${String(details.exitCode)}`,
+  );
+});
+
 void bootstrap().catch((error: unknown) => {
   // A failed boot is fatal and must be visible rather than a silent no-op.
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`Cyps failed to start: ${message}`);
+  startupLog.error(`Failed to start: ${describeError(error)}`);
+  console.error(`Pixel failed to start: ${message}`);
   app.exit(1);
 });
 

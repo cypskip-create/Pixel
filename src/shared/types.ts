@@ -1,5 +1,5 @@
 /**
- * Cyps shared contracts.
+ * Pixel shared contracts.
  *
  * This module is imported by BOTH the Electron main process and the renderer.
  * It must therefore contain only types, constants, and pure functions — no
@@ -115,7 +115,7 @@ export interface ModelCapabilities {
   thinking: boolean;
   contextTokens: number;
   maxOutputTokens: number;
-  /** Intended role in Cyps. */
+  /** Intended role in Pixel. */
   role: 'fast' | 'reasoning';
 }
 
@@ -155,7 +155,7 @@ export function modelSupportsVision(modelId: string): boolean {
   return getModelCapabilities(modelId)?.vision === true;
 }
 
-/** Model Cyps switches to automatically when an image must be sent. */
+/** Model Pixel switches to automatically when an image must be sent. */
 export const VISION_MODEL: DeepSeekModel = 'deepseek-flash';
 
 /* ------------------------------------------------------------------ *

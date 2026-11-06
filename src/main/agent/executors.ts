@@ -31,7 +31,7 @@ export interface ToolResult {
   errorCode?: 'TIMEOUT' | 'DENIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'FAILED';
 }
 
-/** Applications Cyps is willing to launch. Anything else is refused. */
+/** Applications Pixel is willing to launch. Anything else is refused. */
 export const APPLICATION_ALLOWLIST: Record<string, string> = {
   notepad: 'notepad.exe',
   'notepad.exe': 'notepad.exe',
@@ -125,7 +125,7 @@ export class ToolExecutors {
         default:
           return {
             ok: false,
-            content: `Cyps has no implementation for the tool "${name}".`,
+            content: `Pixel has no implementation for the tool "${name}".`,
             errorCode: 'NOT_FOUND',
           };
       }
@@ -188,14 +188,14 @@ export class ToolExecutors {
     if (!this.deps.captureDisplay) {
       return {
         ok: false,
-        content: 'Screen capture is not available in this build of Cyps.',
+        content: 'Screen capture is not available in this build of Pixel.',
         errorCode: 'UNAVAILABLE',
       };
     }
     if (!this.deps.describeImage) {
       return {
         ok: false,
-        content: 'Cyps cannot analyse images because no vision model is configured.',
+        content: 'Pixel cannot analyse images because no vision model is configured.',
         errorCode: 'UNAVAILABLE',
       };
     }
@@ -230,7 +230,7 @@ export class ToolExecutors {
         .join(', ');
       return {
         ok: false,
-        content: `Cyps is not allowed to launch "${requested}". It can open: ${known}.`,
+        content: `Pixel is not allowed to launch "${requested}". It can open: ${known}.`,
         errorCode: 'DENIED',
       };
     }
@@ -267,7 +267,7 @@ export class ToolExecutors {
     if (text.length > 2_000) {
       return {
         ok: false,
-        content: 'That text is too long for Cyps to type safely (limit 2000 characters).',
+        content: 'That text is too long for Pixel to type safely (limit 2000 characters).',
         errorCode: 'FAILED',
       };
     }
@@ -319,7 +319,7 @@ export class ToolExecutors {
       return {
         error: {
           ok: false,
-          content: 'Browser automation is not available in this build of Cyps.',
+          content: 'Browser automation is not available in this build of Pixel.',
           errorCode: 'UNAVAILABLE',
         },
       };
@@ -354,7 +354,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not open that page: ${message(error)}`,
+        content: `Pixel could not open that page: ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -389,7 +389,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not read the page: ${message(error)}`,
+        content: `Pixel could not read the page: ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -415,7 +415,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not click "${selector}": ${message(error)}`,
+        content: `Pixel could not click "${selector}": ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -442,7 +442,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not type into "${selector}": ${message(error)}`,
+        content: `Pixel could not type into "${selector}": ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -467,7 +467,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not scroll the page: ${message(error)}`,
+        content: `Pixel could not scroll the page: ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -488,7 +488,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not capture the page: ${message(error)}`,
+        content: `Pixel could not capture the page: ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -521,7 +521,7 @@ export class ToolExecutors {
     } catch (error) {
       return {
         ok: false,
-        content: `Cyps could not verify the page: ${message(error)}`,
+        content: `Pixel could not verify the page: ${message(error)}`,
         errorCode: 'FAILED',
       };
     }

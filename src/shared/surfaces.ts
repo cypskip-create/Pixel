@@ -5,7 +5,7 @@
  * renderer lays content out to match. Keeping one table prevents the two from
  * drifting, which would show up as clipped or floating text.
  *
- * These numbers are deliberately small. Cyps is a companion that floats at the
+ * These numbers are deliberately small. Pixel is a companion that floats at the
  * top of the screen, not a dashboard and not a chat application: the largest
  * surface is 480px wide.
  */
