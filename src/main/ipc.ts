@@ -36,6 +36,13 @@ import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
 import { ToolExecutors } from './agent/executors';
 import { BrowserSession } from './agent/browser';
+import { openDatabase } from './data/database';
+import { boot } from './startup/boot';
+import { MemoryStore } from './memory/store';
+import { MemoryTools, MEMORY_TOOL_DEFINITIONS } from './memory/toolset';
+import { DocumentIndex } from './documents/indexer';
+import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
+import { PythonWorker } from './services/python-worker';
 import { VoiceService } from './voice/voice';
 import { VISION_MODEL } from '../shared/types';
 import {
@@ -44,7 +51,7 @@ import {
   PermissionBroker,
   TaskManager,
 } from './agent/runtime';
-import { ToolRegistry } from './agent/tools';
+import { BUILTIN_TOOLS, ToolRegistry } from './agent/tools';
 import { HistoryStore } from './history/store';
 import type { ModelProvider } from './providers/deepseek';
 import { SettingsStore } from './settings';
@@ -102,7 +109,25 @@ export function registerIpcHandlers(context: IpcContext): {
   const { settings, windows, provider, captures } = context;
 
   const audit = new AuditLog();
-  const toolRegistry = new ToolRegistry();
+
+  /* ---------------- Wave 3: memory and documents ---------------- */
+
+  const database = openDatabase(join(app.getPath('userData'), 'pixel.db'));
+  const memoryStore = new MemoryStore(database);
+  const pythonWorker = new PythonWorker({
+    workerRoot: join(app.getAppPath(), 'python'),
+    onLog: (line) => boot.info(line),
+  });
+  const documentIndex = new DocumentIndex(database, pythonWorker);
+  const projectId = (): string => memoryStore.getActiveProject();
+  const memoryTools = new MemoryTools(memoryStore, projectId);
+  const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
+
+  const toolRegistry = new ToolRegistry([
+    ...BUILTIN_TOOLS,
+    ...MEMORY_TOOL_DEFINITIONS,
+    ...DOCUMENT_TOOL_DEFINITIONS,
+  ]);
   const tasks = new TaskManager((task) =>
     context.sendToRenderer(CHANNELS.tasksUpdate, task),
   );
@@ -132,7 +157,10 @@ export function registerIpcHandlers(context: IpcContext): {
       agent.cancel('stop');
       return wasRunning;
     },
-    killChildren: () => executors.killAll(),
+    killChildren: () => {
+      void pythonWorker.shutdown();
+      return executors.killAll();
+    },
     completedActions: () => [...completedActions],
     notify: (report) => context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report),
   });
@@ -179,6 +207,8 @@ export function registerIpcHandlers(context: IpcContext): {
 
   const executors = new ToolExecutors({
     browser,
+    memory: memoryTools,
+    documents: documentTools,
     captureDisplay: async () => {
       const result = await captures.captureDisplay();
       return result.ok && result.image ? result.image : null;
