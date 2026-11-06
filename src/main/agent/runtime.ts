@@ -127,6 +127,16 @@ export class PermissionBroker {
     return this.registry.activeGrants();
   }
 
+  /** Revoke one tool's grant. Used to consume single-use approvals. */
+  revoke(toolName: string): boolean {
+    const existed = this.grants.delete(toolName);
+    if (existed) {
+      this.registry.revoke(toolName);
+      this.audit.record('permission', `Consumed approval for "${toolName}"`, 'ok');
+    }
+    return existed;
+  }
+
   revokeAll(): number {
     this.rejectPending();
     const count = this.registry.revokeAll();

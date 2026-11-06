@@ -22,6 +22,7 @@ import type {
   ModelCapabilities,
   StreamEvent,
   ThinkingConfig,
+  ToolCall,
   ToolDefinition,
 } from '../../shared/types';
 import {
@@ -83,6 +84,23 @@ export interface RunTurnOptions {
   thinking?: ThinkingConfig;
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Pre-built message list. The agent loop owns message assembly across tool
+   * steps (assistant tool_calls plus tool results must stay paired), so it
+   * passes the full list rather than letting the engine rebuild it.
+   */
+  messages?: ChatMessage[];
+}
+
+/** What one model turn produced. The agent loop uses this to decide whether to continue. */
+export interface TurnOutcome {
+  content: string;
+  reasoning: string;
+  toolCalls: ToolCall[];
+  finishReason: string;
+  aborted: boolean;
+  /** Set when the turn ended in an error event. */
+  failed: boolean;
 }
 
 export class ConversationEngine {
@@ -105,7 +123,7 @@ export class ConversationEngine {
    * Run one turn. Resolves when the turn ends: completed, aborted, or failed.
    * Never throws — failures are emitted as `error` events.
    */
-  async runTurn(options: RunTurnOptions): Promise<void> {
+  async runTurn(options: RunTurnOptions): Promise<TurnOutcome> {
     const { requestId, request } = options;
     const { provider, getApiKey, isStopped, emit } = this.deps;
 
@@ -113,7 +131,7 @@ export class ConversationEngine {
       emit(
         errorEvent(requestId, 'BAD_REQUEST', 'Cyps is already answering. Wait, or press stop.'),
       );
-      return;
+      return failedTurn();
     }
 
     if (isStopped()) {
@@ -124,7 +142,7 @@ export class ConversationEngine {
           'Emergency stop is active. Clear it before asking Cyps to do anything.',
         ),
       );
-      return;
+      return failedTurn();
     }
 
     const apiKey = getApiKey();
@@ -136,7 +154,7 @@ export class ConversationEngine {
           'Cyps needs a DeepSeek API key before it can answer. Add one in Settings - it is stored encrypted on this computer.',
         ),
       );
-      return;
+      return failedTurn();
     }
 
     this.running = true;
@@ -146,10 +164,15 @@ export class ConversationEngine {
     try {
       const images = request.images ?? [];
       const model = resolveModel(options.model, images.length > 0);
-      const messages = buildMessages(request);
+      const messages = options.messages ?? buildMessages(request);
       const tools = this.deps.toolsFor?.(request.mode);
 
-      await provider.generate({
+      // done is held back until we know whether the turn produced tool calls.
+      // Emitting it eagerly would tell the UI the answer finished on every step
+      // of a multi-step agent run.
+      let pendingDone: StreamEvent | null = null;
+
+      const result = await provider.generate({
         requestId,
         model,
         messages,
@@ -166,11 +189,28 @@ export class ConversationEngine {
             controller.abort();
             return;
           }
+          if (event.type === 'done') {
+            pendingDone = event;
+            return;
+          }
           emit(event);
         },
       });
+
+      // Only a turn with no tool calls is a final answer for the UI.
+      if (result.toolCalls.length === 0 && pendingDone) emit(pendingDone);
+
+      return {
+        content: result.content,
+        reasoning: result.reasoning,
+        toolCalls: result.toolCalls,
+        finishReason: result.finishReason,
+        aborted: result.aborted,
+        failed: false,
+      };
     } catch (error) {
       emit(errorEvent(requestId, ...toErrorParts(error)));
+      return failedTurn();
     } finally {
       this.running = false;
       if (this.controller === controller) this.controller = null;
@@ -253,6 +293,18 @@ function isCypsError(value: unknown): value is CypsError {
 
 function isAbortError(value: unknown): boolean {
   return value instanceof Error && value.name === 'AbortError';
+}
+
+/** A neutral outcome for turns that never reached the model. */
+export function failedTurn(): TurnOutcome {
+  return {
+    content: '',
+    reasoning: '',
+    toolCalls: [],
+    finishReason: 'error',
+    aborted: false,
+    failed: true,
+  };
 }
 
 /** Rough prompt size estimate for the UI. Not billing. */

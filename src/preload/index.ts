@@ -166,6 +166,28 @@ contextBridge.exposeInMainWorld('cyps', bridge);
 const shell = {
   onModeChanged: (handler: (mode: Mode) => void): (() => void) =>
     subscribe(CH.modeChanged, handler),
+
+  /** Windows speech capability. Reports honestly when speech is unavailable. */
+  voiceCapability: () =>
+    ipcRenderer.invoke(CH.voiceCapability) as Promise<{
+      speechToText: boolean;
+      textToSpeech: boolean;
+      reason?: string;
+    }>,
+
+  /** Listen once. Resolves with the recognised text or a precise error. */
+  voiceListen: (timeoutMs?: number) =>
+    ipcRenderer.invoke(CH.voiceListen, timeoutMs) as Promise<{
+      ok: boolean;
+      text: string;
+      confidence: number;
+      error?: string;
+      noSpeech?: boolean;
+    }>,
+
+  /** Speak text aloud with the installed Windows voice. */
+  voiceSpeak: (text: string) =>
+    ipcRenderer.invoke(CH.voiceSpeak, text) as Promise<{ ok: boolean; error?: string }>,
 };
 
 contextBridge.exposeInMainWorld('cypsShell', shell);

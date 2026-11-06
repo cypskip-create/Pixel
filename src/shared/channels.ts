@@ -58,6 +58,12 @@ export const CHANNELS = {
 
   /** Shell-originated: the tray changed the mode. */
   modeChanged: 'cyps:modeChanged',
+
+  /** Voice surface (outside CypsBridge: it is a shell capability, not chat data). */
+  voiceCapability: 'voice:capability',
+  voiceListen: 'voice:listen',
+  voiceCancel: 'voice:cancel',
+  voiceSpeak: 'voice:speak',
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

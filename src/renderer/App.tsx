@@ -306,12 +306,69 @@ function Companion(): React.JSX.Element {
     [showNotice],
   );
 
+  /**
+   * Push-to-talk. Windows speech recognition runs locally; if it is missing we
+   * say exactly that rather than pretending to listen.
+   */
   const toggleListening = useCallback(() => {
-    // Voice is not wired to a speech engine in this build, and pretending to
-    // listen would be worse than saying so.
-    setListening(false);
-    showNotice('Voice input is not available in this build yet.');
-  }, [showNotice]);
+    const shell = window.cypsShell;
+    if (!shell || typeof shell.voiceListen !== 'function') {
+      setListening(false);
+      showNotice('Voice input needs the desktop shell, which is not available here.');
+      return;
+    }
+
+    if (listening) {
+      setListening(false);
+      return;
+    }
+
+    setListening(true);
+    void (async () => {
+      try {
+        const capability = await shell.voiceCapability();
+        if (!capability.speechToText) {
+          setListening(false);
+          showNotice(capability.reason ?? 'No speech recognizer is installed on this computer.');
+          return;
+        }
+
+        const result = await shell.voiceListen(8000);
+        setListening(false);
+        if (result.ok && result.text.length > 0) {
+          setDraft((current) => (current.length > 0 ? current + ' ' + result.text : result.text));
+          return;
+        }
+        showNotice(
+          result.noSpeech
+            ? 'Cyps did not hear anything. Try again, a little closer to the microphone.'
+            : (result.error ?? 'Speech recognition failed.'),
+        );
+      } catch (error) {
+        setListening(false);
+        showNotice(
+          'Speech recognition failed at ' +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    })();
+  }, [listening, showNotice]);
+
+  // Speak replies aloud when the user has asked for it.
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    const finished = wasStreaming.current && !chat.streaming;
+    wasStreaming.current = chat.streaming;
+    if (!finished) return;
+    if (!settings.companion.speakReplies || !settings.voice.ttsEnabled) return;
+    if (chat.content.trim().length === 0) return;
+
+    const shell = window.cypsShell;
+    if (!shell || typeof shell.voiceSpeak !== 'function') return;
+    void shell.voiceSpeak(chat.content).then((result) => {
+      if (!result.ok && result.error) showNotice(result.error);
+    });
+  }, [chat.streaming, chat.content, settings.companion.speakReplies, settings.voice.ttsEnabled, showNotice]);
 
   const runTaskAction = useCallback(
     (action: 'pause' | 'resume' | 'cancel', taskId: string) => {

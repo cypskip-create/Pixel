@@ -33,6 +33,11 @@ import type {
 import { DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
+import { AgentExecutor } from './agent/executor';
+import { ToolExecutors } from './agent/executors';
+import { BrowserSession } from './agent/browser';
+import { VoiceService } from './voice/voice';
+import { VISION_MODEL } from '../shared/types';
 import {
   AuditLog,
   EmergencyController,
@@ -124,14 +129,88 @@ export function registerIpcHandlers(context: IpcContext): {
     abortStream: (): boolean => {
       const wasRunning: boolean = conversation.isRunning;
       conversation.abort();
+      agent.cancel('stop');
       return wasRunning;
     },
-    killChildren: () => 0,
+    killChildren: () => executors.killAll(),
     completedActions: () => [...completedActions],
     notify: (report) => context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report),
   });
 
   const history = new HistoryStore(new FileStorage(join(app.getPath('userData'), 'history')));
+  const voice = new VoiceService();
+  const executions = new FileStorage(join(app.getPath('userData'), 'executions'));
+
+  /**
+   * Vision analysis for the analyze_screen tool. Uses the vision-capable model
+   * for a single, cheap, non-streaming turn.
+   */
+  const describeImage = async (
+    image: { dataUrl: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; width: number; height: number; source: 'screenshot' | 'upload'; label?: string },
+    question: string,
+  ): Promise<string> => {
+    const key = settings.getApiKey();
+    if (!key) throw new Error('No API key is configured.');
+
+    const result = await provider.generate({
+      requestId: `vision_${Date.now().toString(36)}`,
+      model: VISION_MODEL,
+      messages: [
+        {
+          id: 'vision_user',
+          role: 'user',
+          content: question,
+          images: [image],
+          createdAt: Date.now(),
+        },
+      ],
+      thinking: { enabled: false, effort: 'low' },
+      temperature: 0.2,
+      maxTokens: 900,
+      signal: new AbortController().signal,
+      timeoutMs: 60_000,
+      onEvent: () => undefined,
+    });
+    return result.content || 'The screen was captured but nothing could be read from it.';
+  };
+
+  // One browser session per app run, closed by the emergency stop.
+  const browser = new BrowserSession({ headless: true });
+
+  const executors = new ToolExecutors({
+    browser,
+    captureDisplay: async () => {
+      const result = await captures.captureDisplay();
+      return result.ok && result.image ? result.image : null;
+    },
+    describeImage,
+  });
+
+  const agent = new AgentExecutor({
+    engine: conversation,
+    registry: toolRegistry,
+    permissions,
+    tasks,
+    audit,
+    executors,
+    emit: (event: StreamEvent) => context.sendToRenderer(CHANNELS.chatStream, event),
+    isStopped: () => emergency.isStopped(),
+    persist: (task) => {
+      // Keep the last 50 runs on disk for the audit trail across restarts.
+      const existing = executions.read('runs');
+      let runs: unknown[] = [];
+      if (existing) {
+        try {
+          const parsed: unknown = JSON.parse(existing);
+          if (Array.isArray(parsed)) runs = parsed;
+        } catch {
+          runs = [];
+        }
+      }
+      runs.push(task);
+      executions.write('runs', JSON.stringify(runs.slice(-50)));
+    },
+  });
 
   /* ----------------------------- settings ---------------------------- */
 
@@ -224,7 +303,7 @@ export function registerIpcHandlers(context: IpcContext): {
 
     // Fire and forget: progress arrives via chat:stream. The handler returns
     // the id immediately so the UI can pair events with this request.
-    void conversation.runTurn({
+    void agent.run({
       requestId,
       request,
       model: current.provider.primaryModel,
@@ -237,6 +316,7 @@ export function registerIpcHandlers(context: IpcContext): {
   });
 
   ipcMain.handle(CHANNELS.chatCancel, (_event, requestId: string): void => {
+    agent.cancel('user');
     conversation.abort();
     permissions.rejectPending();
     audit.record('model', 'Generation cancelled', 'cancelled', requestId);
@@ -317,6 +397,33 @@ export function registerIpcHandlers(context: IpcContext): {
   ipcMain.handle(CHANNELS.tasksPause, (_event, taskId: string): void => tasks.pause(taskId));
   ipcMain.handle(CHANNELS.tasksResume, (_event, taskId: string): void => tasks.resume(taskId));
   ipcMain.handle(CHANNELS.tasksCancel, (_event, taskId: string): void => tasks.cancel(taskId));
+
+  /* ------------------------------- voice ----------------------------- */
+
+  ipcMain.handle(CHANNELS.voiceCapability, () => voice.capability());
+
+  ipcMain.handle(CHANNELS.voiceListen, async (_event, timeoutMs?: number) => {
+    const result = await voice.listen(
+      typeof timeoutMs === 'number' ? { timeoutMs } : {},
+    );
+    if (result.ok) {
+      audit.record('system', 'Voice input transcribed', 'ok', `${result.text.length} characters`);
+    } else if (result.noSpeech) {
+      audit.record('system', 'Voice input: no speech detected', 'ok');
+    } else {
+      audit.record('system', 'Voice input failed', 'error', result.error);
+    }
+    return result;
+  });
+
+  ipcMain.handle(CHANNELS.voiceSpeak, async (_event, text: string) => {
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      return { ok: false, error: 'There is nothing to say.' };
+    }
+    const result = await voice.speak(text);
+    audit.record('system', result.ok ? 'Spoke a reply' : 'Speech failed', result.ok ? 'ok' : 'error');
+    return result;
+  });
 
   /* ------------------------------- audit ----------------------------- */
 

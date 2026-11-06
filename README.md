@@ -18,9 +18,12 @@ credential storage, an agent permission model, and tests.
 - TypeScript compiles under `strict` for both the main and renderer programs.
 - The renderer builds for production.
 - The main bundle compiles to loadable CommonJS.
-- 147 unit tests pass against real logic: the DeepSeek wire protocol, SSE
-  parsing, the conversation engine, history trimming, the tool permission
-  policy, diagnostics, and the process-boundary invariants.
+- 212 tests pass against real logic: the DeepSeek wire protocol, SSE parsing,
+  the conversation engine, the agent tool loop (approval, denial, failure,
+  cancellation), the tool permission policy, diagnostics, the PNG encoder, and
+  the process-boundary invariants. Fourteen of them drive a live headless
+  Chromium against a real page, and the speech capability probe runs against
+  your actual Windows speech services.
 
 **What has not been verified in the authoring environment:** the window actually
 appearing, tray behaviour, global shortcuts, drag and edge snapping, and real
@@ -159,12 +162,39 @@ Tests cover behaviour rather than markup: real SSE chunk parsing, error mapping
 for each HTTP status, history trimming under budget, the exact rules for when a
 tool may run, and the invariants that keep the processes separated.
 
+## What Cyps can do
+
+Cyps can answer questions, look at your screen (with approval), open a small
+allowlist of applications, type into the focused window, and drive a web page in
+a controlled browser: navigate, read it, click, type, scroll, screenshot, and
+verify that an action actually worked.
+
+Every action that changes something goes through a permission prompt first, and
+Guide mode cannot run such actions at all.
+
+## Validating on Windows
+
+The desktop behaviour cannot be verified in a headless build machine. Run this on
+the machine where you installed Cyps:
+
+```powershell
+node scripts\diagnose.mjs
+powershell -ExecutionPolicy Bypass -File scripts\validate-windows.ps1 -Launch
+```
+
+The script inspects the real window (size, top-of-screen position, always-on-top,
+transparency, taskbar visibility, DPI) and writes a JSON report.
+`docs/WINDOWS-VALIDATION.md` is the full manual checklist.
+
 ## Known gaps
 
-- Voice input and text-to-speech are stubs that report themselves as
-  unavailable. They are not implemented.
-- The agent loop executes no tools yet; the registry, policy and approval flow
-  exist and are tested, and are the insertion point for Wave 1D.
+- Browser tools need `npx playwright install chromium` once per machine; until
+  then they return a capability error naming that command.
+- Typing into elevated (administrator) windows is blocked by Windows integrity
+  levels.
+- `open_application` only launches an allowlist of applications by design.
+- The audit trail is held in memory (the last 50 execution records are persisted
+  to disk, the audit log is not).
 - Cyps Code is out of scope. Only the integration seam is reserved.
 - Disk and battery readings are unavailable where WMI is blocked; the UI says
   "unavailable" rather than showing a fabricated number.

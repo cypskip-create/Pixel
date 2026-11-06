@@ -31,3 +31,7 @@ cyps.db-journal
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Local validation artifacts
+.pw-browsers/
+validation-report-*.json

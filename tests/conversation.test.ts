@@ -214,9 +214,12 @@ describe('ConversationEngine.runTurn', () => {
       },
     };
     const { engine, emitted } = makeEngine({ provider });
-    await expect(
-      engine.runTurn({ requestId: 'r6', request: baseRequest, model: 'deepseek-flash' }),
-    ).resolves.toBeUndefined();
+    const outcome = await engine.runTurn({
+      requestId: 'r6',
+      request: baseRequest,
+      model: 'deepseek-flash',
+    });
+    expect(outcome.failed).toBe(true);
 
     expect(emitted[0].type).toBe('error');
     if (emitted[0].type === 'error') expect(emitted[0].message).toMatch(/boom/);

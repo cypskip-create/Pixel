@@ -181,6 +181,111 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'browser_navigate',
+    description:
+      'Opens a web page in a controlled browser and returns what is on it. Only http and https URLs are allowed.',
+    category: 'browser',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Absolute URL, including https://' },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_inspect',
+    description:
+      'Reads the current browser page: title, URL, visible text, links, buttons and input fields.',
+    category: 'browser',
+    risk: 'safe',
+    requiresApproval: false,
+    changesState: false,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'browser_click',
+    description: 'Clicks an element on the current page, identified by a CSS selector.',
+    category: 'browser',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector, e.g. "#submit" or "text=Sign in"' },
+      },
+      required: ['selector'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_type',
+    description: 'Types text into a field on the current page, identified by a CSS selector.',
+    category: 'browser',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string' },
+        text: { type: 'string' },
+        submit: {
+          type: 'boolean',
+          description: 'Press Enter afterwards. Set true only when the user asked to submit.',
+        },
+      },
+      required: ['selector', 'text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_scroll',
+    description: 'Scrolls the current page up or down by a pixel amount.',
+    category: 'browser',
+    risk: 'low',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', description: 'Positive scrolls down, negative scrolls up.' },
+      },
+      required: ['amount'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_screenshot',
+    description: 'Takes a screenshot of the current browser page.',
+    category: 'browser',
+    risk: 'low',
+    requiresApproval: true,
+    changesState: false,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'browser_verify',
+    description:
+      'Checks whether the current page contains expected text. Use this to confirm an action actually worked.',
+    category: 'browser',
+    risk: 'safe',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        expected: { type: 'string', description: 'Text that should be present on the page.' },
+      },
+      required: ['expected'],
+      additionalProperties: false,
+    },
+  },  {
     name: 'type_text',
     description: 'Types text into the currently focused window.',
     category: 'input',
@@ -243,6 +348,11 @@ export class ToolRegistry {
 
   grant(grant: PermissionGrant): void {
     this.grants.set(grant.toolName, grant);
+  }
+
+  /** Revoke a single tool grant. Returns true when one existed. */
+  revoke(toolName: string): boolean {
+    return this.grants.delete(toolName);
   }
 
   revokeAll(): number {
