@@ -283,3 +283,62 @@ git remote set-url origin https://github.com/<account>/<repo>.git
 
 Verify after the next push with `git-credential-manager github list`, or by
 checking the commit author and pusher on GitHub.
+
+## Installer/startup repair (branch `fix/installer-diagnostics`)
+
+Investigated with REA (see `docs/debug/REA_INTEGRATION.md`), read-only.
+
+### Verified root causes
+
+1. **"cannot be closed" is a misleading shared message.** In electron-builder
+   26.18.0 it is emitted from three unrelated paths (process kill, CopyFiles
+   failure, old-uninstaller failure). It is not evidence that Pixel was running.
+2. **The directory rejection was self-inflicted.** The 0.2.0 preflight lived in
+   `.onVerifyInstDir`, which MUI calls while the path is being typed; the 0.2.1
+   replacement ran in `customInit` before the page has a reliable `$INSTDIR`.
+   Both rejected directories Windows can write to.
+3. **Portable no-window was caused by the `RunAsNode` fuse being enabled.**
+   REA `inspect_electron_fuses` on the 0.2.1 binary (`ev_1d1ce82f…`) shows
+   `RunAsNode: enabled`; with a global `ELECTRON_RUN_AS_NODE=1` the exe becomes a
+   plain Node interpreter: no Chromium, no window, no startup log.
+
+### Repairs
+
+- Removed both custom NSIS behaviours: `customCheckAppRunning` and the
+  `customInit` directory preflight. Maintained electron-builder behaviour restored;
+  `build/installer.nsh` now only cleans up legacy Cyps shortcuts/executable.
+- Added `electronFuses` disabling `runAsNode`,
+  `enableNodeOptionsEnvironmentVariable` and `enableNodeCliImportArguments`
+  (verified applied: build log runs `@electron/fuses`; the rebuilt exe no longer
+  behaves as Node under `ELECTRON_RUN_AS_NODE=1`).
+- Added `--diagnostic-window`: an ordinary opaque resizable window loading the same
+  renderer, skipping tray/shortcuts/floating window, to separate renderer faults
+  from overlay faults.
+- Kept identity: `appId` and NSIS GUID unchanged, so this upgrades in place.
+
+### Fixed during the work
+
+- YAML indentation defect (`nsis:  oneClick: false`) that broke packaging.
+- Test suites asserted the removed overrides; replaced with the restored-default
+  contract (no process override, no directory preflight, no data deletion).
+
+### Test results (this branch)
+
+| Check | Result |
+| --- | --- |
+| `tsc` main + renderer | pass |
+| `vitest` | **273 passed** (14 files) |
+| Distributions rebuilt | installer, portable, unpacked ZIP (0.2.1) |
+| Fuses applied | verified in build log + behaviour change |
+
+### Not verified (requires the laptop)
+
+Gates A–H that need a real desktop: unpacked app starting with a window,
+`--diagnostic-window` visible, floating orb visible, clean install, launch,
+reinstall, upgrade, uninstall, and data preservation. This environment cannot
+start any Chromium GUI process (`app.whenReady()` access violation), and the
+packaged exe produces no output here.
+
+Laptop sequence: `scripts\diagnose-pixel.ps1`, then
+`scripts\capture-startup.ps1` (GUI), then the installer; attach the report if it
+fails. `docs/debug/PIXEL_STARTUP_DIAGNOSTICS.md` lists every gate and its status.
