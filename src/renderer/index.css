@@ -1,0 +1,406 @@
+@import "tailwindcss";
+
+/*
+ * Cyps renderer stylesheet.
+ *
+ * The Electron window is frameless and transparent. The page must therefore be
+ * truly transparent — the floating orb is the only thing on screen. Everything
+ * below the "design tokens" block exists to support that one rule.
+ */
+
+@custom-variant motion-ok (&:where(:not(.reduce-motion), :not(.reduce-motion *)));
+
+/* ------------------------------------------------------------------ *
+ * Design tokens
+ * ------------------------------------------------------------------ */
+
+@theme {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
+    "Inter", "Helvetica Neue", Arial, sans-serif;
+
+  /* Glass surfaces. Translucent enough to read as "floating", solid enough
+     to stay legible over bright wallpapers. */
+  --color-glass: rgb(13 17 28 / 0.88);
+  --color-glass-raised: rgb(22 28 43 / 0.95);
+  --color-glass-border: rgb(255 255 255 / 0.1);
+  --color-glass-border-strong: rgb(255 255 255 / 0.18);
+
+  --color-ink: #e9edf7;
+  --color-ink-soft: #b9c2d6;
+  --color-ink-dim: #8a94ab;
+
+  /* Assistant-state accents. Each state also has a distinct SHAPE and
+     MOTION — colour is never the only signal. */
+  --color-state-idle: #8ea3c4;
+  --color-state-listening: #22d3ee;
+  --color-state-thinking: #a78bfa;
+  --color-state-speaking: #38bdf8;
+  --color-state-working: #fbbf24;
+  --color-state-success: #34d399;
+  --color-state-error: #fb7185;
+  --color-state-paused: #94a3b8;
+}
+
+/* Light theme overrides, applied when the app (or the OS) asks for light. */
+.theme-light {
+  --color-glass: rgb(248 250 253 / 0.9);
+  --color-glass-raised: rgb(255 255 255 / 0.97);
+  --color-glass-border: rgb(15 23 42 / 0.12);
+  --color-glass-border-strong: rgb(15 23 42 / 0.22);
+  --color-ink: #0f172a;
+  --color-ink-soft: #334155;
+  --color-ink-dim: #5b6779;
+}
+
+/* ------------------------------------------------------------------ *
+ * Base
+ * ------------------------------------------------------------------ */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --cyps-radius: 22px;
+    --cyps-duration-fast: 120ms;
+    --cyps-duration: 220ms;
+    --cyps-duration-slow: 460ms;
+  }
+
+  .theme-light {
+    color-scheme: light;
+  }
+
+  /* Reduced motion: kill durations AND, where relevant, iterations. */
+  .reduce-motion {
+    --cyps-duration-fast: 0ms;
+    --cyps-duration: 0ms;
+    --cyps-duration-slow: 0ms;
+  }
+
+  html,
+  body {
+    background: transparent !important;
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    /* The window itself never scrolls; bubbles scroll internally. */
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Dragging the window must not trigger text selection. */
+    user-select: none;
+    cursor: default;
+  }
+
+  #root {
+    height: 100%;
+    background: transparent;
+  }
+
+  /* Text that users may want to copy opts back in. */
+  .selectable {
+    user-select: text;
+    cursor: text;
+  }
+
+  /* A visible, high-contrast focus ring on every interactive element. This is
+     a product requirement, so it is global rather than opt-in. */
+  :where(button, [href], input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid #7dd3fc;
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+
+  ::selection {
+    background: rgb(56 189 248 / 0.35);
+    color: #fff;
+  }
+
+  /* Thin scrollbars that suit the glass aesthetic. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.45) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(148 163 184 / 0.4);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Utilities
+ * ------------------------------------------------------------------ */
+
+@utility glass {
+  background: var(--color-glass);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--color-glass-border);
+  box-shadow:
+    0 18px 44px -12px rgb(0 0 0 / 0.6),
+    0 4px 14px -6px rgb(0 0 0 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.07);
+}
+
+@utility glass-raised {
+  background: var(--color-glass-raised);
+  backdrop-filter: blur(26px) saturate(160%);
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  border: 1px solid var(--color-glass-border-strong);
+  box-shadow:
+    0 26px 60px -16px rgb(0 0 0 / 0.7),
+    0 8px 20px -8px rgb(0 0 0 / 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 0.09);
+}
+
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
+
+@utility drag {
+  -webkit-app-region: drag;
+}
+
+/* Hairline divider that adapts to the theme. */
+@utility hairline {
+  border-color: var(--color-glass-border);
+}
+
+/* ------------------------------------------------------------------ *
+ * Motion — all non-essential animation lives behind .motion-ok so a single
+ * class on <html> disables it (see useMotion).
+ * ------------------------------------------------------------------ */
+
+@keyframes cyps-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes cyps-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cyps-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cyps-orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.045);
+  }
+}
+
+@keyframes cyps-orb-pulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+@keyframes cyps-orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cyps-orb-jitter {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-1.5px) rotate(-2deg);
+  }
+  40% {
+    transform: translateX(1.5px) rotate(2deg);
+  }
+  60% {
+    transform: translateX(-1px);
+  }
+  80% {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes cyps-orb-sheen {
+  0% {
+    transform: translateY(-120%);
+  }
+  100% {
+    transform: translateY(140%);
+  }
+}
+
+@keyframes cyps-orb-tumble {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(180deg);
+  }
+}
+
+@keyframes cyps-caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0.15;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes cyps-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.motion-ok {
+  animation-fill-mode: both;
+}
+
+/* Orb motion, keyed by state. Kept in CSS so the Avatar stays declarative. */
+.orb-breathe {
+  animation: cyps-orb-breathe 3.4s ease-in-out infinite;
+}
+.orb-pulse {
+  animation: cyps-orb-pulse 1.5s ease-out infinite;
+}
+.orb-spin {
+  animation: cyps-orb-spin 2.4s linear infinite;
+}
+.orb-jitter {
+  animation: cyps-orb-jitter 340ms ease-in-out infinite;
+}
+.orb-sheen {
+  animation: cyps-orb-sheen 2.2s ease-in-out infinite;
+}
+.orb-tumble {
+  animation: cyps-orb-tumble 2.8s ease-in-out infinite alternate;
+}
+
+.animate-pop {
+  animation: cyps-pop var(--cyps-duration) cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-fade {
+  animation: cyps-fade var(--cyps-duration-fast) ease-out;
+}
+.animate-slide-down {
+  animation: cyps-slide-down var(--cyps-duration) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Streaming caret: a blinking block after the newest text. */
+.stream-caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 2px;
+  background: currentColor;
+  animation: cyps-caret 1.1s steps(1, end) infinite;
+  opacity: 0.6;
+}
+
+/* "Thinking…" shimmer text. */
+.shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-ink-dim) 0%,
+    var(--color-ink) 45%,
+    var(--color-ink-dim) 90%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: cyps-shimmer 2.4s linear infinite;
+}
+
+/* When motion is reduced: no animation, no transitions, no caret blink. */
+.reduce-motion,
+.reduce-motion * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+.reduce-motion .stream-caret::after,
+.reduce-motion .shimmer-text {
+  animation: none !important;
+}
+.reduce-motion .shimmer-text {
+  background: none;
+  color: var(--color-ink);
+}
+
+/* The OS-level preference is honoured even when app settings say otherwise. */
+@media (prefers-reduced-motion: reduce) {
+  .orb-breathe,
+  .orb-pulse,
+  .orb-spin,
+  .orb-jitter,
+  .orb-sheen,
+  .orb-tumble,
+  .animate-pop,
+  .animate-fade,
+  .animate-slide-down,
+  .shimmer-text,
+  .stream-caret::after {
+    animation: none !important;
+  }
+  .shimmer-text {
+    background: none;
+    color: var(--color-ink);
+  }
+}

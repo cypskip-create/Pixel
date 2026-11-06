@@ -1,0 +1,53 @@
+# electron-builder configuration for Cyps.
+#
+# Cyps is a small tray-resident companion, so the installer is a standard
+# per-user NSIS install with no admin prompt and no background services.
+
+appId: com.cyps.companion
+productName: Cyps
+copyright: Copyright (c) 2026 Cyps
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the compiled output ships. Source, tests and tooling stay out of the
+# installed application.
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+# The main process bundle lives at dist/main/main/main.js and declares
+# "type": "commonjs" for the compiled tree.
+extraMetadata:
+  main: dist/main/main/main.js
+
+asar: true
+compression: normal
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # No code signing certificate is configured; signing is the distributor's
+  # responsibility and must not be faked.
+  signAndEditExecutable: true
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Cyps
+  # A per-user install needs no elevation, which keeps the "no admin prompt"
+  # promise honest.
+  artifactName: 'Cyps-Setup-${version}.${ext}'
+  deleteAppDataOnUninstall: false
+
+# Nothing is published automatically.
+publish: null
