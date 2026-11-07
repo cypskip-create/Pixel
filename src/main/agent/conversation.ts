@@ -74,6 +74,8 @@ export interface ConversationDeps {
   emit: (event: StreamEvent) => void;
   /** Optional tool schemas for the current mode. */
   toolsFor?: (mode: ChatRequest['mode']) => ToolDefinition[];
+  /** Retrieves a bounded, provenance-labelled memory block for the current turn. */
+  memoryContextFor?: (request: ChatRequest) => string;
 }
 
 export interface RunTurnOptions {
@@ -106,6 +108,8 @@ export interface TurnOutcome {
 export class ConversationEngine {
   private controller: AbortController | null = null;
   private running = false;
+  /** Avoid repeating retrieval when the agent reuses its evolving message list. */
+  private readonly memoryPrepared = new WeakSet<ChatMessage[]>();
 
   constructor(private readonly deps: ConversationDeps) {}
 
@@ -165,6 +169,7 @@ export class ConversationEngine {
       const images = request.images ?? [];
       const model = resolveModel(options.model, images.length > 0);
       const messages = options.messages ?? buildMessages(request);
+      this.addMemoryContext(messages, request);
       const tools = this.deps.toolsFor?.(request.mode);
 
       // done is held back until we know whether the turn produced tool calls.
@@ -214,6 +219,27 @@ export class ConversationEngine {
     } finally {
       this.running = false;
       if (this.controller === controller) this.controller = null;
+    }
+  }
+
+  /**
+   * Add retrieved memory to the trusted system message, once per conversation
+   * message list. The callback is best-effort: a storage/search failure must not
+   * prevent the user from having an ordinary conversation.
+   */
+  private addMemoryContext(messages: ChatMessage[], request: ChatRequest): void {
+    const retrieve = this.deps.memoryContextFor;
+    if (!retrieve || this.memoryPrepared.has(messages)) return;
+
+    this.memoryPrepared.add(messages);
+    const system = messages.find((message) => message.role === 'system');
+    if (!system) return;
+
+    try {
+      const context = retrieve(request).trim();
+      if (context.length > 0) system.content = `${system.content}\n\n${context}`;
+    } catch {
+      // Memory is an enhancement, not a dependency for answering the user.
     }
   }
 }

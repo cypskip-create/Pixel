@@ -38,6 +38,7 @@ import { ToolExecutors } from './agent/executors';
 import { BrowserSession } from './agent/browser';
 import { openDatabase } from './data/database';
 import { boot } from './startup/boot';
+import { selectMemoryContext } from './memory/context';
 import { MemoryStore } from './memory/store';
 import { MemoryTools, MEMORY_TOOL_DEFINITIONS } from './memory/toolset';
 import { DocumentIndex } from './documents/indexer';
@@ -144,6 +145,11 @@ export function registerIpcHandlers(context: IpcContext): {
     isStopped: (): boolean => emergency.isStopped(),
     emit: (event: StreamEvent) => context.sendToRenderer(CHANNELS.chatStream, event),
     toolsFor: (mode) => toolRegistry.schemasFor(mode),
+    memoryContextFor: (request) =>
+      selectMemoryContext(memoryStore, {
+        projectId: projectId(),
+        text: request.text,
+      }).text,
   });
 
   const emergency: EmergencyController = new EmergencyController({
