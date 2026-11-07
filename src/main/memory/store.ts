@@ -43,6 +43,7 @@ interface MemoryRow {
 }
 
 const DAY_MS = 86_400_000;
+export const MAX_MEMORY_RESULTS = 50;
 
 export interface SaveResult {
   memory: MemoryRecord;
@@ -195,7 +196,7 @@ export class MemoryStore {
       params.push(options.kind);
     }
     sql += ' ORDER BY updated_at DESC LIMIT ?';
-    params.push(options.limit ?? 50);
+    params.push(boundedLimit(options.limit, MAX_MEMORY_RESULTS));
     return this.db.query<MemoryRow>(sql, params).map(toRecord);
   }
 
@@ -207,7 +208,7 @@ export class MemoryStore {
    * scan so short or partial user phrasing still finds the record.
    */
   search(query: MemorySearchQuery): MemorySearchHit[] {
-    const limit = Math.max(1, Math.min(query.limit ?? 10, 50));
+    const limit = boundedLimit(query.limit, 10);
     const projectIds = query.includeOtherProjects
       ? this.db.query<{ id: string }>('SELECT id FROM projects').map((row) => String(row.id))
       : [query.projectId];
@@ -333,6 +334,11 @@ export class MemoryStore {
  * Helpers
  * -------------------------------------------------------------------- */
 
+function boundedLimit(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.min(MAX_MEMORY_RESULTS, Math.max(1, Math.trunc(value)));
+}
+
 /** Collapse whitespace so trivial formatting cannot defeat duplicate detection. */
 export function normalise(content: string): string {
   return content.replace(/\s+/g, ' ').trim();
@@ -361,7 +367,10 @@ export function scoreOf(memory: MemoryRecord, rank: number | null): number {
 
   const textScore = rank === null ? RANK.substringBase : 1 / (1 + Math.max(0, rank));
   const usage = Math.min(memory.useCount, 10) * RANK.usageWeight * 0.1;
-  const ageDays = (Date.now() - memory.updatedAt) / DAY_MS;
+  // A memory recently recalled should not rank as stale just because its text
+  // was saved long ago. Edits and successful use both count as recent activity.
+  const lastActivityAt = Math.max(memory.updatedAt, memory.lastUsedAt ?? memory.updatedAt);
+  const ageDays = Math.max(0, (Date.now() - lastActivityAt) / DAY_MS);
   const recency = Math.pow(0.5, ageDays / RANK.recencyHalfLifeDays);
 
   return textScore + confidence + usage + recency * 0.5;

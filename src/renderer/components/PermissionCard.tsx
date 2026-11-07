@@ -21,7 +21,7 @@ const RISK_SENTENCE: Record<RiskLevel, string> = {
   safe: 'Read-only. Nothing on your computer changes.',
   low: 'Limited effect on this computer.',
   medium: 'This modifies something on your computer.',
-  high: 'This can change or delete important data.',
+  high: 'This can expose, change, or delete important data.',
 };
 
 /**

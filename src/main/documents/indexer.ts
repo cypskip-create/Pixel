@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import { readdirSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Database, SqlValue } from '../data/database';
 import type { PythonWorker } from '../services/python-worker';
 import type { ExtractedDocument } from '../services/python-worker';
@@ -28,6 +28,7 @@ export const CHUNK_SIZE = 1_200;
 export const CHUNK_OVERLAP = 150;
 export const MAX_FILES_PER_RUN = 500;
 export const MAX_WALK_DEPTH = 8;
+export const MAX_SEARCH_RESULTS = 20;
 
 export interface Chunk {
   ordinal: number;
@@ -116,34 +117,56 @@ export interface DirectoryEntry {
  * Deterministic order, bounded depth, skip hidden and node_modules-style trees so a
  * careless selection cannot turn into indexing the whole profile.
  */
+interface DiscoveryResult {
+  entries: DirectoryEntry[];
+  /** False when a read error or traversal bound means the listing may be partial. */
+  complete: boolean;
+}
+
 export function discoverDocuments(
   root: string,
   options: { maxFiles?: number; maxDepth?: number; maxBytes?: number } = {},
 ): DirectoryEntry[] {
+  return discoverDocumentsWithStatus(root, options).entries;
+}
+
+function discoverDocumentsWithStatus(
+  root: string,
+  options: { maxFiles?: number; maxDepth?: number; maxBytes?: number } = {},
+): DiscoveryResult {
   const maxFiles = options.maxFiles ?? MAX_FILES_PER_RUN;
   const maxDepth = options.maxDepth ?? MAX_WALK_DEPTH;
   const maxBytes = options.maxBytes ?? 32 * 1024 * 1024;
   const skip = new Set(['node_modules', '.git', '.cache', '__pycache__', 'dist', 'build']);
 
   const results: DirectoryEntry[] = [];
+  let complete = true;
 
   const walk = (dir: string, depth: number): void => {
-    if (depth > maxDepth || results.length >= maxFiles) return;
+    if (depth > maxDepth || results.length >= maxFiles) {
+      complete = false;
+      return;
+    }
     let entries: string[];
     try {
       entries = readdirSync(dir);
     } catch {
+      complete = false;
       return;
     }
 
     for (const entry of entries.sort()) {
-      if (results.length >= maxFiles) return;
+      if (results.length >= maxFiles) {
+        complete = false;
+        return;
+      }
       if (entry.startsWith('.')) continue;
       const full = join(dir, entry);
       let stats;
       try {
         stats = statSync(full);
       } catch {
+        complete = false;
         continue;
       }
       if (stats.isDirectory()) {
@@ -164,7 +187,7 @@ export function discoverDocuments(
   };
 
   walk(resolve(root), 0);
-  return results;
+  return { entries: results, complete };
 }
 
 export interface IndexProgress {
@@ -181,6 +204,8 @@ export interface IndexResult {
   skipped: number;
   failed: number;
   errors: Array<{ path: string; message: string }>;
+  /** Existing entries were retained because the scan was partial or cancelled. */
+  cleanupSkipped: boolean;
 }
 
 export class DocumentIndex {
@@ -201,7 +226,9 @@ export class DocumentIndex {
       signal?: AbortSignal;
     } = {},
   ): Promise<IndexResult> {
-    const entries = discoverDocuments(directory);
+    const root = resolve(directory);
+    const discovery = discoverDocumentsWithStatus(root);
+    const entries = discovery.entries;
     const progress: IndexProgress = {
       total: entries.length,
       done: 0,
@@ -258,8 +285,15 @@ export class DocumentIndex {
       options.onProgress?.({ ...progress });
     }
 
-    this.removeMissing(projectId, seen);
-    return { indexed: progress.indexed, skipped: progress.skipped, failed: progress.failed, errors };
+    const cleanupSkipped = !discovery.complete || Boolean(options.signal?.aborted);
+    if (!cleanupSkipped) this.removeMissing(projectId, seen, root);
+    return {
+      indexed: progress.indexed,
+      skipped: progress.skipped,
+      failed: progress.failed,
+      errors,
+      cleanupSkipped,
+    };
   }
 
   /** Store one already-extracted document, replacing any previous version. */
@@ -310,18 +344,19 @@ export class DocumentIndex {
     });
   }
 
-  /** Remove index entries for files that no longer exist. Returns the count. */
-  removeMissing(projectId: string, seen: Set<string>): number {
+  /** Remove missing entries only beneath the root that was just scanned. */
+  removeMissing(projectId: string, seen: Set<string>, rootDirectory: string): number {
+    const root = resolve(rootDirectory);
     const rows = this.db.query<{ id: string; path: string }>(
       'SELECT id, path FROM documents WHERE project_id = ?',
       [projectId],
     );
     let removed = 0;
     for (const row of rows) {
-      if (!seen.has(String(row.path))) {
-        this.db.execute('DELETE FROM documents WHERE id = ?', [String(row.id)]);
-        removed += 1;
-      }
+      const path = resolve(String(row.path));
+      if (!isPathWithin(root, path) || seen.has(path)) continue;
+      this.db.execute('DELETE FROM documents WHERE id = ?', [String(row.id)]);
+      removed += 1;
     }
     return removed;
   }
@@ -341,6 +376,8 @@ export class DocumentIndex {
   }> {
     const match = toMatchQuery(query);
     if (match.length === 0) return [];
+    const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 8;
+    const safeLimit = Math.min(MAX_SEARCH_RESULTS, Math.max(1, requestedLimit));
 
     const params: SqlValue[] = [match, projectId];
     try {
@@ -358,7 +395,7 @@ export class DocumentIndex {
            JOIN documents d ON d.id = c.document_id
           WHERE chunks_fts MATCH ? AND d.project_id = ?
           ORDER BY rank LIMIT ?`,
-        [...params, limit],
+        [...params, safeLimit],
       );
 
       return rows.map((row) => ({
@@ -436,6 +473,16 @@ export class DocumentIndex {
     );
   }
 
+}
+
+function isPathWithin(root: string, candidate: string): boolean {
+  const fromRoot = relative(root, candidate);
+  return (
+    fromRoot.length > 0 &&
+    fromRoot !== '..' &&
+    !fromRoot.startsWith(`..${sep}`) &&
+    !isAbsolute(fromRoot)
+  );
 }
 
 function titleOf(path: string): string {

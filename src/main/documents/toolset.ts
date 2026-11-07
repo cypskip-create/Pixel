@@ -38,8 +38,8 @@ export const DOCUMENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string' },
-        limit: { type: 'number' },
+        query: { type: 'string', maxLength: 500 },
+        limit: { type: 'integer', minimum: 1, maximum: 20 },
       },
       required: ['query'],
       additionalProperties: false,
@@ -116,6 +116,9 @@ export class DocumentTools {
     const summary = [
       `Indexed ${String(result.indexed)} document(s) from ${directory}.`,
       `${String(result.skipped)} unchanged, ${String(result.failed)} failed.`,
+      ...(result.cleanupSkipped
+        ? ['Existing index entries were kept because the folder scan was incomplete or cancelled.']
+        : []),
       `This project now holds ${String(stats.documents)} document(s) and ${String(stats.chunks)} searchable passages.`,
     ];
     if (result.errors.length > 0) {
@@ -138,6 +141,9 @@ export class DocumentTools {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (query.length === 0) {
       return { ok: false, content: 'A search query is required.', errorCode: 'FAILED' };
+    }
+    if (query.length > 500) {
+      return { ok: false, content: 'A document search query must be 500 characters or fewer.', errorCode: 'FAILED' };
     }
     const limit = typeof args.limit === 'number' ? args.limit : 8;
     const hits = this.index.search(this.resolveProject(), query, limit);

@@ -368,3 +368,20 @@ packaged exe produces no output here.
 Laptop sequence: `scripts\diagnose-pixel.ps1`, then
 `scripts\capture-startup.ps1` (GUI), then the installer; attach the report if it
 fails. `docs/debug/PIXEL_STARTUP_DIAGNOSTICS.md` lists every gate and its status.
+
+## Companion milestone comparison (2026-11-07)
+
+- Added `docs/research/CLICKY_TO_PIXEL_ARCHITECTURE.md`, comparing public Clicky
+  implementations with Pixel across overlays, cursor following, multi-monitor
+  behavior, click-through, state, capture, UI detection, pointing, voice,
+  transient visibility, and lifecycle. No Clicky code was copied.
+- `npm run verify`: typecheck passed, **439 tests across 19 files** passed
+  (including 22 Chromium-backed browser tests), production build passed, and
+  icon generation passed. Chromium was already cached; no download was needed.
+- These are code/test/build results only. Windows GUI, unpacked launch, portable
+  executable, NSIS installation/upgrades and installer repair remain unverified.
+- The branch was `feature/pixel-companion-experience` at initial inspection and
+  read as `main` at final status check. No branch switch was issued here; preserve
+  and inspect existing uncommitted file/memory/document work before committing.
+- No companion or safety code was changed in this pass; recommendations in the
+  comparison are not completed acceptance criteria.
