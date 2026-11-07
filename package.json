@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "pack": "npm run build && electron-builder --win --dir",
     "dist": "npm run build && electron-builder --win",
-    "diagnose:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-installer.ps1"
+    "diagnose:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-installer.ps1",
+    "repair:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/repair-install-state.ps1"
   },
   "dependencies": {
     "playwright": "^1.65.0"

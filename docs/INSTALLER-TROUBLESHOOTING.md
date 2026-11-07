@@ -1,4 +1,65 @@
-# Installer troubleshooting: "Pixel cannot be closed"
+# Installer troubleshooting
+
+## Round 3: a stale earlier install breaks every later install (current)
+
+Two screenshots from version 0.2.1 on the real laptop:
+
+1. `Pixel cannot be closed. Please close it manually and click Retry` - at roughly
+   70% progress, with no Pixel process running.
+2. `Error opening file for writing: ...\Programs\Pixel\Uninstall Pixel.exe`.
+
+### Root cause (verified in electron-builder 26.18.0 templates)
+
+On every install the NSIS template runs `uninstallOldVersion`
+(`templates/nsis/include/installUtil.nsh`). It:
+
+- reads the previous install location and `UninstallString` from the **registry**
+  (`HKCU\Software\<GUID>` and `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<GUID>`),
+  **not** from the folder chosen in the wizard;
+- copies the old uninstaller to a temp file and runs it silently with `_?=<old dir>`;
+- retries up to five times if the exit code is non-zero, then shows the
+  "cannot be closed" box (path #3 in the table below).
+
+So when a half-finished earlier install left its registration behind, the old
+uninstaller fails (a locked file, an antivirus scan, a missing file) and **every**
+later install fails the same way. That is why changing the install folder made no
+difference, and why no Pixel process was visible. The second screenshot is the
+same family: something still has `Uninstall Pixel.exe` open when the new installer
+tries to overwrite it - typically a leftover uninstaller/setup process from an
+earlier attempt, or a scan of the freshly written file.
+
+This is an inference from the code and the two screenshots, not a reproduction.
+`scripts/repair-install-state.ps1` exists to turn it into a measured fact.
+
+### Fix
+
+```powershell
+npm run repair:install              # read-only report
+npm run repair:install -- -Apply    # clean up after typing YES
+```
+
+The report lists leftover processes, the registered uninstaller, which process
+holds files in the install folder (Windows Restart Manager), and the Windows
+protections that matter for an unsigned app (Smart App Control, Controlled Folder
+Access, Defender detections, Code Integrity blocks).
+
+`-Apply` stops only your own Pixel/Cyps installer processes, backs up the two
+registry keys to a `.reg` file, **renames** the install folder to
+`Pixel.stale-<timestamp>`, and removes the two keys. It never touches
+`%APPDATA%\Pixel`, `%APPDATA%\Cyps` or `%LOCALAPPDATA%\Pixel`.
+
+### Personal use
+
+Pixel is built for one machine. Code signing is out of scope. The one thing that
+can still matter is **Windows 11 Smart App Control**: when it is enforcing it can
+refuse an unsigned `Pixel.exe` with no "Run anyway" option, which would look like
+"no window, no log". The report prints its state. Running from source
+(`npm run build` then `npx electron .`) uses Electron's own binary and avoids
+the installer entirely.
+
+---
+
+# Earlier rounds: "Pixel cannot be closed"
 
 ## The symptom
 

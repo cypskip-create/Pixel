@@ -195,7 +195,10 @@ export async function start(): Promise<void> {
 
   // Capture is authorized per explicit UI action only.
   let captureAuthorized = false;
-  const captures = new ScreenCapture({ isAuthorized: () => captureAuthorized });
+  const captures = new ScreenCapture({
+    isAuthorized: () => captureAuthorized,
+    ownSourceIds: () => BrowserWindow.getAllWindows().map((w) => w.getMediaSourceId()),
+  });
   void captureAuthorized;
 
   const provider = new RuntimeProvider(() => store.getApiKey());

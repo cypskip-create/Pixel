@@ -55,6 +55,26 @@ export const APPLICATION_ALLOWLIST: Record<string, string> = {
   'visual studio code': 'code.cmd',
 };
 
+/**
+ * Escape text for WScript.Shell.SendKeys.
+ *
+ * SendKeys is a mini-language, not a text API: + ^ % ~ ( ) { } [ ] are control
+ * characters. Typing "50% off (today)" unescaped sends Alt+<keys>, and a
+ * model-supplied "%{F4}" would close the focused window. Every metacharacter is
+ * wrapped in braces so it is typed literally, and line breaks become Enter.
+ */
+export function escapeSendKeys(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    if ('+^%~(){}[]'.includes(ch)) out += `{${ch}}`;
+    else if (ch === '\r') continue;
+    else if (ch === '\n') out += '{ENTER}';
+    else if (ch === '\t') out += '{TAB}';
+    else out += ch;
+  }
+  return out;
+}
+
 /** Per-tool wall clock limit. */
 export const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 
@@ -63,7 +83,7 @@ export interface ExecutorDeps {
    * Capture access. Only called for `analyze_screen`, and only after the
    * permission flow has approved that specific call.
    */
-  captureDisplay?: () => Promise<ImageAttachment | null>;
+  captureDisplay?: (target: 'active_window' | 'display') => Promise<ImageAttachment | null>;
   /** Vision analysis of a captured image. */
   describeImage?: (image: ImageAttachment, question: string) => Promise<string>;
   /** Shared browser session, created lazily on first use. */
@@ -215,7 +235,7 @@ export class ToolExecutors {
       };
     }
 
-    const image = await this.deps.captureDisplay();
+    const image = await this.deps.captureDisplay(target);
     if (!image) {
       return { ok: false, content: 'The screen could not be captured.', errorCode: 'FAILED' };
     }
@@ -309,7 +329,7 @@ export class ToolExecutors {
     const result = await this.runChild(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { ...process.env, CYPS_TYPE_TEXT: text },
+      { ...process.env, CYPS_TYPE_TEXT: escapeSendKeys(text) },
     );
 
     if (!result.ok) {

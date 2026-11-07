@@ -11,7 +11,33 @@ On-device GUI verification is still outstanding and is the gate for Wave 3.
 Waves 1A-1D are preserved: floating shell, DeepSeek streaming, agent tool loop,
 browser automation, voice, and the security model are unchanged.
 
-## Round 2: preflight rejection and silent startup (latest)
+## Round 3: stale install state, agent-path bugs, repo hygiene (latest)
+
+Reported: installer still failed on 0.2.1 ("cannot be closed", then "Error opening
+file for writing ... Uninstall Pixel.exe"). Root cause found in the electron-builder
+templates: the upgrade path runs the *registered* old uninstaller and ignores the
+chosen folder - see `docs/INSTALLER-TROUBLESHOOTING.md` (Round 3).
+
+- `scripts/repair-install-state.ps1` (PowerShell + a C# Restart Manager call):
+  read-only report by default; `-Apply` does a backed-up, user-approved cleanup of
+  installer state only. **Not yet run on Windows.**
+- **Agent path never sent the system prompt** and never bounded context. Fixed:
+  `buildAgentMessages`, `clipToolResult` (12k chars per tool result).
+- `type_text` fed text to `SendKeys` unescaped (`% ^ + ~ ( ) { } [ ]` are key
+  commands). Fixed: `escapeSendKeys`.
+- High-risk tools can no longer hold a session/always grant; they ask every time.
+- `analyze_screen` now honours `target`; active-window capture skips Pixel's own windows.
+- Browser refuses localhost, LAN, link-local and cloud-metadata hosts by default.
+- The mode is now taken from main-process settings, not from the renderer request.
+- `.gitignore` `data/` -> `/data/`. It had been excluding `src/main/data/`
+  (`database.ts`, `migrations.ts`), so a fresh clone could not compile.
+
+Known gaps left open: tool timeouts do not cancel the underlying work; approvals
+are not scoped to a domain/app; DNS-rebinding is not covered by the host check;
+the browser tests that need Chromium could not run in the build sandbox.
+
+## Round 2: preflight rejection and silent startup
+
 
 Two defects were reported from the laptop. Both are fixed; the second is
 diagnosable now even where it cannot be reproduced.

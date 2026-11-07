@@ -209,8 +209,11 @@ export function registerIpcHandlers(context: IpcContext): {
     browser,
     memory: memoryTools,
     documents: documentTools,
-    captureDisplay: async () => {
-      const result = await captures.captureDisplay();
+    captureDisplay: async (target) => {
+      const result =
+        target === 'active_window'
+          ? await captures.captureActiveWindow()
+          : await captures.captureDisplay();
       return result.ok && result.image ? result.image : null;
     },
     describeImage,
@@ -333,9 +336,16 @@ export function registerIpcHandlers(context: IpcContext): {
 
     // Fire and forget: progress arrives via chat:stream. The handler returns
     // the id immediately so the UI can pair events with this request.
+    // The operating mode is owned by the main process. The renderer's copy is
+    // advisory: trusting it would let a compromised renderer claim Agent mode.
+    const trustedRequest: ChatRequest = { ...request, mode: current.companion.mode };
+    if (request.mode !== current.companion.mode) {
+      audit.record('system', 'Ignored renderer-supplied mode', 'denied', `${String(request.mode)} -> ${current.companion.mode}`);
+    }
+
     void agent.run({
       requestId,
-      request,
+      request: trustedRequest,
       model: current.provider.primaryModel,
       thinking: current.provider.thinking ?? DEFAULT_THINKING,
       temperature: current.provider.temperature,

@@ -262,6 +262,30 @@ export function buildMessages(request: ChatRequest): ChatMessage[] {
   return trimHistory([system, ...history, user], HISTORY_TOKEN_BUDGET);
 }
 
+/**
+ * Build the opening message list for an agent run: system prompt, trimmed prior
+ * history, and the new user turn.
+ *
+ * The agent loop assembles its own messages across tool steps, so it cannot use
+ * the engine's fallback `buildMessages`. Before this helper existed the loop
+ * started with no system message at all, which silently dropped Pixel's identity
+ * and its rule about treating web/screen content as untrusted. Routing the
+ * agent through the same builder keeps one definition of "the prompt".
+ */
+export function buildAgentMessages(request: ChatRequest): ChatMessage[] {
+  return buildMessages(request);
+}
+
+/** Longest tool result fed back to the model verbatim. */
+export const MAX_TOOL_RESULT_CHARS = 12_000;
+
+/** Clip a tool result so one huge page or file cannot exhaust the context window. */
+export function clipToolResult(text: string, maxChars: number = MAX_TOOL_RESULT_CHARS): string {
+  if (text.length <= maxChars) return text;
+  const omitted = text.length - maxChars;
+  return `${text.slice(0, maxChars)}\n[Pixel clipped this result: ${omitted} more characters were omitted.]`;
+}
+
 /** Build a well-formed error event. */
 export function errorEvent(
   requestId: string,

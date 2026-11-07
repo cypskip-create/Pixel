@@ -34,7 +34,7 @@ import type {
 } from '../../shared/types';
 import { getModeDescriptor } from '../../shared/types';
 import type { TurnOutcome } from './conversation';
-import { errorEvent } from './conversation';
+import { buildAgentMessages, clipToolResult, errorEvent } from './conversation';
 import type { RunTurnOptions } from './conversation';
 import type { ToolResult } from './executors';
 import type { AuditLog, PermissionBroker, TaskManager } from './runtime';
@@ -157,20 +157,10 @@ export class AgentExecutor {
     tasks.upsert(task);
     audit.record('model', 'Agent run started', 'ok', request.text.slice(0, 120));
 
-    // The conversation the shell already has, trimmed once up front so the
-    // per-step messages stay intact (tool calls and results must stay paired).
-    const messages: ChatMessage[] = [];
-    for (const prior of request.history ?? []) {
-      if (prior.role === 'system') continue;
-      messages.push(prior);
-    }
-    messages.push({
-      id: `u_${startedAt.toString(36)}`,
-      role: 'user',
-      content: request.text,
-      createdAt: startedAt,
-      ...(request.images?.length ? { images: request.images } : {}),
-    });
+    // System prompt + trimmed history + the new user turn. Per-step tool
+    // messages are appended below; they stay paired with their tool calls and
+    // each result is clipped so one large page cannot blow the context window.
+    const messages: ChatMessage[] = buildAgentMessages(request);
 
     let finalContent = '';
     let stepIndex = 0;
@@ -293,7 +283,7 @@ export class AgentExecutor {
     const toolMessage = (content: string): ChatMessage => ({
       id: `${call.id}_result`,
       role: 'tool',
-      content,
+      content: clipToolResult(content),
       toolCallId: call.id,
       createdAt: Date.now(),
     });

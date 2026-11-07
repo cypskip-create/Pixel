@@ -106,7 +106,7 @@ live('browser automation (live chromium)', () => {
   let session: BrowserSession;
 
   beforeAll(async () => {
-    session = new BrowserSession({ headless: true, viewport: { width: 900, height: 700 } });
+    session = new BrowserSession({ headless: true, allowPrivateNetwork: true, viewport: { width: 900, height: 700 } });
     await session.navigate(baseUrl);
   });
 
@@ -182,7 +182,7 @@ live('browser tools through ToolExecutors', () => {
   const registry = new ToolRegistry();
 
   beforeAll(async () => {
-    session = new BrowserSession({ headless: true });
+    session = new BrowserSession({ headless: true, allowPrivateNetwork: true });
     executors = new ToolExecutors({ browser: session });
   });
 

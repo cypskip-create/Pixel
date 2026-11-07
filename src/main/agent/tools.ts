@@ -347,6 +347,14 @@ export class ToolRegistry {
   }
 
   grant(grant: PermissionGrant): void {
+    // A grant is keyed by tool name, not by arguments. For a high-risk tool such
+    // as type_text, a standing grant would approve any text into any window, so
+    // high-risk tools are always downgraded to single use and re-asked each time.
+    const tool = this.tools.get(grant.toolName);
+    if (tool?.risk === 'high' && grant.scope !== 'once') {
+      this.grants.set(grant.toolName, { ...grant, scope: 'once', expiresAt: undefined });
+      return;
+    }
     this.grants.set(grant.toolName, grant);
   }
 

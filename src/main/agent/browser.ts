@@ -67,6 +67,12 @@ interface PlaywrightBrowser {
 export interface BrowserOptions {
   /** Headed browsers need a desktop session; Pixel defaults to headless. */
   headless?: boolean;
+  /**
+   * Allow localhost, LAN and link-local addresses. Off in the app: a page the
+   * model was steered to (prompt injection) must not be able to probe the user's
+   * router, NAS or cloud-metadata endpoint. On only for local tests.
+   */
+  allowPrivateNetwork?: boolean;
   /** Allow file:// URLs. Off in the app, on for local tests. */
   allowFileUrls?: boolean;
   /** Viewport for screenshots. */
@@ -85,6 +91,7 @@ export class BrowserSession {
     this.options = {
       headless: options.headless ?? true,
       allowFileUrls: options.allowFileUrls ?? false,
+      allowPrivateNetwork: options.allowPrivateNetwork ?? false,
       viewport: options.viewport ?? { width: 1280, height: 800 },
     };
   }
@@ -111,7 +118,12 @@ export class BrowserSession {
       return `"${raw}" is not a valid URL. Include the scheme, for example https://example.com.`;
     }
 
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return null;
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      if (!this.options.allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
+        return `Pixel will not open "${parsed.hostname}": it is a local or private-network address.`;
+      }
+      return null;
+    }
     if (parsed.protocol === 'file:' && this.options.allowFileUrls) return null;
 
     return `Pixel will not open ${parsed.protocol} URLs. Only http and https pages are allowed.`;
@@ -294,4 +306,39 @@ export function truncate(text: string, max: number): string {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+
+/**
+ * True for hosts that point at this machine or a private network.
+ *
+ * This inspects the hostname only. It does not resolve DNS, so a public name
+ * that resolves to a private address (DNS rebinding) is not caught here; closing
+ * that needs a network-level egress filter.
+ */
+export function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (host === '' || host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.lan')) return true;
+
+  // IPv6: loopback, unspecified, unique-local (fc00::/7), link-local (fe80::/10),
+  // and IPv4-mapped addresses, which are checked as IPv4 below.
+  if (host.includes(':')) {
+    if (host === '::1' || host === '::') return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(host)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
+    const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    return mapped ? isPrivateHost(mapped[1]) : false;
+  }
+
+  const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 0 || a === 10 || a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
 }

@@ -20,6 +20,12 @@ import type { CaptureResult, CypsErrorCode, ImageAttachment } from '../shared/ty
 export interface CaptureDeps {
   /** Must be true before any capture runs. Set only on explicit user action. */
   isAuthorized: () => boolean;
+  /**
+   * desktopCapturer media-source ids of Pixel's own windows. Active-window
+   * capture skips these so Pixel never "looks at" itself instead of the app the
+   * user is actually working in.
+   */
+  ownSourceIds?: () => string[];
 }
 
 export interface CaptureTarget {
@@ -126,9 +132,16 @@ export class ScreenCapture {
         );
       }
 
-      // desktopCapturer does not guarantee ordering; prefer a named, non-minimised
-      // source and fall back to the first entry.
-      const source = sources.find((candidate) => candidate.name.length > 0) ?? sources[0];
+      // Never capture Pixel's own overlay, settings or diagnostic windows.
+      const own = new Set(this.deps.ownSourceIds?.() ?? []);
+      const candidates = sources.filter((candidate) => !own.has(candidate.id));
+
+      // Electron does not document a guaranteed order for window sources, so
+      // this is best effort: the first named window that is not ours.
+      const source = candidates.find((candidate) => candidate.name.length > 0) ?? candidates[0];
+      if (!source) {
+        return this.fail('The only window available was Pixel itself, so nothing was captured.', 'UNKNOWN');
+      }
 
       return this.toResult(source.thumbnail, {
         label: `Window: ${source.name}`,

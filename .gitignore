@@ -20,7 +20,9 @@ secrets.json
 logs/
 *.log
 npm-debug.log*
-data/
+# Anchored to the repo root. An unanchored "data/" also ignored src/main/data/
+# (database.ts, migrations.ts), so a fresh clone could not build.
+/data/
 cyps.db
 cyps.db-journal
 
