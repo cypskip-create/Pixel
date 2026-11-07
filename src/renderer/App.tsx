@@ -9,6 +9,7 @@ import type {
   Surface,
   TaskRecord,
 } from '@shared/types';
+import { deriveAssistantState } from '@shared/companion-state';
 import { getModeDescriptor } from '@shared/types';
 import { Avatar } from '@/components/Avatar';
 import { InputBar } from '@/components/InputBar';
@@ -90,6 +91,7 @@ function Companion(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
   const mode = settings.companion.mode;
   const modeDescriptor = getModeDescriptor(mode);
@@ -365,9 +367,16 @@ function Companion(): React.JSX.Element {
 
     const shell = window.cypsShell;
     if (!shell || typeof shell.voiceSpeak !== 'function') return;
-    void shell.voiceSpeak(chat.content).then((result) => {
-      if (!result.ok && result.error) showNotice(result.error);
-    });
+    setSpeaking(true);
+    void shell
+      .voiceSpeak(chat.content)
+      .then((result) => {
+        if (!result.ok && result.error) showNotice(result.error);
+      })
+      .catch((error: unknown) => {
+        showNotice(error instanceof Error ? error.message : 'Speech playback failed.');
+      })
+      .finally(() => setSpeaking(false));
   }, [chat.streaming, chat.content, settings.companion.speakReplies, settings.voice.ttsEnabled, showNotice]);
 
   const runTaskAction = useCallback(
@@ -424,6 +433,8 @@ function Companion(): React.JSX.Element {
     hasAnswer: chat.content.length > 0,
     error: chat.error !== null || settingsError !== null,
     listening,
+    executing: hasActiveTask,
+    speaking,
   });
 
   const rootClass = reducedMotion ? 'reduce-motion' : 'motion-ok';
@@ -646,19 +657,4 @@ function Companion(): React.JSX.Element {
   );
 }
 
-/** Collapse the many signals into one of the eight documented avatar states. */
-export function deriveAssistantState(input: {
-  stopped: boolean;
-  permission: boolean;
-  streaming: boolean;
-  hasAnswer: boolean;
-  error: boolean;
-  listening: boolean;
-}): AssistantState {
-  if (input.stopped) return 'paused';
-  if (input.permission) return 'listening';
-  if (input.streaming) return input.hasAnswer ? 'speaking' : 'thinking';
-  if (input.error) return 'error';
-  if (input.listening) return 'listening';
-  return 'idle';
-}
+export { deriveAssistantState };

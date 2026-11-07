@@ -491,6 +491,12 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       const text = typeof args.text === 'string' ? args.text : '';
       return `Type ${text.length > 32 ? `${text.slice(0, 32)}...` : text}`;
     }
+    case 'file_list':
+      return `List files in ${typeof args.directory === 'string' ? args.directory : 'a folder'}`;
+    case 'file_read':
+      return `Read file ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_write':
+      return `${args.overwrite === true ? 'Replace' : 'Create'} file ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
     default:
       return name;
   }
@@ -518,6 +524,8 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'analyze_screen') return 'this screen';
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
   if (name === 'type_text') return 'the focused window';
+  if (name === 'file_list' && typeof args.directory === 'string') return args.directory;
+  if ((name === 'file_read' || name === 'file_write') && typeof args.path === 'string') return args.path;
   return 'this computer';
 }
 

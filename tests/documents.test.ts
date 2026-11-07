@@ -8,6 +8,7 @@ import {
   CHUNK_OVERLAP,
   CHUNK_SIZE,
   DocumentIndex,
+  MAX_SEARCH_RESULTS,
   chunkText,
   discoverDocuments,
   hashContent,
@@ -320,6 +321,72 @@ describe.skipIf(!availability.available)('document indexing', () => {
     const result = await index.indexDirectory(project, dir, { signal: controller.signal });
     expect(result.indexed).toBe(0);
   }, 30_000);
+});
+
+describe('document index safety', () => {
+  function setup(): { index: DocumentIndex; project: string; db: Database } {
+    const db = database();
+    const project = 'p_safety';
+    db.execute(
+      'INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+      [project, project, Date.now(), Date.now()],
+    );
+    return { index: new DocumentIndex(db, worker), project, db };
+  }
+
+  function extracted(path: string, text: string, modifiedAt = Date.now()) {
+    return {
+      path,
+      kind: 'txt',
+      sizeBytes: text.length,
+      modifiedAt,
+      text,
+      metadata: {},
+      pages: null,
+    };
+  }
+
+  it('removes missing files only in the scanned directory', async () => {
+    const { index, project } = setup();
+    const scannedRoot = tempDir();
+    const otherRoot = tempDir();
+    const missing = join(scannedRoot, 'removed.txt');
+    const retained = join(otherRoot, 'keep.txt');
+    index.storeDocument(project, extracted(missing, 'stale content'));
+    index.storeDocument(project, extracted(retained, 'other root content'));
+
+    const result = await index.indexDirectory(project, scannedRoot);
+
+    expect(result.cleanupSkipped).toBe(false);
+    expect(index.listDocuments(project).map((document) => document.path)).toEqual([retained]);
+  });
+
+  it('preserves indexed records when a folder cannot be scanned', async () => {
+    const { index, project } = setup();
+    const missingRoot = join(tempDir(), 'folder-no-longer-readable');
+    const retained = join(missingRoot, 'known.txt');
+    index.storeDocument(project, extracted(retained, 'keep this record'));
+
+    const result = await index.indexDirectory(project, missingRoot);
+
+    expect(result.cleanupSkipped).toBe(true);
+    expect(index.listDocuments(project).map((document) => document.path)).toContain(retained);
+  });
+
+  it('caps search results for invalid or excessive limits', () => {
+    const { index, project } = setup();
+    const root = tempDir();
+    for (let i = 0; i < MAX_SEARCH_RESULTS + 5; i += 1) {
+      index.storeDocument(
+        project,
+        extracted(join(root, `match-${String(i)}.txt`), 'matchingword appears here', Date.now() + i),
+      );
+    }
+
+    expect(index.search(project, 'matchingword', -1)).toHaveLength(1);
+    expect(index.search(project, 'matchingword', 10_000)).toHaveLength(MAX_SEARCH_RESULTS);
+    expect(index.search(project, 'matchingword', 1.8)).toHaveLength(1);
+  });
 });
 
 /* ------------------------------------------------------------------ *

@@ -10,6 +10,7 @@
 import type { ToolDefinition } from '../../shared/types';
 import { MEMORY_KINDS } from './types';
 import type { MemoryKind } from './types';
+import { MAX_MEMORY_RESULTS } from './store';
 import type { MemoryStore } from './store';
 
 export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
@@ -24,7 +25,7 @@ export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        content: { type: 'string', description: 'The fact to remember, in one or two sentences.' },
+        content: { type: 'string', maxLength: 4_000, description: 'The fact to remember, in one or two sentences.' },
         kind: {
           type: 'string',
           enum: [...MEMORY_KINDS],
@@ -32,7 +33,8 @@ export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         },
         tags: {
           type: 'array',
-          items: { type: 'string' },
+          items: { type: 'string', maxLength: 64 },
+          maxItems: 8,
           description: 'Short keywords to aid later retrieval.',
         },
         confidence: {
@@ -56,9 +58,9 @@ export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string' },
+        query: { type: 'string', maxLength: 500 },
         kind: { type: 'string', enum: [...MEMORY_KINDS] },
-        limit: { type: 'number' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_MEMORY_RESULTS },
       },
       required: ['query'],
       additionalProperties: false,
@@ -75,7 +77,7 @@ export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
       type: 'object',
       properties: {
         kind: { type: 'string', enum: [...MEMORY_KINDS] },
-        limit: { type: 'number' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_MEMORY_RESULTS },
       },
       additionalProperties: false,
     },
@@ -142,11 +144,14 @@ export class MemoryTools {
     if (content.length === 0) {
       return { ok: false, content: 'There is nothing to remember.', errorCode: 'FAILED' };
     }
+    if (content.length > 4_000) {
+      return { ok: false, content: 'A memory must be 4,000 characters or fewer.', errorCode: 'FAILED' };
+    }
     const kind = MEMORY_KINDS.includes(args.kind as MemoryKind)
       ? (args.kind as MemoryKind)
       : 'project';
     const tags = Array.isArray(args.tags)
-      ? args.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8)
+      ? args.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8).map((tag) => tag.trim().slice(0, 64))
       : [];
     const confidence =
       args.confidence === 'source_backed' || args.confidence === 'inferred'
@@ -179,6 +184,9 @@ export class MemoryTools {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (query.length === 0) {
       return { ok: false, content: 'A search query is required.', errorCode: 'FAILED' };
+    }
+    if (query.length > 500) {
+      return { ok: false, content: 'A memory search query must be 500 characters or fewer.', errorCode: 'FAILED' };
     }
     const kind = MEMORY_KINDS.includes(args.kind as MemoryKind)
       ? (args.kind as MemoryKind)

@@ -67,10 +67,16 @@ export const ASSISTANT_STATES = [
   'idle',
   'listening',
   'thinking',
+  'responding',
   'speaking',
-  'working',
+  'pointing',
+  'executing',
+  'waiting_for_approval',
   'success',
   'error',
+  'stopped',
+  // Legacy visual states retained for persisted settings and existing callers.
+  'working',
   'paused',
 ] as const;
 export type AssistantState = (typeof ASSISTANT_STATES)[number];

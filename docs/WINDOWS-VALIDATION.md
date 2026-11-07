@@ -7,6 +7,17 @@ real laptop, and to diagnose it if something is wrong.
 
 Run every command from the repository root.
 
+## Latest automated verification (2026-11-07)
+
+`npm run verify` passed on the current working tree: TypeScript type checks,
+439 Vitest tests across 19 files (including 22 Chromium-backed browser tests),
+production main/renderer build, and icon generation. Playwright Chromium was
+already present in the repository's `.pw-browsers` cache, so no download was
+needed. This does **not** verify Electron's Windows GUI, unpacked launch,
+portable executable, NSIS install/upgrade, mixed-DPI overlays, or data
+preservation. Those still require the real-laptop steps below; do not infer an
+installer fix from this automated run.
+
 ## 0. One-time setup
 
 ```powershell

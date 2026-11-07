@@ -375,6 +375,27 @@ describe('retrieval ranking', () => {
     const old = { ...recent, updatedAt: Date.now() - 365 * 86_400_000, useCount: 0 };
     expect(scoreOf(recent, null)).toBeGreaterThan(scoreOf(old, null));
   });
+
+  it('uses last-use time so a recently recalled old memory ranks as recent', () => {
+    const now = Date.now();
+    const dormant: MemoryRecord = {
+      id: 'dormant',
+      projectId: 'p',
+      kind: 'fact',
+      content: 'x',
+      source: 'conversation',
+      confidence: 'user_approved',
+      retention: 'permanent',
+      tags: [],
+      createdAt: now - 365 * 86_400_000,
+      updatedAt: now - 365 * 86_400_000,
+      lastUsedAt: null,
+      useCount: 3,
+      expiresAt: null,
+    };
+    const recentlyUsed = { ...dormant, id: 'recently-used', lastUsedAt: now };
+    expect(scoreOf(recentlyUsed, null)).toBeGreaterThan(scoreOf(dormant, null));
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -506,6 +527,21 @@ describe('memory tools', () => {
   it('rejects an unknown memory id on forget', () => {
     const { tools: api } = tools();
     expect(api.run('memory_forget', { id: 'nope' }).errorCode).toBe('NOT_FOUND');
+  });
+
+  it('bounds list limits even when called with hostile values', () => {
+    const { tools: api, store, project } = tools();
+    for (let index = 0; index < 55; index += 1) {
+      store.save({ projectId: project, kind: 'fact', content: `fact-${index}`, source: 'test' });
+    }
+    expect(api.run('memory_list', { limit: -1 }).detail).toMatchObject({ count: 1 });
+    expect(api.run('memory_list', { limit: 10_000 }).detail).toMatchObject({ count: 50 });
+  });
+
+  it('caps memory content and search query lengths at the tool boundary', () => {
+    const { tools: api } = tools();
+    expect(api.run('memory_save', { content: 'x'.repeat(4_001), kind: 'fact' }).ok).toBe(false);
+    expect(api.run('memory_search', { query: 'x'.repeat(501) }).ok).toBe(false);
   });
 
   it('rejects an empty save', () => {

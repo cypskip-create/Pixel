@@ -43,6 +43,7 @@ import { MemoryStore } from './memory/store';
 import { MemoryTools, MEMORY_TOOL_DEFINITIONS } from './memory/toolset';
 import { DocumentIndex } from './documents/indexer';
 import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
+import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
 import { PythonWorker } from './services/python-worker';
 import { VoiceService } from './voice/voice';
 import { VISION_MODEL } from '../shared/types';
@@ -123,11 +124,13 @@ export function registerIpcHandlers(context: IpcContext): {
   const projectId = (): string => memoryStore.getActiveProject();
   const memoryTools = new MemoryTools(memoryStore, projectId);
   const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
+  const fileTools = new FileTools();
 
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
     ...MEMORY_TOOL_DEFINITIONS,
     ...DOCUMENT_TOOL_DEFINITIONS,
+    ...FILE_TOOL_DEFINITIONS,
   ]);
   const tasks = new TaskManager((task) =>
     context.sendToRenderer(CHANNELS.tasksUpdate, task),
@@ -215,6 +218,7 @@ export function registerIpcHandlers(context: IpcContext): {
     browser,
     memory: memoryTools,
     documents: documentTools,
+    files: fileTools,
     captureDisplay: async (target) => {
       const result =
         target === 'active_window'

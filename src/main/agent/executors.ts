@@ -22,6 +22,7 @@ import type { ImageAttachment } from '../../shared/types';
 import { BrowserSession } from './browser';
 import type { MemoryTools } from '../memory/toolset';
 import type { DocumentTools } from '../documents/toolset';
+import type { FileTools } from '../files/toolset';
 
 export interface ToolResult {
   ok: boolean;
@@ -92,6 +93,8 @@ export interface ExecutorDeps {
   memory?: MemoryTools;
   /** Wave 3 document tools. */
   documents?: DocumentTools;
+  /** Bounded, user-approved local file tools. */
+  files?: FileTools;
 }
 
 export class ToolExecutors {
@@ -130,6 +133,9 @@ export class ToolExecutors {
       }
       if (this.deps.documents?.handles(name)) {
         return await this.deps.documents.run(name, args);
+      }
+      if (this.deps.files?.handles(name)) {
+        return this.deps.files.run(name, args);
       }
 
       switch (name) {
