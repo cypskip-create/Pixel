@@ -14,6 +14,9 @@
  */
 
 import type { ImageAttachment } from '../../shared/types';
+import { NetworkGuard, isPrivateHost, type HostResolver } from './netGuard';
+
+export { isPrivateHost };
 
 /** Longest a single page operation may take. */
 export const PAGE_TIMEOUT_MS = 15_000;
@@ -51,8 +54,19 @@ interface PlaywrightPage {
   setViewportSize?(size: { width: number; height: number }): Promise<void>;
 }
 
+interface PlaywrightRoute {
+  request(): { url(): string };
+  abort(errorCode?: string): Promise<void>;
+  continue(): Promise<void>;
+}
+
+interface PlaywrightResponse {
+  serverAddr?(): Promise<{ ipAddress: string; port: number } | null>;
+}
+
 interface PlaywrightContext {
   newPage(): Promise<PlaywrightPage>;
+  route(url: string, handler: (route: PlaywrightRoute) => Promise<void> | void): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -64,6 +78,7 @@ interface PlaywrightBrowser {
   close(): Promise<void>;
 }
 
+
 export interface BrowserOptions {
   /** Headed browsers need a desktop session; Pixel defaults to headless. */
   headless?: boolean;
@@ -73,6 +88,8 @@ export interface BrowserOptions {
    * router, NAS or cloud-metadata endpoint. On only for local tests.
    */
   allowPrivateNetwork?: boolean;
+  /** Override DNS resolution (tests simulate rebinding with this). */
+  resolver?: HostResolver;
   /** Allow file:// URLs. Off in the app, on for local tests. */
   allowFileUrls?: boolean;
   /** Viewport for screenshots. */
@@ -86,8 +103,15 @@ export class BrowserSession {
   private launchError: string | null = null;
   private launching: Promise<void> | null = null;
   private readonly options: BrowserOptions;
+  private readonly guard: NetworkGuard;
+  /** Why the guard last blocked a request, so navigate() can explain itself. */
+  private lastBlocked: string | null = null;
 
   constructor(options: BrowserOptions = {}) {
+    this.guard = new NetworkGuard({
+      allowPrivateNetwork: options.allowPrivateNetwork ?? false,
+      resolve: options.resolver,
+    });
     this.options = {
       headless: options.headless ?? true,
       allowFileUrls: options.allowFileUrls ?? false,
@@ -134,8 +158,33 @@ export class BrowserSession {
     const problem = this.validateUrl(url);
     if (problem) throw new Error(problem);
 
+    // Resolve the name now so a private destination is refused before any request.
+    const upfront = await this.guard.check(url);
+    if (upfront) throw new Error(upfront);
+
     const page = await this.ensurePage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS });
+    this.lastBlocked = null;
+    let response: unknown;
+    try {
+      response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS });
+    } catch (error) {
+      // A blocked redirect or subresource surfaces as a generic network error.
+      if (this.lastBlocked) throw new Error(this.lastBlocked);
+      throw error;
+    }
+
+    // The request was allowed on paper; verify where it actually went. A redirect
+    // may have landed somewhere private, or DNS may have answered differently to
+    // Chromium than it did to us. Either way the model must not see that page.
+    const landed = await this.guard.check(page.url());
+    const connected = this.guard.checkConnectedAddress(
+      (await (response as PlaywrightResponse | null)?.serverAddr?.().catch(() => null))?.ipAddress,
+    );
+    const problemAfter = landed ?? connected;
+    if (problemAfter) {
+      await page.goto('about:blank').catch(() => undefined);
+      throw new Error(problemAfter);
+    }
     // Give client-rendered pages a moment without waiting for idle network.
     await page.waitForSelector('body', { timeout: PAGE_TIMEOUT_MS }).catch(() => undefined);
     return this.snapshot();
@@ -277,10 +326,32 @@ export class BrowserSession {
 
       this.browser = await playwright.chromium.launch({
         headless: this.options.headless ?? true,
-        args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+        // Chromium's sandbox stays on for Windows. --no-sandbox exists for
+        // root-in-a-container Linux environments such as CI.
+        args: [
+          ...(process.platform === 'win32' ? [] : ['--no-sandbox']),
+          '--disable-gpu',
+          '--disable-dev-shm-usage',
+        ],
       });
       this.context = await this.browser.newContext({
         viewport: this.options.viewport ?? { width: 1280, height: 800 },
+      });
+      // Every request the page makes, including redirect hops and subresources,
+      // passes through the guard before it is sent.
+      await this.context.route('**/*', async (route) => {
+        const target = route.request().url();
+        if (target.startsWith('file:') && this.options.allowFileUrls) {
+          await route.continue();
+          return;
+        }
+        const reason = await this.guard.check(target);
+        if (reason) {
+          this.lastBlocked = reason;
+          await route.abort('blockedbyclient');
+          return;
+        }
+        await route.continue();
       });
       this.page = await this.context.newPage();
       this.launchError = null;
@@ -306,39 +377,4 @@ export function truncate(text: string, max: number): string {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-
-/**
- * True for hosts that point at this machine or a private network.
- *
- * This inspects the hostname only. It does not resolve DNS, so a public name
- * that resolves to a private address (DNS rebinding) is not caught here; closing
- * that needs a network-level egress filter.
- */
-export function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (host === '' || host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.lan')) return true;
-
-  // IPv6: loopback, unspecified, unique-local (fc00::/7), link-local (fe80::/10),
-  // and IPv4-mapped addresses, which are checked as IPv4 below.
-  if (host.includes(':')) {
-    if (host === '::1' || host === '::') return true;
-    if (/^f[cd][0-9a-f]{2}:/.test(host)) return true;
-    if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
-    const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    return mapped ? isPrivateHost(mapped[1]) : false;
-  }
-
-  const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
-  return (
-    a === 0 || a === 10 || a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127)
-  );
 }

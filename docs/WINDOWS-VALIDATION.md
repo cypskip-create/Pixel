@@ -226,3 +226,90 @@ anything from that folder.
   input injection across integrity levels.
 - Disk and battery readings are unavailable where WMI is blocked; the UI says
   "unavailable" rather than a fabricated number.
+
+---
+
+## 7. Companion-milestone validation (added in Round 4)
+
+Everything in this section is **unverified on Windows** until you run it. The logic behind it
+is unit-tested; the OS behaviour is not. Report each item as pass / fail / blocked.
+
+### 7.1 Order of operations
+
+Do these in order. Do not test the installer until the unpacked app launches.
+
+```powershell
+npm run build
+```
+
+```powershell
+npm run dist
+```
+
+```powershell
+.\release\win-unpacked\Pixel.exe --diagnostic-window
+```
+
+Then launch `.\release\win-unpacked\Pixel.exe` normally and confirm the orb appears. Only then
+try the portable build and `Pixel-Setup-*.exe`.
+
+### 7.2 Installation state (read-only first)
+
+```powershell
+npm run repair:install
+```
+
+Read the report. Only if it shows a stale registration or a lock, and you are happy with the
+plan it prints, run the modifying mode (it asks you to type YES and backs up the registry keys):
+
+```powershell
+npm run repair:install -- -Apply
+```
+
+### 7.3 Native UI Automation helper (`PixelNative.exe`)
+
+```powershell
+.\scripts\build-native.ps1
+```
+
+Smoke test. Each should print one JSON line with `"ok":true`:
+
+```powershell
+'{"id":1,"cmd":"ping","args":{}}' | .\native\bin\PixelNative.exe
+```
+
+Click into Notepad within 5 seconds of running this, then read the result:
+
+```powershell
+Start-Sleep 5; '{"id":2,"cmd":"foreground_window","args":{}}' | .\native\bin\PixelNative.exe
+```
+
+```powershell
+Start-Sleep 5; '{"id":3,"cmd":"find_elements","args":{"text":"File","maxResults":5}}' | .\native\bin\PixelNative.exe
+```
+
+Pass criteria: `foreground_window` names Notepad; `find_elements` returns the **File** menu with a
+non-empty `rect`; the rect, converted to DIP, sits on the real menu. If your display scale is
+not 100 %, check specifically that the rectangle is **not** offset or scaled wrongly. That is
+the whole point of the DPI-awareness call. This file has **not been compiled yet**: if
+`build-native.ps1` fails, send me the compiler error text.
+
+### 7.4 Checks the cursor companion will need once its window exists
+
+| # | Check | Pass when |
+|---|---|---|
+| 1 | Passive overlay is click-through | You can click and type in the app underneath |
+| 2 | Overlay never takes focus | The window you were typing in stays active |
+| 3 | Mixed-DPI move | Companion glides across monitors with no jump or resize |
+| 4 | Monitor unplugged | Orb reappears on a remaining monitor (see `ensureVisible`) |
+| 5 | Full-screen video / game | Overlay does not break playback or exclusive full screen |
+| 6 | Idle CPU | Task Manager shows ~0 % for Pixel when the mouse is still |
+| 7 | Capture excludes Pixel | The screenshot Pixel sends does not contain its own orb or bubble |
+
+### 7.5 What is **not** implemented yet (so do not test it)
+
+- The cursor-companion window and React overlay (engine and settings exist; the window does not).
+- Pointing animation on screen (targets, flight paths and tracking exist as logic only).
+- Push-to-talk key *release* (needs a native keyboard hook; toggle-to-talk is the fallback).
+- Transcription provider abstraction, audio-level waveform, device selection.
+- SQLite audit store (a JSONL file at `%APPDATA%\Pixel\audit\audit.jsonl` is used instead).

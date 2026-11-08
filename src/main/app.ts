@@ -119,8 +119,12 @@ export async function start(): Promise<void> {
 
   resolveUserDataDir();
 
-  // Transparent, always-on-top windows rely on per-pixel alpha being composited
-  // by the desktop window manager rather than the GPU path.
+  // Some user machines run Electron without a usable GPU (VMs, headless RDP,
+  // cloud desktops, or broken drivers). A GPU launch failure kills the renderer
+  // before the window can paint, so prefer software rendering over a silent
+  // crash. Transparent, always-on-top windows still work without the GPU path.
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-software-rasterizer');
   app.commandLine.appendSwitch('enable-transparent-visuals');
   if (process.platform === 'win32') {
     app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');

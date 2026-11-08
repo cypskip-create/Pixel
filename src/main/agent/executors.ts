@@ -31,7 +31,7 @@ export interface ToolResult {
   /** Structured detail kept for the audit trail and the task rail. */
   detail?: Record<string, unknown>;
   /** Present when the tool failed, for classification in the UI. */
-  errorCode?: 'TIMEOUT' | 'DENIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'FAILED';
+  errorCode?: 'TIMEOUT' | 'CANCELLED' | 'DENIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'FAILED';
 }
 
 /** Applications Pixel is willing to launch. Anything else is refused. */
@@ -124,7 +124,45 @@ export class ToolExecutors {
   }
 
   /** Dispatch one call. Never throws: failures become ToolResult. */
-  async run(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  async run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (signal?.aborted) return cancelledResult(name);
+
+    // Anything this call starts is killed if the signal fires. Tools run one at
+    // a time, so "children that did not exist before this call" is exactly the
+    // set that belongs to it.
+    const before = new Set(this.children);
+    const isBrowserTool = name.startsWith('browser_');
+    const onAbort = (): void => {
+      this.killChildrenSince(before);
+      // An in-flight page operation can only be interrupted by closing the
+      // session; it is recreated on the next browser tool call.
+      if (isBrowserTool && this.deps.browser) void this.deps.browser.close();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const result = await this.dispatch(name, args, signal);
+      return signal?.aborted ? cancelledResult(name) : result;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  private killChildrenSince(before: Set<ChildProcess>): void {
+    for (const child of this.children) {
+      if (before.has(child)) continue;
+      try {
+        if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+
+  private async dispatch(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<ToolResult> {
     try {
       // Wave 3 tool sets own their own dispatch; they are composed here so the
       // agent loop keeps a single execution entry point.
@@ -148,7 +186,7 @@ export class ToolExecutors {
         case 'open_application':
           return await this.openApplication(args);
         case 'type_text':
-          return await this.typeText(args);
+          return await this.typeText(args, signal);
         case 'browser_navigate':
           return await this.browserNavigate(args);
         case 'browser_inspect':
@@ -300,7 +338,7 @@ export class ToolExecutors {
     };
   }
 
-  private async typeText(args: Record<string, unknown>): Promise<ToolResult> {
+  private async typeText(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const text = typeof args.text === 'string' ? args.text : '';
     if (text.length === 0) {
       return { ok: false, content: 'No text was provided to type.', errorCode: 'FAILED' };
@@ -336,6 +374,7 @@ export class ToolExecutors {
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
       { ...process.env, CYPS_TYPE_TEXT: escapeSendKeys(text) },
+      signal,
     );
 
     if (!result.ok) {
@@ -582,13 +621,15 @@ export class ToolExecutors {
     file: string,
     args: string[],
     env: NodeJS.ProcessEnv,
+    signal?: AbortSignal,
   ): Promise<{ ok: boolean; error: string; timedOut: boolean }> {
     return new Promise((resolve) => {
       let settled = false;
       const child = execFile(
         file,
         args,
-        { env, windowsHide: true, timeout: DEFAULT_TOOL_TIMEOUT_MS },
+        // Node kills the child when the signal aborts.
+        { env, windowsHide: true, timeout: DEFAULT_TOOL_TIMEOUT_MS, signal },
         (error) => {
           if (settled) return;
           settled = true;
@@ -603,6 +644,14 @@ export class ToolExecutors {
       this.track(child);
     });
   }
+}
+
+function cancelledResult(name: string): ToolResult {
+  return {
+    ok: false,
+    content: `"${name}" was cancelled before it finished.`,
+    errorCode: 'CANCELLED',
+  };
 }
 
 function round(value: number): number {

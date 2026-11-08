@@ -41,10 +41,27 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
+$InstallDirs = @(
+  $InstallDir,
+  'C:\Program Files\Pixel',
+  'C:\Program Files (x86)\Pixel',
+  'C:\Program Files\Cyps',
+  'C:\Program Files (x86)\Cyps'
+) | Select-Object -Unique
+
 # Pinned in electron-builder.yml (nsis.guid). Used for both registry keys.
-$Guid       = 'a5745318-c98a-51f9-87f5-f1c32713b276'
-$UninstKey  = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$Guid"
-$InstallKey = "HKCU:\Software\$Guid"
+$Guid = 'a5745318-c98a-51f9-87f5-f1c32713b276'
+$UninstKeys = @(
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$Guid",
+  "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$Guid",
+  "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$Guid"
+)
+$InstallKeys = @(
+  "HKCU:\Software\$Guid",
+  "HKLM:\Software\$Guid",
+  "HKLM:\Software\WOW6432Node\$Guid"
+)
+$AllKeys = @($UninstKeys + $InstallKeys) | Select-Object -Unique
 
 function Write-Section($text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
 function Write-Fact($label, $value) { Write-Host ("  {0,-34} {1}" -f $label, $value) }
@@ -151,7 +168,7 @@ else { $procs | ForEach-Object { Write-Fact "$($_.Name) (pid $($_.Id))" "$($_.Pa
 
 Write-Section 'Installer registration (this is what the upgrade path reads)'
 $reg = $null
-foreach ($k in @($UninstKey, $InstallKey)) {
+foreach ($k in $AllKeys) {
   if (Test-Path $k) {
     Write-Host "  PRESENT  $k" -ForegroundColor Yellow
     $props = Get-ItemProperty -Path $k
@@ -166,17 +183,25 @@ if ($reg) { $registered = $reg.InstallLocation; if (-not $registered) { $registe
 
 Write-Section 'Install folder'
 Write-Fact 'Chosen / default folder' $InstallDir
-Write-Fact 'Exists' (Test-Path -LiteralPath $InstallDir)
+foreach ($dir in $InstallDirs) {
+  if ($dir) { Write-Fact "Exists: $dir" (Test-Path -LiteralPath $dir) }
+}
 if ($registered) { Write-Fact 'Registered folder' $registered }
-if (Test-Path -LiteralPath $InstallDir) {
-  Get-ChildItem -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue | Select-Object -First 12 |
+foreach ($dir in $InstallDirs) {
+  if (-not (Test-Path -LiteralPath $dir)) { continue }
+  Write-Host "  FOLDER  $dir" -ForegroundColor Yellow
+  Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue | Select-Object -First 12 |
     ForEach-Object { Write-Fact '  entry' $_.Name }
-  $uninst = Join-Path $InstallDir 'Uninstall Pixel.exe'
+  $uninst = Join-Path $dir 'Uninstall Pixel.exe'
   if (Test-Path -LiteralPath $uninst) { Write-Fact 'Uninstall Pixel.exe present' 'yes' }
 }
 
 Write-Section 'Who is holding files in the install folder (Restart Manager)'
-$lockers = @(Get-LockersForFolder $InstallDir)
+$lockers = @()
+foreach ($dir in $InstallDirs) {
+  if (Test-Path -LiteralPath $dir) { $lockers += @(Get-LockersForFolder $dir) }
+}
+$lockers = @($lockers | Sort-Object -Unique)
 if ($lockers.Count -eq 0) { Write-Host '  no process reports a lock on the executables' }
 else { $lockers | ForEach-Object { Write-Host "  LOCKED BY  $_" -ForegroundColor Yellow } }
 
@@ -212,7 +237,7 @@ foreach ($d in @((Join-Path $env:APPDATA 'Pixel'), (Join-Path $env:APPDATA 'Cyps
 # DIAGNOSIS
 # --------------------------------------------------------------------------
 Write-Section 'Reading of the results'
-$hasStaleState = ($null -ne $reg) -or (Test-Path -LiteralPath $InstallDir)
+$hasStaleState = ($null -ne $reg) -or ($InstallDirs | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0
 if ($lockers.Count -gt 0) {
   Write-Host '  A process is holding Pixel files open. That alone explains "Error opening file for writing".' -ForegroundColor Yellow
 }
@@ -236,8 +261,8 @@ if (-not $Apply) {
 Write-Section 'Cleanup plan'
 Write-Host '  1. Stop your own Pixel/Cyps installer + uninstaller processes listed above'
 Write-Host '  2. Back up the installer registry keys to a .reg file'
-Write-Host "  3. Rename $InstallDir -> Pixel.stale-<timestamp>"
-Write-Host '  4. Delete the two installer registry keys'
+Write-Host "  3. Rename any stale install folder(s) to Pixel.stale-<timestamp>"
+Write-Host '  4. Delete the stale installer registry keys (HKCU + HKLM)'
 Write-Host '  Your conversations, settings, keys and memory are not touched.'
 $answer = Read-Host 'Type YES to continue'
 if ($answer -ne 'YES') { Write-Host 'Cancelled. Nothing was changed.'; return }
@@ -253,30 +278,31 @@ foreach ($p in @(Get-PixelProcesses | Where-Object { $_.Mine })) {
 }
 Start-Sleep -Seconds 1
 
-foreach ($k in @($UninstKey, $InstallKey)) {
+foreach ($k in $AllKeys) {
   if (Test-Path $k) {
-    $native = $k -replace '^HKCU:\\', 'HKCU\'
+    $native = $k -replace '^HKCU:\\', 'HKCU\' -replace '^HKLM:\\', 'HKLM\'
     $file = Join-Path $backup (($native -replace '[\\/:]', '_') + '.reg')
     & reg.exe export $native $file /y | Out-Null
     if ($LASTEXITCODE -eq 0) { Write-Host "  backed up  $native" } else { Write-Host "  BACKUP FAILED for $native - stopping." -ForegroundColor Red; return }
   }
 }
 
-if (Test-Path -LiteralPath $InstallDir) {
-  $staleDir = "$InstallDir.stale-$stamp"
+foreach ($dir in $InstallDirs) {
+  if (-not (Test-Path -LiteralPath $dir)) { continue }
+  $staleDir = "$dir.stale-$stamp"
   try {
-    Rename-Item -LiteralPath $InstallDir -NewName (Split-Path $staleDir -Leaf) -ErrorAction Stop
-    Write-Host "  renamed    $InstallDir -> $staleDir"
+    Rename-Item -LiteralPath $dir -NewName (Split-Path $staleDir -Leaf) -ErrorAction Stop
+    Write-Host "  renamed    $dir -> $staleDir"
   } catch {
     Write-Host "  Could not rename the install folder: $($_.Exception.Message)" -ForegroundColor Red
-    $again = @(Get-LockersForFolder $InstallDir)
+    $again = @(Get-LockersForFolder $dir)
     if ($again.Count) { Write-Host '  Still held by:'; $again | ForEach-Object { Write-Host "    $_" } }
     Write-Host '  Close those, or sign out and back in, then run this again. Registry was NOT changed.' -ForegroundColor Yellow
     return
   }
 }
 
-foreach ($k in @($UninstKey, $InstallKey)) {
+foreach ($k in $AllKeys) {
   if (Test-Path $k) { Remove-Item -Path $k -Recurse -Force; Write-Host "  removed    $k" }
 }
 

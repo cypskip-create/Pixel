@@ -56,7 +56,7 @@ export interface TurnRunner {
 
 /** The one thing the agent needs from the tool executors. */
 export interface ToolRunner {
-  run(name: string, args: Record<string, unknown>): Promise<ToolResult>;
+  run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult>;
   killAll(): number;
 }
 
@@ -301,7 +301,7 @@ export class AgentExecutor {
     }
 
     // 2. Policy: mode, emergency stop, and whether approval is required.
-    const decision = registry.evaluate(call.name, mode);
+    const decision = registry.evaluate(call.name, mode, args);
     if (!decision.allowed) {
       if (decision.needsApproval) {
         const request = buildPermissionRequest(tool, args);
@@ -332,7 +332,7 @@ export class AgentExecutor {
 
         // Approval grants are stored by the broker; re-check so that a 'once'
         // grant cannot be reused by a second identical call.
-        const recheck = registry.evaluate(call.name, mode);
+        const recheck = registry.evaluate(call.name, mode, args);
         if (!recheck.allowed) {
           const text = `Error: "${call.name}" still cannot run: ${recheck.reason}`;
           this.failStep(step, task, text);
@@ -355,10 +355,11 @@ export class AgentExecutor {
     }
 
     // 3. Execute for real, with a timeout.
-    const result = await withTimeout(
-      executors.run(call.name, args),
+    const result = await runWithDeadline(
+      (signal) => executors.run(call.name, args, signal),
       TOOL_TIMEOUT_MS,
       `"${call.name}" took too long and was stopped.`,
+      this.controller?.signal,
     );
 
     const succeeded = result.ok;
@@ -543,6 +544,69 @@ function consumeOnceGrant(permissions: PermissionBroker, toolName: string): void
   const grant = permissions.activeGrants().find((g) => g.toolName === toolName);
   if (grant && grant.scope === 'once') {
     permissions.revoke(toolName);
+  }
+}
+
+/** How long a cancelled tool gets to wind down before we stop waiting for it. */
+export const CANCEL_GRACE_MS = 2_000;
+
+/**
+ * Run a tool with a real deadline.
+ *
+ * Unlike a plain timeout race, expiry (or an emergency stop on `parent`) aborts
+ * an AbortSignal that the executors honour by killing child processes and
+ * closing the browser, so the work genuinely stops instead of continuing in the
+ * background. If a tool still ignores the signal, we stop waiting after a short
+ * grace period so the agent loop can never hang.
+ */
+export async function runWithDeadline(
+  start: (signal: AbortSignal) => Promise<ToolResult>,
+  timeoutMs: number,
+  timeoutMessage: string,
+  parent?: AbortSignal,
+  graceMs: number = CANCEL_GRACE_MS,
+): Promise<ToolResult> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const onParentAbort = (): void => controller.abort();
+  if (parent?.aborted) controller.abort();
+  else parent?.addEventListener('abort', onParentAbort, { once: true });
+
+  const work = start(controller.signal).catch(
+    (error: unknown): ToolResult => ({
+      ok: false,
+      content: error instanceof Error ? error.message : String(error),
+      errorCode: 'FAILED',
+    }),
+  );
+
+  const aborted = new Promise<'aborted'>((resolve) => {
+    if (controller.signal.aborted) resolve('aborted');
+    else controller.signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+  });
+
+  try {
+    const first = await Promise.race([work, aborted]);
+    if (first !== 'aborted') return first;
+
+    // Aborted: give the tool a moment to unwind and report, then stop waiting.
+    const settled = await Promise.race([
+      work,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), graceMs)),
+    ]);
+    if (timedOut) {
+      return { ok: false, content: timeoutMessage, errorCode: 'TIMEOUT' };
+    }
+    return (
+      settled ?? { ok: false, content: 'The action was cancelled.', errorCode: 'CANCELLED' }
+    );
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener('abort', onParentAbort);
   }
 }
 

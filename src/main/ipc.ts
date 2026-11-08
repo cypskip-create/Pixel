@@ -36,6 +36,7 @@ import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
 import { ToolExecutors } from './agent/executors';
 import { BrowserSession } from './agent/browser';
+import { JsonlAuditSink } from './agent/auditStore';
 import { openDatabase } from './data/database';
 import { boot } from './startup/boot';
 import { selectMemoryContext } from './memory/context';
@@ -110,7 +111,9 @@ export function registerIpcHandlers(context: IpcContext): {
 } {
   const { settings, windows, provider, captures } = context;
 
-  const audit = new AuditLog();
+  const audit = new AuditLog(
+    new JsonlAuditSink(join(app.getPath('userData'), 'audit', 'audit.jsonl')),
+  );
 
   /* ---------------- Wave 3: memory and documents ---------------- */
 

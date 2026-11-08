@@ -14,6 +14,8 @@
 import type { Mode, PermissionDecision, PermissionGrant, RiskLevel, ToolCategory, ToolDefinition } from '../../shared/types';
 import { getModeDescriptor } from '../../shared/types';
 
+import { deriveGrantScope, scopeCovers } from './scope';
+
 export interface ToolContext {
   /** User's current mode. */
   mode: Mode;
@@ -21,6 +23,8 @@ export interface ToolContext {
   grants: Map<string, PermissionGrant>;
   /** Set when the user has pressed emergency stop. */
   stopped: boolean;
+  /** Arguments of the invocation being evaluated, used to check grant scope. */
+  args?: Record<string, unknown>;
   /** Records an audit line; injected so this module stays dependency-free. */
   audit: (entry: {
     kind: 'tool' | 'permission' | 'system';
@@ -84,6 +88,8 @@ export function evaluateInvocation(
 export function hasValidGrant(toolName: string, context: ToolContext): boolean {
   const grant = context.grants.get(toolName);
   if (!grant) return false;
+  // A grant aimed at one origin/application never covers a different target.
+  if (!scopeCovers(grant.target, deriveGrantScope(toolName, context.args ?? {}))) return false;
   if (grant.scope === 'always') return true;
   if (grant.expiresAt !== undefined && Date.now() > grant.expiresAt) {
     context.grants.delete(toolName);
@@ -95,11 +101,13 @@ export function hasValidGrant(toolName: string, context: ToolContext): boolean {
 /** Apply an approval decision, producing the grant to store (if any). */
 export function applyDecision(
   decision: PermissionDecision,
-  request: { toolName: string },
+  request: { toolName: string; args?: Record<string, unknown> },
 ): PermissionGrant | null {
   if (!decision.approved) return null;
   const now = Date.now();
+  const target = deriveGrantScope(request.toolName, request.args ?? {});
   return {
+    ...(Object.keys(target).length > 0 ? { target } : {}),
     id: `grant_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     toolName: request.toolName,
     scope: decision.duration,
@@ -337,9 +345,10 @@ export class ToolRegistry {
     return this.stopped;
   }
 
-  evaluate(name: string, mode: Mode): ExecutionDecision {
+  evaluate(name: string, mode: Mode, args?: Record<string, unknown>): ExecutionDecision {
     return evaluateInvocation(this.get(name), {
       mode,
+      args,
       grants: this.grants,
       stopped: this.stopped,
       audit: () => {},

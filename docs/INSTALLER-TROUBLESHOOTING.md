@@ -239,7 +239,7 @@ Then choose one of these, in order of least risk:
 | --- | --- |
 | Any Pixel/Cyps process is listed | End it in Task Manager ▸ Details (it may be a tray icon, not a window). |
 | "Partial installation" is reported | Remove the entry from Settings ▸ Apps ▸ Installed apps, then install Pixel. Your data in `%APPDATA%` is untouched. |
-| You just want to use the app now | Use `Pixel-Windows-Unpacked-0.2.0.zip` or `Pixel-Portable-0.2.0.exe` - neither uses NSIS. |
+| You just want to use the app now | Use `Pixel-Windows-Unpacked-0.2.1.zip` or `Pixel-Portable-0.2.1.exe` - neither uses NSIS. |
 | Antivirus is suspected | Add the installation folder as an exclusion, then retry. |
 
 ## Reproducing the investigation

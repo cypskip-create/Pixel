@@ -11,7 +11,34 @@ On-device GUI verification is still outstanding and is the gate for Wave 3.
 Waves 1A-1D are preserved: floating shell, DeepSeek streaming, agent tool loop,
 browser automation, voice, and the security model are unchanged.
 
-## Round 3: stale install state, agent-path bugs, repo hygiene (latest)
+## Round 4: companion engine foundation and safety (latest)
+
+Branch `merge/round4-onto-main`. See `docs/HANDOFF.md` for resume steps,
+`docs/research/CLICKY_TO_PIXEL_ARCHITECTURE.md` for the Clicky comparison and
+`docs/research/CLICKY_SOURCE_DEEP_DIVE.md` for source-level notes.
+
+**Verified in this build (merged onto `main` at `2e7d11a`):** both type checks are clean;
+554 unit tests pass, 32 are skipped (need Chromium), 11 fail. The same 11 fail identically on
+an untouched checkout of `main` in the build sandbox (10 document-indexing tests that need a
+Python worker environment, and 1 Windows-specific voice test), so they are not caused by this
+work, but they have not been run on the laptop either.
+**NOT verified:** any Windows GUI behaviour, the C# helper, the repair script, packaging.
+
+- Safety: origin/app-scoped approvals; `AbortSignal` cancellation that kills child processes
+  and closes the browser; `NetworkGuard` (all DNS records, every request incl. redirects,
+  connected-address check); JSONL audit with redaction; Chromium sandbox on for Windows.
+- Companion: `shared/companion/{stateMachine,geometry,cursorFollow,pointing,pushToTalk}.ts`.
+  The orb vocabulary and `deriveAssistantState` come from `shared/companion-state.ts` (landed
+  on `main` separately); the state machine delegates its priority to that function and a test
+  asserts they agree for every combination, so there is one priority definition.
+- Settings: `visualMode`, `followSpeed`, `cursorOffset`, `animations`, `transientMode`,
+  `transientIdleMs`, all validated and clamped.
+- Native: `PixelNative.cs` (UI Automation, read-only) and its TS client. Uncompiled.
+
+**Release blockers (unchanged):** nothing in the installer or startup path has been verified
+on a real Windows desktop. The release is not shipped.
+
+## Round 3: stale install state, agent-path bugs, repo hygiene
 
 Reported: installer still failed on 0.2.1 ("cannot be closed", then "Error opening
 file for writing ... Uninstall Pixel.exe"). Root cause found in the electron-builder

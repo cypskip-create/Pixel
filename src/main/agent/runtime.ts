@@ -15,6 +15,8 @@ import type {
   PermissionRequest,
   TaskRecord,
 } from '../../shared/types';
+import type { AuditSink } from './auditStore';
+import { describeScope } from './scope';
 import { ToolRegistry, applyDecision } from './tools';
 
 export const MAX_AUDIT_ENTRIES = 500;
@@ -22,6 +24,9 @@ export const MAX_AUDIT_ENTRIES = 500;
 /** Append-only audit trail, held in memory and capped. */
 export class AuditLog {
   private entries: AuditEntry[] = [];
+
+  /** An optional durable copy. Entries are sanitised by the sink, not here. */
+  constructor(private readonly sink?: AuditSink) {}
 
   record(
     kind: AuditEntry['kind'],
@@ -38,6 +43,7 @@ export class AuditLog {
       ...(detail ? { detail } : {}),
     };
     this.entries.push(entry);
+    this.sink?.write(entry);
     if (this.entries.length > MAX_AUDIT_ENTRIES) {
       this.entries = this.entries.slice(-MAX_AUDIT_ENTRIES);
     }
@@ -97,7 +103,10 @@ export class PermissionBroker {
     this.pending = null;
 
     if (decision.approved) {
-      const grant = applyDecision(decision, { toolName: pending.request.toolName });
+      const grant = applyDecision(decision, {
+        toolName: pending.request.toolName,
+        args: pending.request.args,
+      });
       if (grant) {
         this.grants.set(grant.toolName, grant);
         this.registry.grant(grant);
@@ -105,6 +114,7 @@ export class PermissionBroker {
           'permission',
           `Approved "${pending.request.toolName}" (${grant.scope})`,
           'ok',
+          `limited to ${describeScope(grant.target ?? {})}`,
         );
       }
     } else {

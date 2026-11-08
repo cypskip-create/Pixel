@@ -37,3 +37,6 @@ desktop.ini
 # Local validation artifacts
 .pw-browsers/
 validation-report-*.json
+
+# Compiled native helper (built locally by scripts/build-native.ps1)
+native/bin/

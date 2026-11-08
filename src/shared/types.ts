@@ -210,7 +210,33 @@ export interface CompanionSettings {
   reducedMotion: boolean;
   /** Compact bar for smaller displays. */
   compact: boolean;
+  /**
+   * How the companion is presented. This is independent of `mode` (Guide, Agent,
+   * Hybrid), which controls what Pixel may do.
+   *  - stationary: the orb rests near the top of the screen (default).
+   *  - cursor: a small companion follows the mouse pointer.
+   */
+  visualMode: VisualMode;
+  /** Cursor-companion follow speed multiplier, 0.25 to 3. */
+  followSpeed: number;
+  /** Offset of the cursor companion from the pointer, in logical pixels. */
+  cursorOffset: { x: number; y: number };
+  /** Animation budget. 'off' also stops the idle breathing animation. */
+  animations: AnimationLevel;
+  /**
+   * Transient mode: the companion is hidden until the summon hotkey is pressed,
+   * then fades out after the interaction. Off by default until validated.
+   */
+  transientMode: boolean;
+  /** Quiet time, in milliseconds, before a transient companion fades out. */
+  transientIdleMs: number;
 }
+
+export const VISUAL_MODES = ['stationary', 'cursor'] as const;
+export type VisualMode = (typeof VISUAL_MODES)[number];
+
+export const ANIMATION_LEVELS = ['full', 'reduced', 'off'] as const;
+export type AnimationLevel = (typeof ANIMATION_LEVELS)[number];
 
 export interface VoiceSettings {
   /** Push-to-talk keybinding (Electron accelerator syntax). */
@@ -273,6 +299,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
     speakReplies: false,
     reducedMotion: false,
     compact: false,
+    visualMode: 'stationary',
+    followSpeed: 1,
+    cursorOffset: { x: 22, y: 20 },
+    animations: 'full',
+    transientMode: false,
+    transientIdleMs: 2500,
   },
   voice: {
     pushToTalkAccelerator: 'CommandOrControl+Shift+Space',
@@ -318,8 +350,34 @@ export function mergeSettings(partial: unknown): AppSettings {
   // Never allow the screenshot-approval invariant to be turned off.
   base.privacy.screenshotRequiresApproval = true;
   if (!MODES.includes(base.companion.mode)) base.companion.mode = DEFAULT_MODE;
+  sanitiseCompanion(base.companion);
 
   return base;
+}
+
+/**
+ * Replace any invalid companion value with its default or clamp it into range.
+ * Settings come from a file the user (or a bug) may have edited, and these
+ * numbers feed straight into animation maths.
+ */
+export function sanitiseCompanion(c: CompanionSettings): void {
+  const d = DEFAULT_SETTINGS.companion;
+  if (!VISUAL_MODES.includes(c.visualMode)) c.visualMode = d.visualMode;
+  if (!ANIMATION_LEVELS.includes(c.animations)) c.animations = d.animations;
+  c.followSpeed = finiteWithin(c.followSpeed, 0.25, 3, d.followSpeed);
+  c.transientIdleMs = finiteWithin(c.transientIdleMs, 1000, 30_000, d.transientIdleMs);
+  const offset = c.cursorOffset as { x?: unknown; y?: unknown } | null | undefined;
+  c.cursorOffset = {
+    x: finiteWithin(offset?.x, -200, 200, d.cursorOffset.x),
+    y: finiteWithin(offset?.y, -200, 200, d.cursorOffset.y),
+  };
+  c.transientMode = c.transientMode === true;
+}
+
+function finiteWithin(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(Math.max(value, min), max)
+    : fallback;
 }
 
 /* ------------------------------------------------------------------ *
@@ -638,12 +696,27 @@ export interface EmergencyStopReport {
   abortedStream: boolean;
 }
 
+/**
+ * What a grant is limited to, beyond the tool name. A grant for
+ * `browser_navigate` to https://a.example must not also cover https://b.example,
+ * and a grant to open Notepad must not cover launching PowerShell.
+ * An empty or absent scope means "this tool, anywhere" (the old behaviour).
+ */
+export interface GrantScope {
+  /** Web origin (scheme + host + port), e.g. "https://example.com". */
+  origin?: string;
+  /** Normalised application name, e.g. "notepad". */
+  app?: string;
+}
+
 export interface PermissionGrant {
   id: string;
   toolName: string;
   scope: 'once' | 'session' | 'always';
   grantedAt: number;
   expiresAt?: number;
+  /** Narrows the grant to one origin/application. Absent = tool-wide. */
+  target?: GrantScope;
 }
 
 export interface AuditEntry {
