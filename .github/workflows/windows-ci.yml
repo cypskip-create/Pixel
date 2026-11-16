@@ -1,0 +1,96 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: '0'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Create artifact folders
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/logs, artifacts/test-results | Out-Null
+
+      - name: Install npm dependencies
+        shell: pwsh
+        run: |
+          npm ci 2>&1 | Tee-Object artifacts/logs/npm-ci.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: |
+          npx playwright install chromium 2>&1 | Tee-Object artifacts/logs/playwright-install.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install NSIS for installer integration tests
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis --yes --no-progress --limit-output 2>&1 | Tee-Object artifacts/logs/nsis-install.log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $nsisPath = 'C:\Program Files (x86)\NSIS'
+          if (Test-Path (Join-Path $nsisPath 'makensis.exe')) {
+            Add-Content -Path $env:GITHUB_PATH -Value $nsisPath
+            $env:PATH = "$env:PATH;$nsisPath"
+          }
+          makensis /VERSION 2>&1 | Tee-Object artifacts/logs/nsis-version.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Type check
+        shell: pwsh
+        run: |
+          npm run typecheck 2>&1 | Tee-Object artifacts/logs/typecheck.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run full automated test suite
+        shell: pwsh
+        run: |
+          npm test -- --reporter=default --reporter=junit --outputFile.junit=artifacts/test-results/vitest-junit.xml 2>&1 | Tee-Object artifacts/logs/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Compile native UI Automation helper
+        shell: pwsh
+        run: |
+          npm run build:native 2>&1 | Tee-Object artifacts/logs/native-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build unpacked app, portable executable and NSIS installer
+        shell: pwsh
+        run: |
+          npm run dist 2>&1 | Tee-Object artifacts/logs/package.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload logs, test report and Windows distributions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-windows-ci-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            artifacts/logs/**/*.log
+            artifacts/logs/*.log
+            artifacts/test-results/*.xml
+            release/**
+            native/bin/PixelNative.exe

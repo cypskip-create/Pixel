@@ -530,13 +530,20 @@ import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { NativeHelper, NativeHelperError, toDipRect } from '../src/main/services/nativeHelper';
 
-function fakeProcess(onRequest: (req: { id: number; cmd: string; args: unknown }, reply: (obj: unknown) => void) => void) {
+function fakeProcess(
+  onRequest: (req: { id: number; cmd: string; args: unknown }, reply: (obj: unknown) => void) => void,
+  options: { exitOnKill?: boolean } = {},
+) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const emitter = new EventEmitter() as unknown as ChildProcessWithoutNullStreams;
-  Object.assign(emitter, { stdin, stdout, stderr: new PassThrough(), exitCode: null, kill: () => {
-    (emitter as unknown as { exitCode: number | null }).exitCode = 0;
-    emitter.emit('exit', 0);
+  Object.assign(emitter, { stdin, stdout, stderr: new PassThrough(), exitCode: null, signalCode: null, killCount: 0, kill: () => {
+    const mock = emitter as unknown as { exitCode: number | null; killCount: number };
+    mock.killCount += 1;
+    if (options.exitOnKill !== false) {
+      mock.exitCode = 0;
+      emitter.emit('exit', 0);
+    }
     return true;
   } });
   let buffer = '';
@@ -594,17 +601,90 @@ describe('NativeHelper', () => {
   });
 
   it('times out a helper that never answers', async () => {
-    const helper = new NativeHelper({ ...base, requestTimeoutMs: 30, spawnFn: () => fakeProcess(() => undefined) });
+    let proc!: ChildProcessWithoutNullStreams & { killCount: number };
+    const helper = new NativeHelper({
+      ...base,
+      requestTimeoutMs: 30,
+      terminationGraceMs: 20,
+      spawnFn: () => (proc = fakeProcess(() => undefined) as ChildProcessWithoutNullStreams & { killCount: number }),
+    });
     await expect(helper.call('ping', {})).rejects.toMatchObject({ code: 'TIMEOUT' });
+    expect(proc.killCount).toBeGreaterThan(0);
+    expect(helper.running).toBe(false);
+    helper.dispose();
+  });
+
+  it('rejects queued callers when a timed-out request stops the shared helper', async () => {
+    const helper = new NativeHelper({
+      ...base,
+      requestTimeoutMs: 30,
+      terminationGraceMs: 20,
+      spawnFn: () => fakeProcess(() => undefined),
+    });
+    const first = helper.call('ping', {});
+    const second = helper.call('foreground_window', {});
+    const results = await Promise.allSettled([first, second]);
+    expect(results[0]).toMatchObject({ status: 'rejected', reason: { code: 'TIMEOUT' } });
+    expect(results[1]).toMatchObject({ status: 'rejected', reason: { code: 'CRASHED' } });
+    helper.dispose();
+  });
+
+  it('restarts only after a timed-out helper has exited', async () => {
+    let starts = 0;
+    const helper = new NativeHelper({
+      ...base,
+      requestTimeoutMs: 25,
+      terminationGraceMs: 20,
+      spawnFn: () => {
+        starts += 1;
+        return fakeProcess((req, reply) => {
+          if (starts > 1) reply({ id: req.id, ok: true, result: { version: 'restarted' } });
+        });
+      },
+    });
+    await expect(helper.call('ping', {})).rejects.toMatchObject({ code: 'TIMEOUT' });
+    expect(await helper.call('ping', {})).toEqual({ version: 'restarted' });
+    expect(starts).toBe(2);
+    helper.dispose();
+  });
+
+  it('quarantines a helper when bounded termination cannot confirm exit', async () => {
+    let proc!: ChildProcessWithoutNullStreams & { killCount: number; exitCode: number | null };
+    let starts = 0;
+    const helper = new NativeHelper({
+      ...base,
+      requestTimeoutMs: 25,
+      terminationGraceMs: 15,
+      spawnFn: () => {
+        starts += 1;
+        proc = fakeProcess(() => undefined, { exitOnKill: false }) as ChildProcessWithoutNullStreams & { killCount: number; exitCode: number | null };
+        return proc;
+      },
+    });
+    await expect(helper.call('ping', {})).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('outcome is unknown') });
+    expect(proc.killCount).toBeGreaterThanOrEqual(2);
+    expect(helper.terminating).toBe(true);
+    await expect(helper.call('ping', {})).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    expect(starts).toBe(1);
+
+    proc.exitCode = 1;
+    proc.emit('exit', 1);
+    await helper.whenStopped();
+    expect(helper.terminating).toBe(false);
+    await expect(helper.call('ping', {})).rejects.toMatchObject({ code: 'TIMEOUT' });
+    expect(starts).toBe(2);
     helper.dispose();
   });
 
   it('cancels a pending request when the signal aborts', async () => {
-    const helper = new NativeHelper({ ...base, spawnFn: () => fakeProcess(() => undefined) });
+    let proc!: ChildProcessWithoutNullStreams & { killCount: number };
+    const helper = new NativeHelper({ ...base, spawnFn: () => (proc = fakeProcess(() => undefined) as ChildProcessWithoutNullStreams & { killCount: number }) });
     const controller = new AbortController();
     const pending = helper.call('ping', {}, controller.signal);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(proc.killCount).toBeGreaterThan(0);
+    expect(helper.running).toBe(false);
     helper.dispose();
   });
 

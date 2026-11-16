@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
-    "dev:electron": "npm run build:main && cross-env CYPS_DEV=1 electron .",
+    "dev:electron": "npm run build:main && cross-env CYPS_DEV=1 CYPS_DEV_SERVER_URL=http://localhost:5199 electron --disable-gpu .",
     "build:main": "tsc -p tsconfig.main.json && node scripts/write-main-package.mjs",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
@@ -20,10 +20,11 @@
     "build:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1",
     "diagnose": "node scripts/diagnose.mjs",
     "validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-windows.ps1 -Launch",
+    "test:native-uia-e2e": "npm run build:main && npm run build:native && node scripts/test-native-uia-e2e.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pack": "npm run build && npm run build:native && electron-builder --win --dir",
-    "dist": "npm run build && npm run build:native && electron-builder --win",
+    "pack": "npm run build && npm run build:native && electron-builder --win --dir --publish never",
+    "dist": "npm run build && npm run build:native && electron-builder --win --publish never",
     "diagnose:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-installer.ps1",
     "repair:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/repair-install-state.ps1"
   },

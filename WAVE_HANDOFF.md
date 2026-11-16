@@ -8,10 +8,11 @@ Updated: 2026-11-16
 - Cancellation propagation through browser, Python/voice workers, child process trees and the native UIA helper; emergency stop also stops queued routine work.
 - Scoped, one-shot high-risk approvals; prompt-injection data framing; exact-window title checks before Windows text input and native UIA invocation.
 - Human takeover state with explicit acknowledgement and a required fresh observation before any later mutation.
-- Compiled and connected C# UI Automation helper for foreground-window information, bounded semantic element search, exact unique enabled `InvokePattern` invocation, and exact present/absent postcondition checks. UIA actions remain pending until a matching postcondition is observed.
+- Compiled and connected C# UI Automation helper for foreground-window information, bounded semantic element search, exact unique enabled `InvokePattern` invocation, and exact present/absent postcondition checks. Timed-out/cancelled helpers are boundedly terminated; unconfirmed exit quarantines future calls and retains the desktop-input lease.
 - Optional cursor-follow presentation using spring motion and work-area clamping; it is independent of intelligence mode and pauses while expanded.
 - Project memory inspection, correction, deletion and JSON export; versioned skill drafts/review/activation/run history; durable daily routines with missed-run skip, serialization, cancellation, failure pause and one-time manual retry.
-- Tests cover task recovery, approval/cancellation paths, memory UI operations, skills and routines, UIA tool policy/argument validation, and browser/file/document/worker behavior.
+- Windows CI for type checks, Chromium/NSIS tests, native-helper compilation and non-publishing distributions. Build logs, JUnit test results and package artifacts are uploaded by the workflow.
+- A harmless Windows Forms UIA fixture and deterministic AgentExecutor/PermissionBroker/SQLite harness are available for a real Windows desktop.
 - Refreshed current-state report, Grok Bot mapping, Clicky mapping, runtime/security/skills documentation, Windows acceptance procedure, README and PROGRESS.
 
 ## Important files
@@ -25,23 +26,25 @@ Updated: 2026-11-16
 
 ## Validation performed
 
-- Latest after the UIA postcondition changes: `npm run typecheck`, `npm run build`, `npm run build:native`, and `git diff --check` passed.
-- The full suite had passed earlier: **619 passed, 24 skipped** across 25 files. It was not rerun after the final UIA postcondition changes. Earlier skips: 17 browser cases because Playwright Chromium is absent and 7 NSIS cases because `makensis` is absent.
-- Earlier direct Windows checks passed for protocol ping, foreground window, UIA search and title-mismatch refusal. The added postcondition path compiled but was not exercised against a real UI control.
-- Windows `type_text` mismatch check — passed through the real PowerShell child process; it returned `DENIED` and sent no text.
-- `npm run pack` — attempted twice, failed at electron-builder's GitHub download (`getaddrinfo ENOTFOUND github.com`). No newly packaged app is validated.
-- Electron GUI launch — attempted with an isolated workspace-local profile and exited before creating a window (`-2147483645`), matching the sandbox limitation in [ELECTRON-CONSTRAINTS.md](docs/ELECTRON-CONSTRAINTS.md). No profile data was written.
-- No code, checkpoint commit, push, installer, release or worktree was created.
+- `npm run typecheck` passed. `npm run build` and `npm run build:native` passed.
+- Final full suite: **651 passed, 0 failed, 0 skipped across 25 files**. All 22 Chromium browser tests and 9 NSIS tests ran. The sandboxed test attempt could not reach its loopback fixture; the final run was authorized outside the sandbox.
+- `npm run pack` and `npm run dist` passed with publishing disabled. Outputs: unpacked app, NSIS installer, portable executable and ZIP. Package inspection confirmed the helper is present and Playwright's test-browser cache is excluded.
+- The Electron dev process exited before main startup logs or window creation (`2147483651`, signed `-2147483645`). No renderer/preload GUI behavior was observed.
+- The native helper and timeout/lease unit tests passed. The real fixture was not foregrounded in this desktop session, so `test-native-uia-e2e` did not invoke a control. Pixel approval-card/UIA action acceptance remains unverified.
+- Voice test capability output differed by execution context. No fixed local STT/TTS availability is claimed.
+- Windows CI was added but not run from this uncommitted tree. It runs only after CI is triggered; it uploads artifacts and never publishes a release.
 
 ## Remaining work and limits
 
-- Run GUI and packaged acceptance on a normal Windows desktop with network access. Validate cursor mode, tray, focus, mixed DPI, screen capture, UIA providers and installer identity/upgrade/uninstall.
+- Run the ordered UI and distribution checklist on an interactive Windows laptop: development startup/logs, renderer/preload, orb, conversation, task strip, approval cards, cursor following, fixture UIA task, unpacked/portable launch, clean install, upgrade, uninstall and user-data preservation.
+- Run `npm run test:native-uia-e2e` with `Pixel UIA Harmless Fixture` in the foreground; then complete the actual Pixel approval-card task separately. The deterministic harness grants one-use approvals through the backend broker but does not display the UI.
 - Native UIA reads accessible names/AutomationIds, checks exact present/absent states and invokes one exact unique enabled `InvokePattern`; it does not type, set form values or operate inaccessible/custom controls. It verifies only within the same exact titled foreground window and can report an empty process name for some desktop providers.
 - Skills are user-reviewed and model-mediated. There is no interaction recorder, automatic save-from-task prompt or deterministic live semantic replay runner.
 - Specialist roles/coordinator are foundations, not independent model-backed delegations in the live task flow. VirtualBox/SSH and Pixel Code are unavailable.
 - There is no general credential broker. Passwords, MFA, passkeys, CAPTCHA and payment confirmation remain human tasks.
 - Restart recovery asks the user to review and start a new task; it does not continue the old model call stack. A task acknowledgement does not prove the handoff action succeeded.
 - Browser private-network checks detect some unsafe connections after the connection begins; preventing the network request itself requires a controlled egress proxy.
+- The current release readiness decision and exact artifact sizes are in [docs/validation/PIXEL_RELEASE_READINESS.md](docs/validation/PIXEL_RELEASE_READINESS.md).
 
 ## Git
 

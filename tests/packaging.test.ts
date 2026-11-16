@@ -100,6 +100,10 @@ describe('packaging identity', () => {
     expect(config.files).toContain('dist/**/*');
     expect(config.files).toContain('package.json');
   });
+
+  it('does not ship the package-local Playwright browser cache', () => {
+    expect(config.files).toContain('!**/.local-browsers/**');
+  });
 });
 
 describe('package.json', () => {
@@ -130,17 +134,17 @@ describe('package.json', () => {
 
 describe('installer.nsh', () => {
   const script = readFileSync(join(root, 'build', 'installer.nsh'), 'utf8');
-
-
-
-
+
+
+
+
 
   it('never deletes user data or application data directories', () => {
     expect(script).not.toMatch(/RMDir\s+\/r/i);
     expect(script).not.toContain('$APPDATA');
     expect(script).not.toContain('deleteAppData');
   });
-
+
 
   it('only removes legacy shortcuts and the legacy executable on upgrade', () => {
     expect(script).toContain('Delete "$DESKTOP\\Cyps.lnk"');

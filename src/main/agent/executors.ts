@@ -37,7 +37,7 @@ export interface ToolResult {
   /** Structured detail kept for the audit trail and the task rail. */
   detail?: Record<string, unknown>;
   /** Present when the tool failed, for classification in the UI. */
-  errorCode?: 'TIMEOUT' | 'CANCELLED' | 'DENIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'FAILED';
+  errorCode?: 'TIMEOUT' | 'CANCELLED' | 'CRASHED' | 'DENIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'FAILED';
   verification?: { summary: string; source: string };
 }
 
@@ -102,6 +102,8 @@ export interface ExecutorDeps {
   documents?: DocumentTools;
   /** Bounded, user-approved local file tools. */
   files?: FileTools;
+  /** Isolated desktop-input lease for integration tests; production shares one lease. */
+  inputLease?: DesktopInputLease;
   /** Wait for an explicit user handoff acknowledgement without granting authority. */
   requestHumanTakeover?: (taskId: string, reason: string, signal?: AbortSignal) => Promise<boolean>;
   /** Read-only Windows UI Automation helper. */
@@ -117,7 +119,7 @@ export class ToolExecutors {
 
   constructor(deps: ExecutorDeps = {}) {
     this.deps = deps;
-    this.inputLease = sharedDesktopInputLease;
+    this.inputLease = deps.inputLease ?? sharedDesktopInputLease;
   }
 
   /** Terminate every child process and close the browser. Returns kill count. */
@@ -170,6 +172,9 @@ export class ToolExecutors {
       return signal?.aborted ? cancelledResult(name) : result;
     } finally {
       signal?.removeEventListener('abort', onAbort);
+      if (releaseInput && name === 'invoke_ui_element' && this.deps.nativeHelper?.terminating) {
+        await this.deps.nativeHelper.whenStopped();
+      }
       releaseInput?.();
     }
   }
@@ -263,7 +268,8 @@ export class ToolExecutors {
       if (error instanceof NativeHelperError) {
         const errorCode = error.code === 'UNAVAILABLE' ? 'UNAVAILABLE'
           : error.code === 'TIMEOUT' ? 'TIMEOUT'
-            : error.code === 'CANCELLED' ? 'CANCELLED' : 'FAILED';
+            : error.code === 'CANCELLED' ? 'CANCELLED'
+              : error.code === 'CRASHED' ? 'CRASHED' : 'FAILED';
         return { ok: false, content: `The tool "${name}" failed: ${error.message}`, errorCode };
       }
       return {

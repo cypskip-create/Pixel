@@ -35,6 +35,7 @@ desktop.ini
 .DS_Store
 
 # Local validation artifacts
+/artifacts/
 .pw-browsers/
 validation-report-*.json
 

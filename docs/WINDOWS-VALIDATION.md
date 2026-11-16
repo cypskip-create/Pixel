@@ -1,5 +1,7 @@
 # Validating Pixel on Windows
 
+> Superseded on 2026-11-16. Use [the current ordered acceptance procedure](validation/PIXEL_WINDOWS_ACCEPTANCE.md) and [release-readiness report](validation/PIXEL_RELEASE_READINESS.md) for current commands, test totals and voice capability status. The material below is retained as historical supplementary guidance.
+
 Pixel was developed on a machine that cannot start any Chromium GUI process, so
 the desktop-facing behaviour is compiled and packaged but **not** exercised
 there. This document is the procedure to prove each of those behaviours on a

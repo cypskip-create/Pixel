@@ -19,6 +19,9 @@ const read = (path: string): string => readFileSync(join(root, path), 'utf8');
 
 const mainSource = read('src/main/main.ts');
 const appSource = read('src/main/app.ts');
+const packageJson = JSON.parse(read('package.json')) as {
+  scripts: Record<string, string>;
+};
 const bootSource = read('src/main/startup/boot.ts');
 const selfCheckSource = read('src/main/startup/selfcheck.ts');
 
@@ -55,6 +58,15 @@ describe('entry point ordering', () => {
 
   it('exports start() from the application module', () => {
     expect(appSource).toContain('export async function start()');
+  });
+
+  it('uses the Vite dev server and preserves Chromium software rendering', () => {
+    expect(packageJson.scripts['dev:electron']).toContain(
+      'CYPS_DEV_SERVER_URL=http://localhost:5199',
+    );
+    expect(packageJson.scripts['dev:electron']).toContain('electron --disable-gpu .');
+    expect(appSource).toContain("appendSwitch('disable-gpu')");
+    expect(appSource).not.toContain("appendSwitch('disable-software-rasterizer')");
   });
 
   it('runs the single-instance lock only after logging exists', () => {

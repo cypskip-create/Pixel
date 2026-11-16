@@ -24,28 +24,45 @@ The existing Electron + React + TypeScript product is retained. The local change
 
 ## Validation for this tree
 
-Latest source checks after adding the exact UIA postcondition flow:
+Checkpoint run on 2026-11-16:
 
-- `npm run typecheck`: passed.
-- `npm run build`: passed; main bundle and Vite renderer production output generated.
-- `npm run build:native`: passed; the .NET Framework C# helper compiled. The build script printed its manual ping command; no native request was run during this final check.
-- `git diff --check`: passed; Git only reported existing line-ending normalization warnings.
-- The full Vitest suite had passed earlier in this review (**619 passed and 24 skipped** across 25 files), before the final UIA postcondition implementation. It was not rerun afterward. The earlier skips were 17 browser cases (Chromium absent) and 7 NSIS cases (`makensis` absent).
-- Earlier direct Windows checks covered protocol ping, foreground window, bounded UIA search and title-mismatch refusal. The new present/absent postcondition path compiled but was not exercised against a real app control.
-- The exact-title refusal for `type_text` was exercised through the actual Windows PowerShell child process; no text was sent.
-- Electron GUI startup still fails in this Codex environment with exit `-2147483645`, consistent with the existing [Electron constraints report](docs/ELECTRON-CONSTRAINTS.md). Packaging also stopped when electron-builder could not resolve `github.com` to fetch its Windows signing/edit helper. No current packed app, installer, tray, multi-monitor, microphone or full UI behavior was validated.
+- `npm run typecheck`: passed for renderer and main TypeScript projects.
+- `npm test`: **651 passed, 0 failed, 0 skipped across 25 files**. All 22 Chromium browser tests and all 9 NSIS tests ran. Chromium needed package-local installation; the complete run needed loopback access for its local browser fixture.
+- `npm run build` and `npm run build:native`: passed. `PixelNative.exe` compiled with the Windows .NET Framework compiler.
+- `npm run pack`: passed after excluding Playwright's local test-browser cache. The unpacked package contains `Pixel.exe` and `resources/native/PixelNative.exe` and does not ship the test cache.
+- `npm run dist`: passed with `--publish never`; it produced the NSIS installer, portable executable and unpacked ZIP.
+- `npm run dev`: Vite started; Electron exited before main-process logs or a window appeared (`2147483651`, signed `-2147483645`). Renderer/preload initialization and visible app behavior remain unverified.
+- The harmless UIA fixture and AgentExecutor harness are prepared. The fixture did not enter the foreground desktop session here, so the harness stopped before invoking any control. Actual Pixel approval cards and a real UIA postcondition remain unverified.
+- Voice availability is probed at runtime. Test output varied by execution context, so no fixed STT/TTS availability is claimed.
+- Windows CI is configured but was not run from this uncommitted tree. It uploads logs, JUnit results and distributions and does not publish releases.
 
-See [the current-state report](docs/research/PIXEL_CURRENT_STATE.md) and [Windows acceptance procedure](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md) for detailed evidence and limits.
+See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), [the current-state report](docs/research/PIXEL_CURRENT_STATE.md) and [Windows acceptance procedure](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md) for exact evidence and laptop-side steps.
 
-## Major work still open
+## Capability status
 
-- Cursor following and native UIA tools need acceptance on a normal Windows desktop, especially mixed-DPI displays, accessibility-provider edge cases and actual approval-card behavior. UIA postconditions cover accessible control presence/absence only; they do not read values or verify a newly titled window.
-- Native UIA exposes a limited safe subset. It cannot set form values, read editable control values, reliably identify process names in every app, or click inaccessible/custom controls.
-- Skills are reviewed and runnable through the task model with per-skill tool allowlists, but there is no interaction recorder or deterministic live semantic replay runner. The standalone workflow replay API remains caller-driven.
-- Specialist roles and budgets exist, but no independent model-backed delegation path is connected to the user task flow. VirtualBox/SSH and Pixel Code remain unavailable.
-- There is no general credential broker; account passwords, payment data and authentication challenges must remain human-controlled.
-- Task recovery is manual review and a new request, not automatic continuation.
-- Full GUI/packaged launch, Playwright Chromium and NSIS validation remains for a normal Windows desktop/build environment with network access to GitHub.
+### Implemented
+
+- Durable tasks and safe restart recovery; scoped, one-use approvals; cancellation; task outcomes and verification evidence.
+- Bounded native UIA title/search/invoke/present-absent postcondition operations, with timeout/cancel termination and input-lease retention while process exit is unconfirmed.
+- Browser, files, documents, project memory, reviewed skills, local routines and optional cursor-follow presentation.
+- Windows CI for typechecking, browser/NSIS tests, native-helper compilation and non-publishing package builds.
+
+### Partially implemented
+
+- General action verification is limited to operations with implemented read-back or postconditions; UIA only checks exact accessible-control presence/absence.
+- Voice depends on local Windows capabilities; microphone/UI behavior is unverified.
+- Skills are model-mediated without deterministic interaction recording/replay. Specialist-agent coordination is not independently model-backed in the user task flow.
+
+### Unverified
+
+- Electron GUI, renderer/preload runtime, floating orb, expanded conversation, task/approval UI, cursor-follow, and the live Pixel UIA approval/action flow.
+- Launch of unpacked and portable packages; clean install, upgrade, uninstall and user-data preservation.
+- The GitHub Actions workflow itself; it becomes runnable after the user pushes this branch.
+
+### Missing
+
+- General credential broker, deterministic UI interaction recorder/replay, independent model-backed delegation, VirtualBox/SSH and Pixel Code.
+- Automatic continuation of an interrupted task. Recovery pauses and asks for review; it does not replay the old call stack.
 
 ## Research and architecture
 

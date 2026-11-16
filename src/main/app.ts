@@ -126,7 +126,6 @@ export async function start(): Promise<void> {
   // before the window can paint, so prefer software rendering over a silent
   // crash. Transparent, always-on-top windows still work without the GPU path.
   app.commandLine.appendSwitch('disable-gpu');
-  app.commandLine.appendSwitch('disable-software-rasterizer');
   app.commandLine.appendSwitch('enable-transparent-visuals');
   if (process.platform === 'win32') {
     app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');

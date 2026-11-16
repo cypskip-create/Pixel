@@ -626,7 +626,7 @@ export class AgentExecutor {
       }
     }
 
-    if (result.errorCode === 'TIMEOUT' || result.errorCode === 'CANCELLED') {
+    if (result.errorCode === 'TIMEOUT' || result.errorCode === 'CANCELLED' || result.errorCode === 'CRASHED') {
       task.recoveryNote = 'The operation was interrupted and may have partly completed. Re-observe its target before retrying.';
     }
 

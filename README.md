@@ -19,11 +19,11 @@ automatically. State-changing actions that lack postcondition evidence finish as
 **Needs verification**.
 
 Use [`docs/research/PIXEL_CURRENT_STATE.md`](docs/research/PIXEL_CURRENT_STATE.md)
-for the source-backed feature inventory and latest test totals. Type checking,
-unit tests and the production build are automated checks; they do not prove the
-Windows window, tray, microphone, installer or multi-monitor behavior. The
-current environment also lacks Playwright Chromium and NSIS, so browser and
-installer integration cases are skipped. Follow
+for the source-backed feature inventory. The latest command results, exact test
+totals, release blockers and laptop-side commands are in
+[`docs/validation/PIXEL_RELEASE_READINESS.md`](docs/validation/PIXEL_RELEASE_READINESS.md).
+Type checking, unit tests and production builds do not prove the Windows window,
+tray, microphone, installer or multi-monitor behavior. Follow
 [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
 for the target-machine acceptance run.
 
@@ -90,7 +90,7 @@ npm's script runner cannot spawn child processes. On a normal machine a plain
 ### Development
 
 ```powershell
-npm run dev     # Vite dev server + Electron with hot reload of the renderer
+npm run dev     # Vite dev server + Electron loading it for renderer hot reload
 ```
 
 ### Package the Windows distributions
@@ -160,8 +160,9 @@ completed actions explicitly so nothing implies a rollback that did not happen.
   `window.cyps` preload bridge.
 - No screen capture without an explicit user action. There is no timer and no
   background capture path.
-- No invisible microphone recording. Voice is not enabled in this build, and the
-  UI says so instead of pretending to listen.
+- Voice is partially implemented with local Windows System.Speech services.
+  Recognition and synthesis are probed at runtime and can vary by machine and
+  execution context. The microphone and voice UI path has not been verified.
 - Model output cannot grant permission. Tool authority is a local policy table.
 - Instructions found on websites, in documents, or in screenshots are treated as
   untrusted data, and the system prompt says so.
@@ -190,13 +191,21 @@ That is what keeps a later migration to Tauri a shell-only change.
 ## Tests
 
 ```powershell
-npm test          # 147 unit tests
+npm test          # Full Vitest suite; see the release-readiness report for current totals
 npm run verify    # typecheck + tests + both builds
 ```
 
 Tests cover behaviour rather than markup: real SSE chunk parsing, error mapping
 for each HTTP status, history trimming under budget, the exact rules for when a
 tool may run, and the invariants that keep the processes separated.
+
+## Continuous integration
+
+`.github/workflows/windows-ci.yml` checks types, installs Playwright Chromium,
+runs the full test suite, compiles `PixelNative.exe`, and builds the unpacked app,
+portable executable and NSIS installer on Windows. It uploads logs, JUnit test
+results and build artifacts for 14 days. The workflow builds artifacts only and
+does not publish releases.
 
 ## What Pixel can do
 
@@ -220,7 +229,8 @@ powershell -ExecutionPolicy Bypass -File scripts\validate-windows.ps1 -Launch
 
 The script inspects the real window (size, top-of-screen position, always-on-top,
 transparency, taskbar visibility, DPI) and writes a JSON report.
-`docs/WINDOWS-VALIDATION.md` is the full manual checklist.
+[`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+is the current ordered acceptance checklist.
 
 ## Known gaps
 

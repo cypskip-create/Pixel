@@ -35,6 +35,8 @@ directories:
 files:
   - dist/**/*
   - package.json
+  # Playwright downloads in the test cache are not application runtime assets.
+  - '!**/.local-browsers/**'
   - '!**/*.map'
 
 extraResources:
