@@ -30,6 +30,7 @@ declare global {
         error?: string;
         noSpeech?: boolean;
       }>;
+      voiceCancel(): Promise<number>;
       voiceSpeak(text: string): Promise<{ ok: boolean; error?: string }>;
     };
   }

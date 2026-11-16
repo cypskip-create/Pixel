@@ -29,6 +29,13 @@ import type {
   StreamEvent,
   Surface,
   TaskRecord,
+  SkillRecord,
+  SkillDraftRequest,
+  RoutineRecord,
+  RoutineRunRecord,
+  MemoryRecordView,
+  MemoryExportView,
+  PixelMemoryKind,
 } from '../shared/types';
 
 export { CHANNELS } from '../shared/channels';
@@ -125,6 +132,7 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.systemDiagnostics) as Promise<DiagnosticsSnapshot>,
     emergencyStop: () =>
       ipcRenderer.invoke(CH.systemEmergencyStop) as Promise<EmergencyStopReport>,
+    emergencyClear: () => ipcRenderer.invoke(CH.systemEmergencyClear) as Promise<void>,
     onEmergencyStop: (handler: (report: EmergencyStopReport) => void) =>
       subscribe(CH.systemEmergencyStopEvent, handler),
   },
@@ -140,10 +148,41 @@ const bridge: CypsBridge = {
   },
 
   tasks: {
+    list: () => ipcRenderer.invoke(CH.tasksList) as Promise<TaskRecord[]>,
     onUpdate: (handler: (task: TaskRecord) => void) => subscribe(CH.tasksUpdate, handler),
     pause: (taskId: string) => ipcRenderer.invoke(CH.tasksPause, taskId) as Promise<void>,
     resume: (taskId: string) => ipcRenderer.invoke(CH.tasksResume, taskId) as Promise<void>,
     cancel: (taskId: string) => ipcRenderer.invoke(CH.tasksCancel, taskId) as Promise<void>,
+    continueAfterHandoff: (taskId: string) => ipcRenderer.invoke(CH.tasksContinueAfterHandoff, taskId) as Promise<boolean>,
+  },
+
+  skills: {
+    list: () => ipcRenderer.invoke(CH.skillsList) as Promise<SkillRecord[]>,
+    createDraft: (draft: SkillDraftRequest) =>
+      ipcRenderer.invoke(CH.skillsCreateDraft, draft) as Promise<SkillRecord>,
+    activate: (skillId: string) => ipcRenderer.invoke(CH.skillsActivate, skillId) as Promise<SkillRecord>,
+    delete: (skillId: string) => ipcRenderer.invoke(CH.skillsDelete, skillId) as Promise<boolean>,
+  },
+
+  routines: {
+    list: () => ipcRenderer.invoke(CH.routinesList) as Promise<RoutineRecord[]>,
+    create: (input: { skillId: string; name: string; localTime: string; timezone: string }) =>
+      ipcRenderer.invoke(CH.routinesCreate, input) as Promise<RoutineRecord>,
+    setEnabled: (routineId: string, enabled: boolean) =>
+      ipcRenderer.invoke(CH.routinesSetEnabled, routineId, enabled) as Promise<boolean>,
+    delete: (routineId: string) => ipcRenderer.invoke(CH.routinesDelete, routineId) as Promise<boolean>,
+    history: (routineId: string, limit?: number) =>
+      ipcRenderer.invoke(CH.routinesHistory, routineId, limit) as Promise<RoutineRunRecord[]>,
+    cancel: (routineId: string) => ipcRenderer.invoke(CH.routinesCancel, routineId) as Promise<boolean>,
+    retry: (routineId: string) => ipcRenderer.invoke(CH.routinesRetry, routineId) as Promise<boolean>,
+  },
+
+  memory: {
+    list: () => ipcRenderer.invoke(CH.memoryList) as Promise<MemoryRecordView[]>,
+    update: (id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }) =>
+      ipcRenderer.invoke(CH.memoryUpdate, id, patch) as Promise<MemoryRecordView>,
+    delete: (id: string) => ipcRenderer.invoke(CH.memoryDelete, id) as Promise<boolean>,
+    export: () => ipcRenderer.invoke(CH.memoryExport) as Promise<MemoryExportView>,
   },
 
   audit: {
@@ -184,6 +223,7 @@ const shell = {
       error?: string;
       noSpeech?: boolean;
     }>,
+  voiceCancel: () => ipcRenderer.invoke(CH.voiceCancel) as Promise<number>,
 
   /** Speak text aloud with the installed Windows voice. */
   voiceSpeak: (text: string) =>

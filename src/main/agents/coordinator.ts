@@ -76,6 +76,7 @@ export const SPECIALISTS: Record<SpecialistId, SpecialistDefinition> = {
     allowedTools: [
       'memory_search',
       'memory_list',
+      'memory_update',
       'documents_search',
       'documents_list',
       'documents_index',

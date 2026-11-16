@@ -75,9 +75,12 @@ interface Harness {
 
 function harness(options: {
   outcomes: TurnOutcome[];
+  engine?: TurnRunner;
   tools?: ToolRunner;
   /** Auto-answer permission prompts. */
   approve?: boolean;
+  /** Leave permission prompts pending so a test can drive the decision. */
+  deferApproval?: boolean;
   revokedGrants?: boolean;
 }): Harness {
   const audit = new AuditLog();
@@ -88,6 +91,7 @@ function harness(options: {
 
   const broker = new PermissionBroker(registry, audit, (request) => {
     prompts.push(request);
+    if (options.deferApproval) return;
     // Answer on the next tick so the loop is genuinely suspended.
     queueMicrotask(() => {
       broker.respond({
@@ -98,7 +102,7 @@ function harness(options: {
     });
   });
 
-  const engine = scriptedEngine(options.outcomes);
+  const engine = options.engine ?? scriptedEngine(options.outcomes);
 
   const agent = new AgentExecutor({
     engine,
@@ -201,7 +205,7 @@ describe('agent loop - approval', () => {
   it('suspends, asks, and executes once approved', async () => {
     const tools = fakeTools({ type_text: { ok: true, content: 'typed 5 characters' } });
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello' }), plainAnswer('Typed it.')],
+      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('Typed it.')],
       tools,
       approve: true,
     });
@@ -212,13 +216,15 @@ describe('agent loop - approval', () => {
     expect(h.prompts[0].toolName).toBe('type_text');
     expect(h.prompts[0].changesData).toBe(true);
     expect(tools.calls).toEqual(['type_text']);
-    expect(result.task.status).toBe('completed');
+    expect(result.task.status).toBe('blocked');
+    expect(result.task.pendingVerifications).toHaveLength(1);
+    expect(result.finalContent).toMatch(/could not verify the result/i);
   });
 
   it('does not execute when the user denies, and tells the model so', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello' }), plainAnswer('Understood.')],
+      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('Understood.')],
       tools,
       approve: false,
     });
@@ -236,7 +242,7 @@ describe('agent loop - approval', () => {
 
   it('records a denied tool call in the audit trail', async () => {
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello' }), plainAnswer('ok')],
+      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('ok')],
       approve: false,
     });
     await run(h.agent);
@@ -245,11 +251,96 @@ describe('agent loop - approval', () => {
 
   it('sends the risk level so the UI can show an honest warning', async () => {
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'x' }), plainAnswer('ok')],
+      outcomes: [toolStep('type_text', { text: 'x', expectedWindowTitle: 'Test window' }), plainAnswer('ok')],
       approve: false,
     });
     await run(h.agent);
     expect(h.prompts[0].risk).toBe('high');
+  });
+
+  it('honors a pause requested while approval is open', async () => {
+    const tools = fakeTools({ type_text: { ok: true, content: 'typed 5 characters' } });
+    const h = harness({
+      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('Typed it.')],
+      tools,
+      deferApproval: true,
+    });
+    const running = run(h.agent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.prompts).toHaveLength(1);
+    const taskId = h.tasks.list()[0]?.id;
+    expect(taskId).toBeDefined();
+    h.tasks.pause(taskId!);
+    h.broker.respond({ requestId: h.prompts[0].id, approved: true, duration: 'once' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(h.tasks.get(taskId!)?.status).toBe('paused');
+    expect(tools.calls).toEqual([]);
+    h.tasks.resume(taskId!);
+    const result = await running;
+    expect(tools.calls).toEqual(['type_text']);
+    expect(result.task.status).toBe('blocked');
+  });
+
+  it('cancels promptly when the user stops a task with an approval open', async () => {
+    const tools = fakeTools();
+    const h = harness({
+      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('should not run')],
+      tools,
+      deferApproval: true,
+    });
+    const running = run(h.agent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const taskId = h.tasks.list()[0]?.id;
+    expect(taskId).toBeDefined();
+    expect(h.broker.isPending()).toBe(true);
+    h.tasks.cancel(taskId!);
+    const result = await running;
+    expect(result.task.status).toBe('cancelled');
+    expect(h.broker.isPending()).toBe(false);
+    expect(tools.calls).toEqual([]);
+  });
+});
+
+describe('agent loop - human handoff', () => {
+  it('requires an explicit continue and a fresh observation before any next action', async () => {
+    let tasks: TaskManager | null = null;
+    const calls: string[] = [];
+    const tools: ToolRunner = {
+      async run(name, args, signal, context): Promise<ToolResult> {
+        if (name === 'request_human_takeover') {
+          if (!tasks || !context || !signal) throw new Error('Task context was not passed to the tool runner.');
+          const waiting = tasks.waitForHuman(context.taskId, String(args.reason), signal);
+          queueMicrotask(() => tasks?.continueAfterHandoff(context.taskId));
+          const continued = await waiting;
+          return { ok: continued, content: 'User handoff acknowledged.' };
+        }
+        calls.push(name);
+        if (name === 'open_application') {
+          return { ok: true, content: 'Notepad opened.', verification: { summary: 'Notepad is present.', source: 'test window probe' } };
+        }
+        return { ok: true, content: 'Current browser page observed.' };
+      },
+      killAll: () => 0,
+    };
+    const h = harness({
+      tools,
+      approve: true,
+      outcomes: [
+        toolStep('request_human_takeover', { reason: 'Complete the MFA prompt yourself.' }),
+        toolStep('open_application', { name: 'notepad' }, 'call_blocked_before_recheck'),
+        toolStep('browser_inspect', {}, 'call_reobserve'),
+        toolStep('open_application', { name: 'notepad' }, 'call_allowed_after_recheck'),
+        plainAnswer('The handoff was rechecked before Notepad opened.'),
+      ],
+    });
+    tasks = h.tasks;
+
+    const result = await run(h.agent);
+    expect(result.task.status).toBe('completed');
+    expect(calls).toEqual(['browser_inspect', 'open_application']);
+    expect(result.executed.find((step) => step.name === 'open_application' && !step.ok)?.summary).toMatch(/re-observation required/i);
+    expect(h.prompts).toHaveLength(1);
   });
 });
 
@@ -258,6 +349,24 @@ describe('agent loop - approval', () => {
  * ------------------------------------------------------------------ */
 
 describe('agent loop - failures', () => {
+  it('records an unexpected model error and releases the task runner', async () => {
+    const h = harness({
+      outcomes: [],
+      engine: {
+        async runTurn(): Promise<TurnOutcome> {
+          throw new Error('provider process failed');
+        },
+      },
+    });
+
+    const result = await run(h.agent);
+
+    expect(result.task.status).toBe('failed');
+    expect(result.finalContent).toBe('');
+    expect(h.agent.isRunning).toBe(false);
+    expect(h.tasks.runningCount()).toBe(0);
+  });
+
   it('reports an unknown tool to the model without crashing', async () => {
     const h = harness({
       outcomes: [toolStep('does_not_exist', {}), plainAnswer('I cannot do that.')],
@@ -288,7 +397,7 @@ describe('agent loop - failures', () => {
   it('blocks a state-changing tool in Guide mode without asking', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hi' }), plainAnswer('Guide mode cannot type.')],
+      outcomes: [toolStep('type_text', { text: 'hi', expectedWindowTitle: 'Test window' }), plainAnswer('Guide mode cannot type.')],
       tools,
     });
     const result = await h.agent.run({

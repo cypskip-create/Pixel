@@ -61,6 +61,7 @@ export interface DocumentToolResult {
   content: string;
   detail?: Record<string, unknown>;
   errorCode?: 'NOT_FOUND' | 'FAILED' | 'UNAVAILABLE' | 'DENIED';
+  verification?: { summary: string; source: string };
 }
 
 export class DocumentTools {
@@ -74,10 +75,10 @@ export class DocumentTools {
     return DOCUMENT_TOOL_DEFINITIONS.some((tool) => tool.name === name);
   }
 
-  async run(name: string, args: Record<string, unknown>): Promise<DocumentToolResult> {
+  async run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<DocumentToolResult> {
     switch (name) {
       case 'documents_index':
-        return this.indexDirectory(args);
+        return this.indexDirectory(args, signal);
       case 'documents_search':
         return this.search(args);
       case 'documents_list':
@@ -87,7 +88,7 @@ export class DocumentTools {
     }
   }
 
-  private async indexDirectory(args: Record<string, unknown>): Promise<DocumentToolResult> {
+  private async indexDirectory(args: Record<string, unknown>, signal?: AbortSignal): Promise<DocumentToolResult> {
     const availability = this.isAvailable();
     if (!availability.available) {
       return {
@@ -110,7 +111,7 @@ export class DocumentTools {
     }
 
     const projectId = this.resolveProject();
-    const result = await this.index.indexDirectory(projectId, directory);
+    const result = await this.index.indexDirectory(projectId, directory, { signal });
     const stats = this.index.stats(projectId);
 
     const summary = [
@@ -134,6 +135,9 @@ export class DocumentTools {
       ok: true,
       content: summary.join(' '),
       detail: { ...result, stats },
+      ...(!result.cleanupSkipped && result.failed === 0
+        ? { verification: { summary: `Confirmed the project index now reports ${String(stats.documents)} documents and ${String(stats.chunks)} passages.`, source: 'SQLite index statistics read-back' } }
+        : {}),
     };
   }
 

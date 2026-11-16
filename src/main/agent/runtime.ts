@@ -18,6 +18,8 @@ import type {
 import type { AuditSink } from './auditStore';
 import { describeScope } from './scope';
 import { ToolRegistry, applyDecision } from './tools';
+import type { TaskPersistence } from '../tasks/store';
+import { redactTaskText } from '../tasks/schema';
 
 export const MAX_AUDIT_ENTRIES = 500;
 
@@ -67,8 +69,7 @@ export class AuditLog {
  * than defaulting to approved.
  */
 export class PermissionBroker {
-  private pending: { request: PermissionRequest; resolve: (d: PermissionDecision) => void } | null =
-    null;
+  private pending: { request: PermissionRequest; resolve: (d: PermissionDecision) => void; cleanup: () => void } | null = null;
   private readonly grants = new Map<string, PermissionGrant>();
   private readonly registry: ToolRegistry;
   private readonly audit: AuditLog;
@@ -81,7 +82,8 @@ export class PermissionBroker {
   }
 
   /** Ask the user. Resolves with their decision; never resolves to approved by default. */
-  async ask(request: PermissionRequest): Promise<PermissionDecision> {
+  async ask(request: PermissionRequest, signal?: AbortSignal): Promise<PermissionDecision> {
+    if (signal?.aborted) return { requestId: request.id, approved: false, duration: 'once' };
     if (this.pending) {
       // One prompt at a time: a second concurrent request is refused rather
       // than queued, so the UI cannot be tricked into approving twice.
@@ -91,8 +93,32 @@ export class PermissionBroker {
     this.audit.record('permission', `Asked to run "${request.toolName}"`, 'ok', request.action);
 
     return new Promise<PermissionDecision>((resolve) => {
-      this.pending = { request, resolve };
-      this.emitRequest(request);
+      const cleanup = (): void => signal?.removeEventListener('abort', onAbort);
+      const onAbort = (): void => {
+        if (this.pending?.request.id !== request.id) return;
+        this.pending = null;
+        cleanup();
+        this.audit.record('permission', `Cancelled "${request.toolName}"`, 'cancelled');
+        resolve({ requestId: request.id, approved: false, duration: 'once' });
+      };
+      this.pending = { request, resolve, cleanup };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        this.emitRequest(request);
+      } catch {
+        this.pending = null;
+        cleanup();
+        try {
+          this.audit.record('permission', 'Could not deliver the approval request', 'error');
+        } catch {
+          // A failed audit sink must not leave a permission prompt pending.
+        }
+        resolve({ requestId: request.id, approved: false, duration: 'once' });
+      }
     });
   }
 
@@ -100,10 +126,37 @@ export class PermissionBroker {
   respond(decision: PermissionDecision): void {
     const pending = this.pending;
     if (!pending) return;
+    if (decision.requestId !== pending.request.id) {
+      this.audit.record('permission', 'Ignored a stale approval response', 'denied');
+      return;
+    }
+    if (
+      typeof decision.approved !== 'boolean' ||
+      !['once', 'session', 'always'].includes(decision.duration)
+    ) {
+      this.audit.record('permission', 'Ignored an invalid approval response', 'denied');
+      return;
+    }
     this.pending = null;
+    pending.cleanup();
 
-    if (decision.approved) {
-      const grant = applyDecision(decision, {
+    // The renderer is not an authority boundary. Even if a modified or stale
+    // UI asks for a standing grant, only the exact scoped action represented by
+    // this request may retain one; high-risk and unscoped requests are one-shot.
+    const effectiveDecision: PermissionDecision = {
+      ...decision,
+      duration:
+        decision.approved && decision.duration !== 'once' &&
+        (pending.request.allowPersistent !== true || pending.request.risk === 'high')
+          ? 'once'
+          : decision.duration,
+    };
+    if (decision.approved && effectiveDecision.duration !== decision.duration) {
+      this.audit.record('permission', 'Reduced an unsupported standing approval to one use', 'ok');
+    }
+
+    if (effectiveDecision.approved) {
+      const grant = applyDecision(effectiveDecision, {
         toolName: pending.request.toolName,
         args: pending.request.args,
       });
@@ -121,7 +174,7 @@ export class PermissionBroker {
       this.audit.record('permission', `Denied "${pending.request.toolName}"`, 'denied');
     }
 
-    pending.resolve(decision);
+    pending.resolve(effectiveDecision);
   }
 
   /** Reject anything still pending; used when a turn ends or stop is pressed. */
@@ -129,6 +182,7 @@ export class PermissionBroker {
     const pending = this.pending;
     if (!pending) return;
     this.pending = null;
+    pending.cleanup();
     this.audit.record('permission', `Cancelled "${pending.request.toolName}"`, 'cancelled');
     pending.resolve({ requestId: pending.request.id, approved: false, duration: 'once' });
   }
@@ -163,22 +217,50 @@ export class PermissionBroker {
 export class TaskManager {
   private readonly tasks = new Map<string, TaskRecord>();
   private readonly emit: (task: TaskRecord) => void;
+  private readonly persistence?: TaskPersistence;
+  private readonly onError: (error: unknown) => void;
+  private readonly controls = new Map<string, { cancel: () => void }>();
+  private readonly pauseWaiters = new Map<string, (resumed: boolean) => void>();
+  private readonly handoffWaiters = new Map<string, (continued: boolean) => void>();
 
-  constructor(emit: (task: TaskRecord) => void) {
+  constructor(
+    emit: (task: TaskRecord) => void,
+    persistence?: TaskPersistence,
+    onPersistenceError: (error: unknown) => void = () => undefined,
+  ) {
     this.emit = emit;
+    this.persistence = persistence;
+    this.onError = onPersistenceError;
+
+    for (const restored of persistence?.load() ?? []) {
+      const interrupted = isActiveStatus(restored.status) || restored.status === 'paused'
+        ? {
+            ...restored,
+            status: 'paused' as const,
+            pauseRequested: false,
+            recoveryNote:
+              'Pixel restarted while this task was active. Its previous call stack and pending approval were discarded. Review the last completed step and recheck the target before starting a new request.',
+            checkpoint: {
+              phase: 'before_tool' as const,
+              at: Date.now(),
+              summary: 'Restart recovery: no action was resumed automatically.',
+            },
+          }
+        : restored;
+      if (interrupted !== restored) this.commit(interrupted);
+      else this.tasks.set(restored.id, restored);
+    }
   }
 
   upsert(task: TaskRecord): void {
-    this.tasks.set(task.id, task);
-    this.emit(task);
+    this.commit(task);
   }
 
   update(id: string, patch: Partial<TaskRecord>): void {
     const existing = this.tasks.get(id);
     if (!existing) return;
     const next: TaskRecord = { ...existing, ...patch };
-    this.tasks.set(id, next);
-    this.emit(next);
+    this.commit(next);
   }
 
   get(id: string): TaskRecord | undefined {
@@ -186,21 +268,104 @@ export class TaskManager {
   }
 
   list(): TaskRecord[] {
-    return [...this.tasks.values()];
+    return [...this.tasks.values()].sort(
+      (a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt),
+    );
+  }
+
+  registerControl(id: string, control: { cancel: () => void }): void {
+    this.controls.set(id, control);
+  }
+
+  unregisterControl(id: string): void {
+    this.controls.delete(id);
+    this.pauseWaiters.get(id)?.(false);
+    this.pauseWaiters.delete(id);
+    this.handoffWaiters.get(id)?.(false);
+    this.handoffWaiters.delete(id);
+  }
+
+  /** Stop the agent at a safe point until the user explicitly completes a handoff. */
+  async waitForHuman(id: string, reason: string, signal: AbortSignal): Promise<boolean> {
+    const task = this.tasks.get(id);
+    if (!task || !this.controls.has(id) || signal.aborted) return false;
+    if (this.handoffWaiters.has(id)) return false;
+    const safeReason = redactHandoffReason(reason);
+    this.update(id, {
+      status: 'awaiting_user',
+      handoffReason: safeReason,
+      checkpoint: { phase: 'before_tool', at: Date.now(), summary: 'Paused for user handoff.' },
+    });
+    return new Promise<boolean>((resolve) => {
+      const finish = (continued: boolean): void => {
+        signal.removeEventListener('abort', onAbort);
+        this.handoffWaiters.delete(id);
+        resolve(continued && !signal.aborted);
+      };
+      const onAbort = (): void => finish(false);
+      this.handoffWaiters.set(id, finish);
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) finish(false);
+    });
+  }
+
+  /** Continue the current call stack only after the user acknowledges the handoff. */
+  continueAfterHandoff(id: string): boolean {
+    const task = this.tasks.get(id);
+    const resolve = this.handoffWaiters.get(id);
+    if (!task || task.status !== 'awaiting_user' || !resolve) return false;
+    this.update(id, {
+      status: 'running',
+      handoffReason: undefined,
+      reobserveRequired: true,
+      evidence: [
+        ...(task.evidence ?? []),
+        {
+          id: `recovery_${Date.now().toString(36)}`,
+          kind: 'recovery' as const,
+          summary: 'User indicated the handoff is complete. Re-observation is still required before further action.',
+          source: 'User handoff acknowledgement',
+          at: Date.now(),
+        },
+      ].slice(-100),
+    });
+    resolve(true);
+    return true;
+  }
+
+  /** Wait until a safe executor boundary is resumed, or cancellation occurs. */
+  async waitUntilRunnable(id: string, phase: 'before_model' | 'before_tool', signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return false;
+    const task = this.get(id);
+    if (!task || task.recoveryNote) return false;
+    this.update(id, {
+      checkpoint: { phase, at: Date.now(), summary: 'Safe point reached.' },
+    });
+    const current = this.get(id);
+    if (!current?.pauseRequested) return !signal.aborted;
+
+    this.update(id, { status: 'paused', pauseRequested: false });
+    return new Promise<boolean>((resolve) => {
+      const finish = (resumed: boolean): void => {
+        signal.removeEventListener('abort', onAbort);
+        this.pauseWaiters.delete(id);
+        resolve(resumed && !signal.aborted);
+      };
+      const onAbort = (): void => finish(false);
+      this.pauseWaiters.set(id, (resumed) => finish(resumed));
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) finish(false);
+    });
   }
 
   /** Mark every running or planning task as cancelled. Returns how many. */
   cancelAll(_reason: string): number {
     let count = 0;
     for (const task of this.tasks.values()) {
-      if (task.status === 'running' || task.status === 'planning' || task.status === 'awaiting_approval') {
-        const next: TaskRecord = {
-          ...task,
-          status: 'cancelled',
-          endedAt: Date.now(),
-        };
-        this.tasks.set(task.id, next);
-        this.emit(next);
+      if (isCancellableStatus(task.status)) {
+        this.controls.get(task.id)?.cancel();
+        this.pauseWaiters.get(task.id)?.(false);
+        this.update(task.id, { status: 'cancelled', endedAt: Date.now(), pauseRequested: false });
         count += 1;
       }
     }
@@ -209,24 +374,62 @@ export class TaskManager {
 
   pause(id: string): void {
     const task = this.tasks.get(id);
-    if (task && task.status === 'running') this.update(id, { status: 'paused' });
+    if (!task || !this.controls.has(id) || !['running', 'planning', 'awaiting_approval'].includes(task.status)) return;
+    this.update(id, { status: 'pause_requested', pauseRequested: true });
   }
 
   resume(id: string): void {
     const task = this.tasks.get(id);
-    if (task && task.status === 'paused') this.update(id, { status: 'running' });
+    if (!task || task.status !== 'paused' || task.recoveryNote || !this.controls.has(id)) return;
+    this.update(id, { status: 'running', pauseRequested: false });
+    this.pauseWaiters.get(id)?.(true);
   }
 
   cancel(id: string): void {
     const task = this.tasks.get(id);
-    if (task && task.status !== 'completed' && task.status !== 'failed') {
-      this.update(id, { status: 'cancelled' });
+    if (!task || !isCancellableStatus(task.status)) return;
+    const cancel = this.controls.get(id)?.cancel;
+    if (!cancel) {
+      this.update(id, { status: 'cancelled', endedAt: Date.now(), pauseRequested: false });
+      return;
     }
+    this.update(id, { status: 'cancelling', pauseRequested: false });
+    this.pauseWaiters.get(id)?.(false);
+    cancel();
   }
 
   runningCount(): number {
-    return [...this.tasks.values()].filter((t) => t.status === 'running').length;
+    return [...this.tasks.values()].filter((t) => isActiveStatus(t.status)).length;
   }
+
+  private commit(task: TaskRecord): void {
+    const next: TaskRecord = { ...task, updatedAt: Date.now() };
+    this.tasks.set(next.id, next);
+    try {
+      this.persistence?.save(next);
+    } catch (error) {
+      this.onError(error);
+    }
+    try {
+      this.emit(next);
+    } catch (error) {
+      // A renderer can close while a task is running. Durable state remains the
+      // source of truth and will be hydrated from tasks.list() on the next view.
+      this.onError(error);
+    }
+  }
+}
+
+function isActiveStatus(status: TaskRecord['status']): boolean {
+  return ['planning', 'running', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'cancelling'].includes(status);
+}
+
+function isCancellableStatus(status: TaskRecord['status']): boolean {
+  return isActiveStatus(status) || status === 'paused' || status === 'blocked';
+}
+
+function redactHandoffReason(reason: string): string {
+  return redactTaskText(reason.replace(/\s+/g, ' ').trim()).slice(0, 1_000);
 }
 
 export interface EmergencyStopDeps {

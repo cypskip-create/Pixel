@@ -17,17 +17,19 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
     "verify": "npm run typecheck && npm test && npm run build && node scripts/make-icon.mjs",
+    "build:native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1",
     "diagnose": "node scripts/diagnose.mjs",
     "validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-windows.ps1 -Launch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pack": "npm run build && electron-builder --win --dir",
-    "dist": "npm run build && electron-builder --win",
+    "pack": "npm run build && npm run build:native && electron-builder --win --dir",
+    "dist": "npm run build && npm run build:native && electron-builder --win",
     "diagnose:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-installer.ps1",
     "repair:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/repair-install-state.ps1"
   },
   "dependencies": {
-    "playwright": "^1.65.0"
+    "playwright": "^1.65.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",

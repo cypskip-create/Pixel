@@ -19,7 +19,7 @@ export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     description:
       'Saves a durable fact, preference or project detail so it can be recalled in later conversations. Only save what the user explicitly told you to remember.',
     category: 'memory',
-    risk: 'low',
+    risk: 'high',
     requiresApproval: true,
     changesState: true,
     parameters: {
@@ -83,10 +83,29 @@ export const MEMORY_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'memory_update',
+    description: 'Corrects an existing memory in the active project when the user explicitly asks to change it.',
+    category: 'memory',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        content: { type: 'string', maxLength: 4_000 },
+        kind: { type: 'string', enum: [...MEMORY_KINDS] },
+        tags: { type: 'array', items: { type: 'string', maxLength: 64 }, maxItems: 8 },
+      },
+      required: ['id', 'content'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'memory_forget',
     description: 'Deletes a memory by id. Only use when the user asks to forget something.',
     category: 'memory',
-    risk: 'medium',
+    risk: 'high',
     requiresApproval: true,
     changesState: true,
     parameters: {
@@ -103,6 +122,7 @@ export interface MemoryToolResult {
   content: string;
   detail?: Record<string, unknown>;
   errorCode?: 'NOT_FOUND' | 'FAILED' | 'DENIED';
+  verification?: { summary: string; source: string };
 }
 
 /** Executes the memory tools against a store, scoped to a project. */
@@ -125,6 +145,8 @@ export class MemoryTools {
           return this.search(args);
         case 'memory_list':
           return this.list(args);
+        case 'memory_update':
+          return this.update(args);
         case 'memory_forget':
           return this.forget(args);
         default:
@@ -146,6 +168,9 @@ export class MemoryTools {
     }
     if (content.length > 4_000) {
       return { ok: false, content: 'A memory must be 4,000 characters or fewer.', errorCode: 'FAILED' };
+    }
+    if (looksLikeSecret(content)) {
+      return { ok: false, content: 'Pixel will not save passwords, API keys, tokens, or other credential-like values in memory.', errorCode: 'DENIED' };
     }
     const kind = MEMORY_KINDS.includes(args.kind as MemoryKind)
       ? (args.kind as MemoryKind)
@@ -170,6 +195,8 @@ export class MemoryTools {
       confidence,
       tags,
     });
+    const persisted = this.store.get(result.memory.id);
+    const verified = persisted?.projectId === projectId && persisted.content === content;
 
     return {
       ok: true,
@@ -177,6 +204,7 @@ export class MemoryTools {
         ? `Already remembered (id ${result.memory.id}); usage count increased.`
         : `Saved to memory (id ${result.memory.id}, kind ${kind}).`,
       detail: { id: result.memory.id, duplicate: result.duplicate, kind },
+      ...(verified ? { verification: { summary: `Read memory ${result.memory.id} back from this project and confirmed the saved text.`, source: 'SQLite memory read-back' } } : {}),
     };
   }
 
@@ -259,7 +287,49 @@ export class MemoryTools {
       };
     }
 
-    this.store.delete(id);
-    return { ok: true, content: `Deleted memory ${id}.`, detail: { id } };
+    const removed = this.store.delete(id);
+    const deleted = this.store.get(id) === null;
+    if (!removed || !deleted) {
+      return { ok: false, content: `Memory ${id} could not be deleted.`, errorCode: 'FAILED' };
+    }
+    return {
+      ok: true,
+      content: `Deleted memory ${id}.`,
+      detail: { id },
+      ...(deleted ? { verification: { summary: `Confirmed memory ${id} is absent after deletion.`, source: 'SQLite memory read-back' } } : {}),
+    };
   }
+
+  private update(args: Record<string, unknown>): MemoryToolResult {
+    const id = typeof args.id === 'string' ? args.id.trim() : '';
+    const content = typeof args.content === 'string' ? args.content.trim() : '';
+    if (!id || !content) return { ok: false, content: 'A memory id and corrected content are required.', errorCode: 'FAILED' };
+    if (content.length > 4_000) return { ok: false, content: 'Corrected memory must be 4,000 characters or fewer.', errorCode: 'FAILED' };
+    if (looksLikeSecret(content)) return { ok: false, content: 'Pixel will not store credential-like values in memory.', errorCode: 'DENIED' };
+    const existing = this.store.get(id);
+    if (!existing || existing.projectId !== this.resolveProject()) {
+      return { ok: false, content: 'That memory is not in the active project.', errorCode: existing ? 'DENIED' : 'NOT_FOUND' };
+    }
+    const kind = args.kind === undefined ? undefined : MEMORY_KINDS.includes(args.kind as MemoryKind) ? args.kind as MemoryKind : undefined;
+    if (args.kind !== undefined && kind === undefined) return { ok: false, content: 'The requested memory category is invalid.', errorCode: 'FAILED' };
+    const tags = Array.isArray(args.tags)
+      ? args.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8).map((tag) => tag.trim().slice(0, 64))
+      : undefined;
+    this.store.update(id, { content, ...(kind ? { kind } : {}), ...(tags ? { tags } : {}) });
+    const verified = this.store.get(id);
+    return {
+      ok: verified?.content === content && verified.projectId === existing.projectId,
+      content: verified?.content === content ? `Corrected memory ${id}.` : `Memory ${id} could not be verified after correction.`,
+      detail: { id },
+      ...(verified?.content === content ? { verification: { summary: `Read corrected memory ${id} back from this project.`, source: 'SQLite memory read-back' } } : {}),
+    };
+  }
+}
+
+function looksLikeSecret(content: string): boolean {
+  return /\b(password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s*(?:=|:)\s*\S+/i.test(content)
+    || /\b(password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s+is\s+\S+/i.test(content)
+    || /\bsk-[A-Za-z0-9_-]{12,}\b/.test(content)
+    || /\bAKIA[0-9A-Z]{16}\b/.test(content)
+    || /\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/i.test(content);
 }

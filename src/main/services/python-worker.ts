@@ -16,6 +16,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { terminateProcessTree } from './process';
 
 export const WORKER_PROTOCOL_VERSION = 1;
 
@@ -78,6 +79,8 @@ interface Pending {
   resolve: (value: WorkerResult<unknown>) => void;
   timer: NodeJS.Timeout;
   operation: string;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
 /** How the worker can be reached right now. */
@@ -132,8 +135,8 @@ export class PythonWorker {
     return response;
   }
 
-  async extract(path: string): Promise<WorkerResult<ExtractedDocument>> {
-    return this.send<ExtractedDocument>('extract', { path });
+  async extract(path: string, signal?: AbortSignal): Promise<WorkerResult<ExtractedDocument>> {
+    return this.send<ExtractedDocument>('extract', { path }, this.options.requestTimeoutMs, signal);
   }
 
   /** Stop the worker. Safe to call when it is not running. */
@@ -149,11 +152,7 @@ export class PythonWorker {
     this.child = null;
     this.buffer = '';
     this.failAllPending({ code: 'WORKER_UNAVAILABLE', message: 'The worker was shut down.' });
-    try {
-      child.kill();
-    } catch {
-      // Already gone.
-    }
+    terminateProcessTree(child);
   }
 
   /** True when a worker process is currently running. */
@@ -167,9 +166,16 @@ export class PythonWorker {
     op: string,
     params: Record<string, unknown>,
     timeoutMs = this.options.requestTimeoutMs,
+    signal?: AbortSignal,
   ): Promise<WorkerResult<T>> {
+    if (signal?.aborted) {
+      return { ok: false, error: { code: 'CANCELLED', message: `The "${op}" request was cancelled before it started.` } };
+    }
     const started = await this.ensureStarted();
     if (!started.ok) return started;
+    if (signal?.aborted) {
+      return { ok: false, error: { code: 'CANCELLED', message: `The "${op}" request was cancelled before it was sent.` } };
+    }
 
     const child = this.child;
     if (!child || child.stdin.destroyed) {
@@ -183,29 +189,53 @@ export class PythonWorker {
     const payload = JSON.stringify({ id, op, protocol: WORKER_PROTOCOL_VERSION, params });
 
     return new Promise<WorkerResult<T>>((resolve) => {
+      let settled = false;
+      const finish = (result: WorkerResult<unknown>): void => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        resolve(result as WorkerResult<T>);
+      };
+      const onAbort = (): void => {
+        const pending = this.pending.get(id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pending.delete(id);
+        }
+        finish({ ok: false, error: { code: 'CANCELLED', message: `The "${op}" request was cancelled; its worker was stopped.` } });
+        this.terminateWorker('The document worker was stopped after cancellation.');
+      };
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        resolve({
+        finish({
           ok: false,
           error: {
             code: 'TIMEOUT',
             message: `The "${op}" request took longer than ${String(timeoutMs)} ms.`,
           },
         });
+        this.terminateWorker('The document worker was stopped after a request timeout.');
       }, timeoutMs);
 
       this.pending.set(id, {
-        resolve: resolve as (value: WorkerResult<unknown>) => void,
+        resolve: finish,
         timer,
         operation: op,
+        signal,
+        onAbort,
       });
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
 
       try {
         child.stdin.write(`${payload}\n`);
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
-        resolve({
+        finish({
           ok: false,
           error: {
             code: 'WORKER_UNAVAILABLE',
@@ -335,6 +365,7 @@ export class PythonWorker {
 
     this.pending.delete(frame.id as string);
     clearTimeout(pending.timer);
+    pending.signal?.removeEventListener('abort', pending.onAbort!);
 
     if (frame.ok) {
       pending.resolve({ ok: true, result: frame.result as unknown });
@@ -353,9 +384,19 @@ export class PythonWorker {
   private failAllPending(error: WorkerFailure): void {
     for (const [, pending] of this.pending) {
       clearTimeout(pending.timer);
+      pending.signal?.removeEventListener('abort', pending.onAbort!);
       pending.resolve({ ok: false, error });
     }
     this.pending.clear();
+  }
+
+  private terminateWorker(message: string): void {
+    const child = this.child;
+    if (!child) return;
+    this.child = null;
+    this.buffer = '';
+    this.failAllPending({ code: 'CANCELLED', message });
+    terminateProcessTree(child);
   }
 
   private resolvePython(): string | null {

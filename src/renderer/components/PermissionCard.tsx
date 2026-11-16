@@ -127,15 +127,17 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
         >
           Allow once
         </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => decide(true, 'session')}
-          title="Approve for the rest of this app session"
-          className="no-drag flex-1 rounded-xl border border-[var(--color-glass-border)] bg-white/8 px-3 py-2 text-[12px] font-semibold text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/16 hover:text-[var(--color-ink)] disabled:opacity-50"
-        >
-          Allow for session
-        </button>
+        {request.allowPersistent === true ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => decide(true, 'session')}
+            title="Approve for the rest of this app session, limited to the displayed scope"
+            className="no-drag flex-1 rounded-xl border border-[var(--color-glass-border)] bg-white/8 px-3 py-2 text-[12px] font-semibold text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/16 hover:text-[var(--color-ink)] disabled:opacity-50"
+          >
+            Allow for session
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={pending}
@@ -145,6 +147,12 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
           Deny
         </button>
       </div>
+
+      {request.scopeLabel ? (
+        <p className="text-[10px] text-[var(--color-ink-dim)]">
+          {request.allowPersistent === true ? `Session approval is limited to ${request.scopeLabel}.` : 'This approval expires after one use.'}
+        </p>
+      ) : null}
 
       <p className="text-[10px] leading-snug text-[var(--color-ink-dim)]">
         Pixel is paused until you choose. Nothing runs on its own.

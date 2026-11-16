@@ -79,6 +79,7 @@ export interface FileToolResult {
   content: string;
   detail?: Record<string, unknown>;
   errorCode?: 'NOT_FOUND' | 'FAILED' | 'DENIED';
+  verification?: { summary: string; source: string };
 }
 
 export class FileTools {
@@ -209,7 +210,16 @@ export class FileTools {
     } else {
       writeFileSync(path, content, { encoding: 'utf8', flag: 'wx' });
     }
-    return { ok: true, content: `Wrote ${content.length} UTF-8 characters to ${path}.`, detail: { path, characters: content.length, overwritten: existing } };
+    const written = readFileSync(path, 'utf8');
+    if (written !== content) {
+      return { ok: false, content: 'The file was written, but a read-back check did not match the requested contents. Inspect it before retrying.', errorCode: 'FAILED' };
+    }
+    return {
+      ok: true,
+      content: `Wrote ${content.length} UTF-8 characters to ${path}.`,
+      detail: { path, characters: content.length, overwritten: existing },
+      verification: { summary: `Read the written file back and confirmed ${String(content.length)} characters match.`, source: 'filesystem read-back' },
+    };
   }
 }
 

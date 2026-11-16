@@ -24,7 +24,7 @@ import type {
   Confidence,
   Retention,
 } from './types';
-import { RANK } from './types';
+import { MEMORY_KINDS, RANK } from './types';
 
 interface MemoryRow {
   id: string;
@@ -104,6 +104,11 @@ export class MemoryStore {
   save(draft: MemoryDraft): SaveResult {
     const content = normalise(draft.content);
     if (content.length === 0) throw new Error('A memory cannot be empty.');
+    if (looksLikeCredential(content)) throw new Error('Credential-like values cannot be saved in memory.');
+    if (!MEMORY_KINDS.includes(draft.kind)) throw new Error('The memory category is invalid.');
+    if ((draft.tags?.length ?? 0) > 8 || draft.tags?.some((tag) => typeof tag !== 'string' || tag.length > 64)) {
+      throw new Error('Memory tags must be at most eight short text values.');
+    }
 
     const hash = contentHash(draft.kind, content, draft.projectId);
     const existing = this.db.queryOne<MemoryRow>(
@@ -154,8 +159,15 @@ export class MemoryStore {
     if (!current) throw new Error(`No memory with id ${id}.`);
 
     const content = patch.content !== undefined ? normalise(patch.content) : current.content;
+    if (content.length === 0) throw new Error('A memory cannot be empty.');
+    if (looksLikeCredential(content)) throw new Error('Credential-like values cannot be saved in memory.');
     const kind = patch.kind ?? current.kind;
-    const tags = (patch.tags ?? current.tags).join(' ');
+    if (!MEMORY_KINDS.includes(kind)) throw new Error('The memory category is invalid.');
+    const nextTags = patch.tags ?? current.tags;
+    if (nextTags.length > 8 || nextTags.some((tag) => typeof tag !== 'string' || tag.length > 64)) {
+      throw new Error('Memory tags must be at most eight short text values.');
+    }
+    const tags = nextTags.map((tag) => tag.trim()).filter(Boolean).join(' ');
 
     this.db.execute(
       `UPDATE memories
@@ -328,6 +340,15 @@ export class MemoryStore {
     );
     return { total, byKind, expired };
   }
+
+  exportProject(projectId: string): { schemaVersion: 1; projectId: string; exportedAt: number; memories: MemoryRecord[] } {
+    const rows = this.db.query<MemoryRow>(
+      'SELECT * FROM memories WHERE project_id = ? ORDER BY created_at, id LIMIT 10001',
+      [projectId],
+    );
+    if (rows.length > 10_000) throw new Error('This project has more than 10,000 memories; export a smaller project scope.');
+    return { schemaVersion: 1, projectId, exportedAt: Date.now(), memories: rows.map(toRecord) };
+  }
 }
 
 /* -------------------------------------------------------------------- *
@@ -391,6 +412,14 @@ export function toFtsQuery(text: string): string {
     .filter((word) => word.length > 1);
   if (words.length === 0) return '';
   return words.map((word) => `"${word}"*`).join(' OR ');
+}
+
+export function looksLikeCredential(content: string): boolean {
+  return /\b(password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s*(?:=|:)\s*\S+/i.test(content)
+    || /\b(password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s+is\s+\S+/i.test(content)
+    || /\bsk-[A-Za-z0-9_-]{12,}\b/.test(content)
+    || /\bAKIA[0-9A-Z]{16}\b/.test(content)
+    || /\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/i.test(content);
 }
 
 function toRecord(row: MemoryRow | (MemoryRow & { rank?: number })): MemoryRecord {

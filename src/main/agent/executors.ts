@@ -20,9 +20,15 @@ import type { ChildProcess } from 'node:child_process';
 import { arch, cpus, freemem, platform, release, totalmem } from 'node:os';
 import type { ImageAttachment } from '../../shared/types';
 import { BrowserSession } from './browser';
+import { DesktopInputLease } from './inputLease';
 import type { MemoryTools } from '../memory/toolset';
 import type { DocumentTools } from '../documents/toolset';
 import type { FileTools } from '../files/toolset';
+import { terminateProcessTree } from '../services/process';
+import { NativeHelperError } from '../services/nativeHelper';
+import type { NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
+
+const sharedDesktopInputLease = new DesktopInputLease();
 
 export interface ToolResult {
   ok: boolean;
@@ -32,6 +38,7 @@ export interface ToolResult {
   detail?: Record<string, unknown>;
   /** Present when the tool failed, for classification in the UI. */
   errorCode?: 'TIMEOUT' | 'CANCELLED' | 'DENIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'FAILED';
+  verification?: { summary: string; source: string };
 }
 
 /** Applications Pixel is willing to launch. Anything else is refused. */
@@ -86,7 +93,7 @@ export interface ExecutorDeps {
    */
   captureDisplay?: (target: 'active_window' | 'display') => Promise<ImageAttachment | null>;
   /** Vision analysis of a captured image. */
-  describeImage?: (image: ImageAttachment, question: string) => Promise<string>;
+  describeImage?: (image: ImageAttachment, question: string, signal?: AbortSignal) => Promise<string>;
   /** Shared browser session, created lazily on first use. */
   browser?: BrowserSession;
   /** Wave 3 memory tools, scoped to the active project. */
@@ -95,14 +102,22 @@ export interface ExecutorDeps {
   documents?: DocumentTools;
   /** Bounded, user-approved local file tools. */
   files?: FileTools;
+  /** Wait for an explicit user handoff acknowledgement without granting authority. */
+  requestHumanTakeover?: (taskId: string, reason: string, signal?: AbortSignal) => Promise<boolean>;
+  /** Read-only Windows UI Automation helper. */
+  nativeHelper?: NativeHelper;
+  /** Convert the helper's physical pixel bounds to Electron DIP coordinates. */
+  toDipRect?: (rect: WindowInfo['rect']) => WindowInfo['rect'];
 }
 
 export class ToolExecutors {
   private readonly children = new Set<ChildProcess>();
   private readonly deps: ExecutorDeps;
+  private readonly inputLease: DesktopInputLease;
 
   constructor(deps: ExecutorDeps = {}) {
     this.deps = deps;
+    this.inputLease = sharedDesktopInputLease;
   }
 
   /** Terminate every child process and close the browser. Returns kill count. */
@@ -110,8 +125,8 @@ export class ToolExecutors {
     let killed = 0;
     for (const child of this.children) {
       try {
-        if (child.exitCode === null && !child.killed) {
-          child.kill('SIGKILL');
+        if (child.exitCode === null) {
+          terminateProcessTree(child);
           killed += 1;
         }
       } catch {
@@ -120,12 +135,22 @@ export class ToolExecutors {
     }
     this.children.clear();
     if (this.deps.browser) void this.deps.browser.close();
+    this.deps.nativeHelper?.dispose();
     return killed;
   }
 
   /** Dispatch one call. Never throws: failures become ToolResult. */
-  async run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+  async run(name: string, args: Record<string, unknown>, signal?: AbortSignal, context?: { taskId: string }): Promise<ToolResult> {
     if (signal?.aborted) return cancelledResult(name);
+
+    let releaseInput: (() => void) | null = null;
+    if (name === 'type_text' || name === 'invoke_ui_element') {
+      releaseInput = await this.inputLease.acquire(signal);
+      if (!releaseInput || signal?.aborted) {
+        releaseInput?.();
+        return cancelledResult(name);
+      }
+    }
 
     // Anything this call starts is killed if the signal fires. Tools run one at
     // a time, so "children that did not exist before this call" is exactly the
@@ -140,10 +165,12 @@ export class ToolExecutors {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      const result = await this.dispatch(name, args, signal);
+      const result = await this.dispatch(name, args, signal, context?.taskId);
+      if (signal?.aborted && isBrowserTool && this.deps.browser) await this.deps.browser.close();
       return signal?.aborted ? cancelledResult(name) : result;
     } finally {
       signal?.removeEventListener('abort', onAbort);
+      releaseInput?.();
     }
   }
 
@@ -151,7 +178,7 @@ export class ToolExecutors {
     for (const child of this.children) {
       if (before.has(child)) continue;
       try {
-        if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+        if (child.exitCode === null) terminateProcessTree(child);
       } catch {
         /* already gone */
       }
@@ -162,6 +189,7 @@ export class ToolExecutors {
     name: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    taskId?: string,
   ): Promise<ToolResult> {
     try {
       // Wave 3 tool sets own their own dispatch; they are composed here so the
@@ -170,7 +198,7 @@ export class ToolExecutors {
         return this.deps.memory.run(name, args);
       }
       if (this.deps.documents?.handles(name)) {
-        return await this.deps.documents.run(name, args);
+        return await this.deps.documents.run(name, args, signal);
       }
       if (this.deps.files?.handles(name)) {
         return this.deps.files.run(name, args);
@@ -179,12 +207,35 @@ export class ToolExecutors {
       switch (name) {
         case 'get_current_time':
           return this.getCurrentTime();
+        case 'request_human_takeover': {
+          const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
+          if (!this.deps.requestHumanTakeover || !taskId) {
+            return { ok: false, content: 'Human takeover is unavailable in this task context.', errorCode: 'UNAVAILABLE' };
+          }
+          const continued = await this.deps.requestHumanTakeover(taskId, reason, signal);
+          if (!continued) return signal?.aborted
+            ? cancelledResult(name)
+            : { ok: false, content: 'The task was not continued. Stop or leave it paused for the user.', errorCode: 'CANCELLED' };
+          return {
+            ok: true,
+            content: 'The user indicated that the handoff is complete. Re-observe the current environment before any further action; the acknowledgement is not proof that the requested change succeeded.',
+            detail: { handoffAcknowledged: true },
+          };
+        }
         case 'get_system_info':
           return this.getSystemInfo();
         case 'analyze_screen':
-          return await this.analyzeScreen(args);
+          return await this.analyzeScreen(args, signal);
+        case 'get_foreground_window':
+          return await this.getForegroundWindow(signal);
+        case 'find_ui_elements':
+          return await this.findUiElements(args, signal);
+        case 'verify_ui_state':
+          return await this.verifyUiState(args, signal);
+        case 'invoke_ui_element':
+          return await this.invokeUiElement(args, signal);
         case 'open_application':
-          return await this.openApplication(args);
+          return await this.openApplication(args, signal);
         case 'type_text':
           return await this.typeText(args, signal);
         case 'browser_navigate':
@@ -209,6 +260,12 @@ export class ToolExecutors {
           };
       }
     } catch (error) {
+      if (error instanceof NativeHelperError) {
+        const errorCode = error.code === 'UNAVAILABLE' ? 'UNAVAILABLE'
+          : error.code === 'TIMEOUT' ? 'TIMEOUT'
+            : error.code === 'CANCELLED' ? 'CANCELLED' : 'FAILED';
+        return { ok: false, content: `The tool "${name}" failed: ${error.message}`, errorCode };
+      }
       return {
         ok: false,
         content: `The tool "${name}" failed: ${message(error)}`,
@@ -257,7 +314,7 @@ export class ToolExecutors {
 
   /* ------------------------------ screen ------------------------------ */
 
-  private async analyzeScreen(args: Record<string, unknown>): Promise<ToolResult> {
+  private async analyzeScreen(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const question =
       typeof args.question === 'string' && args.question.trim().length > 0
         ? args.question.trim()
@@ -284,7 +341,8 @@ export class ToolExecutors {
       return { ok: false, content: 'The screen could not be captured.', errorCode: 'FAILED' };
     }
 
-    const description = await this.deps.describeImage(image, question);
+    if (signal?.aborted) return cancelledResult('analyze_screen');
+    const description = await this.deps.describeImage(image, question, signal);
     return {
       ok: true,
       content: description,
@@ -292,9 +350,136 @@ export class ToolExecutors {
     };
   }
 
+  private async getForegroundWindow(signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows UI Automation is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const window = await this.deps.nativeHelper.call('foreground_window', {}, signal);
+    if (!window) return { ok: true, content: 'There is no foreground window.', detail: { window: null } };
+    const rect = this.deps.toDipRect?.(window.rect) ?? window.rect;
+    const detail = { ...window, physicalRect: window.rect, rect, coordinateSpace: 'electron_dip' };
+    return {
+      ok: true,
+      content: `Foreground window: ${window.title || '(untitled)'} (${window.processName || 'unknown process'}). Bounds in desktop DIP: x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}${window.isMinimized ? '; minimized' : ''}.`,
+      detail,
+    };
+  }
+
+  private async findUiElements(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows UI Automation is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const text = typeof args.text === 'string' ? args.text.trim() : '';
+    if (!text) return { ok: false, content: 'Provide the accessible name or AutomationId to search for.', errorCode: 'FAILED' };
+    const query = {
+      text,
+      ...(Array.isArray(args.roles) ? { roles: args.roles.filter((role): role is string => typeof role === 'string').slice(0, 20) } : {}),
+      ...(typeof args.maxResults === 'number' ? { maxResults: Math.max(1, Math.min(25, Math.trunc(args.maxResults))) } : {}),
+    };
+    const result = await this.deps.nativeHelper.call('find_elements', query, signal);
+    const convert = (element: UiElement): UiElement & { physicalRect: UiElement['rect'] } => ({
+      ...element,
+      physicalRect: element.rect,
+      rect: this.deps.toDipRect?.(element.rect) ?? element.rect,
+    });
+    const windowRect = this.deps.toDipRect?.(result.window.rect) ?? result.window.rect;
+    const elements = result.elements.map(convert);
+    const detail = {
+      window: { ...result.window, physicalRect: result.window.rect, rect: windowRect },
+      elements,
+      truncated: result.truncated,
+      coordinateSpace: 'electron_dip',
+    };
+    const lines = elements.map((element, index) =>
+      `${index + 1}. ${element.role} "${element.name || '(unnamed)'}"${element.automationId ? ` (AutomationId: ${element.automationId})` : ''}; enabled=${element.enabled}; bounds=${element.rect.x},${element.rect.y},${element.rect.width},${element.rect.height} DIP`,
+    );
+    return {
+      ok: true,
+      content: `Found ${elements.length} matching UI element${elements.length === 1 ? '' : 's'} in ${result.window.title || 'the foreground window'}.${result.truncated ? ' Search was truncated at its safety limit.' : ''}${lines.length ? `\n${lines.join('\n')}` : ' No matching elements were found.'}`,
+      detail,
+    };
+  }
+
+  private async invokeUiElement(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows UI Automation is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+    if (!selector) return { ok: false, content: 'Provide the exact accessible name or AutomationId of the control.', errorCode: 'FAILED' };
+    const expectedResult = args.expectedResult && typeof args.expectedResult === 'object'
+      ? args.expectedResult as Record<string, unknown>
+      : {};
+    const result = await this.deps.nativeHelper.call('invoke_element', {
+      selector,
+      expectedWindowTitle: typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '',
+      ...(typeof args.role === 'string' ? { role: args.role } : {}),
+      expectedResult: {
+        selector: typeof expectedResult.selector === 'string' ? expectedResult.selector : '',
+        state: expectedResult.state === 'absent' ? 'absent' : 'present',
+        ...(typeof expectedResult.role === 'string' ? { role: expectedResult.role } : {}),
+      },
+    }, signal);
+    const rect = this.deps.toDipRect?.(result.element.rect) ?? result.element.rect;
+    const detail = {
+      window: result.window,
+      element: { ...result.element, physicalRect: result.element.rect, rect },
+      invoked: result.invoked,
+      coordinateSpace: 'electron_dip',
+    };
+    return {
+      ok: true,
+      content: `Invoked ${result.element.role} "${result.element.name || result.element.automationId}" in the approved foreground window "${result.window.title}". Now verify that ${expectedResult.state === 'absent' ? 'the control is absent' : 'the control is present'}: "${String(expectedResult.selector ?? '')}".`,
+      detail,
+    };
+  }
+
+  private async verifyUiState(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows UI Automation is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+    const expectedWindowTitle = typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '';
+    const state = args.state === 'absent' ? 'absent' : 'present';
+    if (!selector || !expectedWindowTitle) {
+      return { ok: false, content: 'Provide an exact UI selector and foreground window title.', errorCode: 'FAILED' };
+    }
+    const result = await this.deps.nativeHelper.call('verify_element_state', {
+      selector,
+      expectedWindowTitle,
+      state,
+      ...(typeof args.role === 'string' ? { role: args.role } : {}),
+    }, signal);
+    const windowRect = this.deps.toDipRect?.(result.window.rect) ?? result.window.rect;
+    const element = result.element
+      ? { ...result.element, physicalRect: result.element.rect, rect: this.deps.toDipRect?.(result.element.rect) ?? result.element.rect }
+      : undefined;
+    const detail = {
+      window: { ...result.window, physicalRect: result.window.rect, rect: windowRect },
+      selector,
+      state,
+      matches: result.matches,
+      matchedCount: result.matchedCount,
+      ...(element ? { element } : {}),
+      coordinateSpace: 'electron_dip',
+    };
+    const expected = state === 'present' ? 'present exactly once' : 'absent';
+    const observed = result.matchedCount === 0 ? 'absent' : `present ${result.matchedCount} time${result.matchedCount === 1 ? '' : 's'}`;
+    return {
+      ok: true,
+      content: `UI Automation found "${selector}" ${observed} among visible controls in "${result.window.title}"; expected it to be ${expected}.${result.matches ? ' The postcondition matches.' : ' The postcondition does not match.'}`,
+      detail,
+      ...(result.matches ? {
+        verification: {
+          summary: `UI Automation confirmed that ${selector} is ${expected} in the expected foreground window.`,
+          source: 'UI Automation postcondition check',
+        },
+      } : {}),
+    };
+  }
+
   /* --------------------------- state changing -------------------------- */
 
-  private async openApplication(args: Record<string, unknown>): Promise<ToolResult> {
+  private async openApplication(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const requested = typeof args.name === 'string' ? args.name.trim().toLowerCase() : '';
     if (requested.length === 0) {
       return { ok: false, content: 'No application name was provided.', errorCode: 'FAILED' };
@@ -326,7 +511,7 @@ export class ToolExecutors {
     const child = execFile(
       'cmd.exe',
       ['/c', 'start', '', executable],
-      { windowsHide: true, timeout: DEFAULT_TOOL_TIMEOUT_MS },
+      { windowsHide: true, timeout: DEFAULT_TOOL_TIMEOUT_MS, signal },
       () => undefined,
     );
     this.track(child);
@@ -340,8 +525,12 @@ export class ToolExecutors {
 
   private async typeText(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const text = typeof args.text === 'string' ? args.text : '';
+    const expectedWindowTitle = typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '';
     if (text.length === 0) {
       return { ok: false, content: 'No text was provided to type.', errorCode: 'FAILED' };
+    }
+    if (expectedWindowTitle.length === 0 || expectedWindowTitle.length > 500) {
+      return { ok: false, content: 'Observe the foreground window and include its exact title before requesting text input.', errorCode: 'FAILED' };
     }
     if (text.length > 2_000) {
       return {
@@ -358,22 +547,39 @@ export class ToolExecutors {
       };
     }
 
-    // The text travels through the environment, never inside the script, so it
-    // cannot break out into the PowerShell command.
+    // Both the requested title and text travel through the environment, never
+    // inside the PowerShell script. A Win32 recheck immediately before SendKeys
+    // narrows the focus-change race between the approval card and input.
+    const nativeCode = [
+      'using System;',
+      'using System.Runtime.InteropServices;',
+      'using System.Text;',
+      'public static class PixelForegroundWindowCheck {',
+      '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
+      '  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);',
+      '}',
+    ].join('\n');
     const script = [
       '$ErrorActionPreference = "Stop";',
+      "$native = @'",
+      nativeCode,
+      "'@",
+      'Add-Type -TypeDefinition $native;',
+      '$handle = [PixelForegroundWindowCheck]::GetForegroundWindow();',
+      '$title = New-Object System.Text.StringBuilder 1024;',
+      '[void][PixelForegroundWindowCheck]::GetWindowText($handle, $title, $title.Capacity);',
+      'if ($title.ToString() -cne $env:CYPS_EXPECTED_WINDOW_TITLE) { Write-Error "Foreground window changed; no text was sent"; exit 3 }',
       '$value = $env:CYPS_TYPE_TEXT;',
       'if ([string]::IsNullOrEmpty($value)) { Write-Error "empty"; exit 2 }',
       '$shell = New-Object -ComObject WScript.Shell;',
-      'Start-Sleep -Milliseconds 120;',
       '$shell.SendKeys($value);',
       'Write-Output "typed"',
-    ].join(' ');
+    ].join('\n');
 
     const result = await this.runChild(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { ...process.env, CYPS_TYPE_TEXT: escapeSendKeys(text) },
+      { ...process.env, CYPS_TYPE_TEXT: escapeSendKeys(text), CYPS_EXPECTED_WINDOW_TITLE: expectedWindowTitle },
       signal,
     );
 
@@ -381,14 +587,14 @@ export class ToolExecutors {
       return {
         ok: false,
         content: `Windows refused the keystrokes: ${result.error}. The target window may not accept input, or the session may be locked.`,
-        errorCode: result.timedOut ? 'TIMEOUT' : 'FAILED',
+        errorCode: result.timedOut ? 'TIMEOUT' : /foreground window changed/i.test(result.error ?? '') ? 'DENIED' : 'FAILED',
       };
     }
 
     return {
       ok: true,
-      content: `Typed ${text.length} character${text.length === 1 ? '' : 's'} into the focused window.`,
-      detail: { characters: text.length },
+      content: `Typed ${text.length} character${text.length === 1 ? '' : 's'} into the foreground window titled "${expectedWindowTitle}" after rechecking its title.`,
+      detail: { characters: text.length, expectedWindowTitle },
     };
   }
 
@@ -430,6 +636,7 @@ export class ToolExecutors {
           page.text || '(the page has no visible text)',
         ].join('\n'),
         detail: { url: page.url, title: page.title, links: page.links.length },
+        verification: { summary: `Loaded and checked ${page.url} after navigation.`, source: 'browser URL and connected-address check' },
       };
     } catch (error) {
       return {
@@ -590,6 +797,7 @@ export class ToolExecutors {
           ok: true,
           content: `Verified: the page contains "${expected}".`,
           detail: { expected, found: true },
+          verification: { summary: `Confirmed the current page contains the requested text: ${expected}.`, source: 'browser page text check' },
         };
       }
       return {
@@ -642,6 +850,9 @@ export class ToolExecutors {
         },
       );
       this.track(child);
+      const onAbort = (): void => terminateProcessTree(child);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      child.once('close', () => signal?.removeEventListener('abort', onAbort));
     });
   }
 }

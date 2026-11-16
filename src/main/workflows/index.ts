@@ -44,7 +44,7 @@ export type ReplayStatus = 'completed' | 'failed' | 'cancelled' | 'denied';
 
 export interface StepOutcome {
   ordinal: number;
-  status: 'done' | 'failed' | 'skipped';
+  status: 'done' | 'failed' | 'skipped' | 'cancelled';
   detail: string;
 }
 
@@ -56,7 +56,7 @@ export interface ReplayResult {
 
 /** Runs one action and reports whether its expectation held. */
 export interface StepRunner {
-  run(step: WorkflowStep): Promise<{ ok: boolean; observed: string }>;
+  run(step: WorkflowStep, signal?: AbortSignal): Promise<{ ok: boolean; observed: string }>;
 }
 
 export class WorkflowStore {
@@ -200,7 +200,7 @@ export interface ReplayOptions {
   /** Central policy: may this step run without asking? */
   authorize: (step: WorkflowStep) => { allowed: boolean; reason: string; needsApproval: boolean };
   /** Requests approval for a step that needs it. */
-  requestApproval?: (step: WorkflowStep) => Promise<boolean>;
+  requestApproval?: (step: WorkflowStep, signal?: AbortSignal) => Promise<boolean>;
   signal?: AbortSignal;
   onStep?: (outcome: StepOutcome) => void;
 }
@@ -233,7 +233,12 @@ export async function replayWorkflow(
     }
 
     if (decision.needsApproval) {
-      const approved = options.requestApproval ? await options.requestApproval(step) : false;
+      const approved = options.requestApproval
+        ? await options.requestApproval(step, options.signal)
+        : false;
+      if (options.signal?.aborted) {
+        return { status: 'cancelled', steps: outcomes, failure: 'Cancelled while waiting for approval.' };
+      }
       if (!approved) {
         const outcome: StepOutcome = {
           ordinal: step.ordinal,
@@ -246,7 +251,19 @@ export async function replayWorkflow(
       }
     }
 
-    const result = await runner.run(step);
+    if (options.signal?.aborted) {
+      return { status: 'cancelled', steps: outcomes, failure: 'Cancelled before the step started.' };
+    }
+
+    const result = await runner.run(step, options.signal);
+    if (options.signal?.aborted) {
+      const detail = 'Cancelled during the step; it may have partly completed. Re-observe before retrying.';
+      const outcome: StepOutcome = { ordinal: step.ordinal, status: 'cancelled', detail };
+      outcomes.push(outcome);
+      options.onStep?.(outcome);
+      return { status: 'cancelled', steps: outcomes, failure: detail };
+    }
+
     const outcome: StepOutcome = {
       ordinal: step.ordinal,
       status: result.ok ? 'done' : 'failed',

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Gauge, Keyboard, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Brain, Gauge, Keyboard, ListChecks, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
 import type { AppSettings, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
+import { AutomationPanel } from '@/components/AutomationPanel';
+import { MemoryPanel } from '@/components/MemoryPanel';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -32,6 +34,8 @@ export type DeepPartial<T> = {
 export function SettingsPanel(props: SettingsPanelProps) {
   const { settings, onPatch, onRequestMode, onClose, hasApiKey, error, saving } = props;
   const [advanced, setAdvanced] = useState(false);
+  const [automationOpen, setAutomationOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -75,6 +79,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </p>
         ) : null}
 
+        {automationOpen ? (
+          <AutomationPanel onBack={() => setAutomationOpen(false)} />
+        ) : memoryOpen ? (
+          <MemoryPanel onBack={() => setMemoryOpen(false)} />
+        ) : <>
         <Group icon={Gauge} title="Behaviour">
           <div className="pb-1.5">
             <ModeSwitcher
@@ -86,6 +95,23 @@ export function SettingsPanel(props: SettingsPanelProps) {
               {modeDescriptor.summary}
             </p>
           </div>
+
+          <Row label="Presentation">
+            <select
+              aria-label="Companion presentation"
+              value={settings.companion.visualMode}
+              onChange={(event) => onPatch({ companion: { visualMode: event.target.value as 'stationary' | 'cursor' } })}
+              className="no-drag rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="stationary">Stationary orb</option>
+              <option value="cursor">Follow cursor</option>
+            </select>
+          </Row>
+          {settings.companion.visualMode === 'cursor' ? (
+            <p className="px-1 pb-1 text-[9.5px] leading-snug text-[var(--color-ink-dim)]">
+              The orb follows the pointer while collapsed, stays beside it, and pauses while Pixel is open.
+            </p>
+          ) : null}
 
           <Toggle
             label="Collapse after answering"
@@ -158,7 +184,24 @@ export function SettingsPanel(props: SettingsPanelProps) {
               {hasApiKey === null ? 'Unknown' : hasApiKey ? 'Configured' : 'Not set'}
             </span>
           </Row>
+          <button
+            type="button"
+            onClick={() => setMemoryOpen(true)}
+            className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
+          >
+            <Brain size={12} aria-hidden="true" />
+            Manage project memory
+          </button>
         </Group>
+
+        <button
+          type="button"
+          onClick={() => setAutomationOpen(true)}
+          className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-sky-300/20 bg-sky-300/8 px-2.5 py-2 text-left text-[10.5px] font-medium text-sky-100 hover:bg-sky-300/14"
+        >
+          <ListChecks size={12} aria-hidden="true" />
+          Skills and routines
+        </button>
 
         <button
           type="button"
@@ -181,6 +224,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <p>history: {settings.privacy.historyRetentionDays === 0 ? 'forever' : `${String(settings.privacy.historyRetentionDays)}d`}</p>
           </div>
         ) : null}
+        </>}
       </div>
     </section>
   );

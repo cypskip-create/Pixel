@@ -13,6 +13,8 @@
 
 import type { Mode, PermissionDecision, PermissionGrant, RiskLevel, ToolCategory, ToolDefinition } from '../../shared/types';
 import { getModeDescriptor } from '../../shared/types';
+import { z } from 'zod';
+import type { ZodType } from 'zod';
 
 import { deriveGrantScope, scopeCovers } from './scope';
 
@@ -151,11 +153,25 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'request_human_takeover',
+    description: 'Pauses this task and releases control while the user completes a sensitive or ambiguous step.',
+    category: 'system',
+    risk: 'safe',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: { reason: { type: 'string', minLength: 5, maxLength: 1_000 } },
+      required: ['reason'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'analyze_screen',
     description:
       'Captures the screen and asks a vision model to describe or explain what is visible. Only runs after the user explicitly requests it.',
     category: 'screen',
-    risk: 'low',
+    risk: 'high',
     requiresApproval: true,
     changesState: false,
     parameters: {
@@ -169,6 +185,80 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
         question: { type: 'string', description: 'What to look for on screen.' },
       },
       required: ['target'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_foreground_window',
+    description: 'Reads the foreground Windows application title and bounds using UI Automation.',
+    category: 'screen',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: false,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'find_ui_elements',
+    description: 'Searches the foreground Windows application for accessible UI elements matching a name or AutomationId.',
+    category: 'screen',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 300 },
+        roles: { type: 'array', items: { type: 'string', maxLength: 80 }, maxItems: 20 },
+        maxResults: { type: 'integer', minimum: 1, maximum: 25 },
+      },
+      required: ['text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'verify_ui_state',
+    description: 'Checks whether one exact visible accessible control is present or absent in the named foreground window. Repeat the exact selector, role and window title from the approved action. This is a bounded UI Automation postcondition check.',
+    category: 'screen',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        role: { type: 'string', maxLength: 80 },
+        expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
+        state: { type: 'string', enum: ['present', 'absent'] },
+      },
+      required: ['selector', 'expectedWindowTitle', 'state'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'invoke_ui_element',
+    description: 'Invokes an accessible button, link, or menu item by exact accessible name or AutomationId in the named foreground window. Requires an explicit visible UIA control postcondition that Pixel checks before reporting success.',
+    category: 'input',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        role: { type: 'string', maxLength: 80 },
+        expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
+        expectedResult: {
+          type: 'object',
+          properties: {
+            selector: { type: 'string', minLength: 1, maxLength: 300 },
+            role: { type: 'string', maxLength: 80 },
+            state: { type: 'string', enum: ['present', 'absent'] },
+          },
+          required: ['selector', 'state'],
+          additionalProperties: false,
+        },
+      },
+      required: ['selector', 'expectedWindowTitle', 'expectedResult'],
       additionalProperties: false,
     },
   },
@@ -219,7 +309,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'browser_click',
     description: 'Clicks an element on the current page, identified by a CSS selector.',
     category: 'browser',
-    risk: 'medium',
+    risk: 'high',
     requiresApproval: true,
     changesState: true,
     parameters: {
@@ -235,7 +325,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'browser_type',
     description: 'Types text into a field on the current page, identified by a CSS selector.',
     category: 'browser',
-    risk: 'medium',
+    risk: 'high',
     requiresApproval: true,
     changesState: true,
     parameters: {
@@ -272,7 +362,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'browser_screenshot',
     description: 'Takes a screenshot of the current browser page.',
     category: 'browser',
-    risk: 'low',
+    risk: 'high',
     requiresApproval: true,
     changesState: false,
     parameters: { type: 'object', properties: {}, additionalProperties: false },
@@ -295,15 +385,18 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },  {
     name: 'type_text',
-    description: 'Types text into the currently focused window.',
+    description: 'Types approved text only if the foreground window title still exactly matches the title shown in the approval card.',
     category: 'input',
     risk: 'high',
     requiresApproval: true,
     changesState: true,
     parameters: {
       type: 'object',
-      properties: { text: { type: 'string' } },
-      required: ['text'],
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 2_000 },
+        expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
+      },
+      required: ['text', 'expectedWindowTitle'],
       additionalProperties: false,
     },
   },
@@ -311,6 +404,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
+  private readonly argumentSchemas = new Map<string, ZodType>();
   private stopped = false;
   private readonly grants = new Map<string, PermissionGrant>();
 
@@ -324,6 +418,26 @@ export class ToolRegistry {
 
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
+  }
+
+  /** Validate model supplied arguments against the tool's declared JSON schema. */
+  validateArgs(name: string, args: unknown): { ok: true } | { ok: false; message: string } {
+    const tool = this.tools.get(name);
+    if (!tool) return { ok: false, message: 'The requested capability is not registered.' };
+    let schema = this.argumentSchemas.get(name);
+    if (!schema) {
+      try {
+        schema = jsonSchemaToZod(tool.parameters);
+        this.argumentSchemas.set(name, schema);
+      } catch {
+        return { ok: false, message: 'This tool has no supported argument contract in the current build.' };
+      }
+    }
+    const parsed = schema.safeParse(args);
+    if (parsed.success) return { ok: true };
+    const issue = parsed.error.issues[0];
+    const field = issue?.path.length ? `${issue.path.map(String).join('.')}: ` : '';
+    return { ok: false, message: `${field}${issue?.message ?? 'arguments did not match the tool contract'}` };
   }
 
   /** Tools exposed to the model, filtered by what the current mode permits. */
@@ -360,7 +474,8 @@ export class ToolRegistry {
     // as type_text, a standing grant would approve any text into any window, so
     // high-risk tools are always downgraded to single use and re-asked each time.
     const tool = this.tools.get(grant.toolName);
-    if (tool?.risk === 'high' && grant.scope !== 'once') {
+    const hasNarrowTarget = Object.keys(grant.target ?? {}).length > 0;
+    if (grant.scope !== 'once' && (tool?.risk === 'high' || !hasNarrowTarget)) {
       this.grants.set(grant.toolName, { ...grant, scope: 'once', expiresAt: undefined });
       return;
     }
@@ -384,6 +499,69 @@ export class ToolRegistry {
       (g) => g.scope === 'always' || g.expiresAt === undefined || g.expiresAt > now,
     );
   }
+}
+
+type JsonSchema = Record<string, unknown>;
+
+/** Convert the JSON Schema subset used by Pixel's registered tools to Zod. */
+function jsonSchemaToZod(raw: unknown, depth = 0): ZodType {
+  if (depth > 12 || typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('Unsupported JSON schema.');
+  }
+  const schema = raw as JsonSchema;
+  const enumValues = schema.enum;
+  if (Array.isArray(enumValues)) {
+    if (enumValues.length === 0 || enumValues.some((value) => typeof value !== 'string')) {
+      throw new Error('Unsupported enum.');
+    }
+    return z.enum(enumValues as [string, ...string[]]);
+  }
+
+  const union = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(union) && union.length > 0 && union.length <= 8) {
+    const options = union.map((item) => jsonSchemaToZod(item, depth + 1));
+    return z.union(options as [ZodType, ZodType, ...ZodType[]]);
+  }
+
+  const type = schema.type;
+  if (type === 'object' || (type === undefined && typeof schema.properties === 'object')) {
+    const properties = (schema.properties ?? {}) as Record<string, unknown>;
+    const required = new Set(Array.isArray(schema.required) ? schema.required.filter((v): v is string => typeof v === 'string') : []);
+    const shape: Record<string, ZodType> = {};
+    for (const [name, child] of Object.entries(properties)) {
+      const childSchema = jsonSchemaToZod(child, depth + 1);
+      shape[name] = required.has(name) ? childSchema : childSchema.optional();
+    }
+    return z.object(shape).strict();
+  }
+
+  if (type === 'array') {
+    if (!schema.items) throw new Error('Array schema has no item contract.');
+    const item = jsonSchemaToZod(schema.items, depth + 1);
+    const array = z.array(item);
+    return typeof schema.maxItems === 'number' ? array.max(schema.maxItems) : array;
+  }
+  if (type === 'string') {
+    let value = z.string();
+    if (typeof schema.minLength === 'number') value = value.min(schema.minLength);
+    if (typeof schema.maxLength === 'number') value = value.max(schema.maxLength);
+    return value;
+  }
+  if (type === 'integer') {
+    let value = z.number().int();
+    if (typeof schema.minimum === 'number') value = value.min(schema.minimum);
+    if (typeof schema.maximum === 'number') value = value.max(schema.maximum);
+    return value;
+  }
+  if (type === 'number') {
+    let value = z.number();
+    if (typeof schema.minimum === 'number') value = value.min(schema.minimum);
+    if (typeof schema.maximum === 'number') value = value.max(schema.maximum);
+    return value;
+  }
+  if (type === 'boolean') return z.boolean();
+  if (type === 'null') return z.null();
+  throw new Error(`Unsupported JSON schema type: ${String(type)}`);
 }
 
 /** Risk ordering helper for sorting/coloring UI. */

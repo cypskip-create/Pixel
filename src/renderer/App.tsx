@@ -115,7 +115,7 @@ function Companion(): React.JSX.Element {
 
   const bubbleVisible = chat.streaming || chat.content.length > 0 || chat.error !== null;
   const hasActiveTask =
-    task !== null && (task.status === 'running' || task.status === 'planning');
+    task !== null && ['running', 'planning', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'cancelling'].includes(task.status);
 
   const nextSurface = useMemo(
     () =>
@@ -169,12 +169,30 @@ function Companion(): React.JSX.Element {
     if (bridge.kind !== 'ready') return;
     const api = bridge.bridge.tasks;
     if (typeof api.onUpdate !== 'function') return;
-    return safeSubscribe<TaskRecord>(api.onUpdate, (record) => {
+    let mounted = true;
+    const unsubscribe = safeSubscribe<TaskRecord>(api.onUpdate, (record) => {
       setTask(record);
       if (record.status === 'cancelled' || record.status === 'completed') {
         window.setTimeout(() => setTask(null), 4000);
       }
     });
+    void api.list().then((records) => {
+      if (!mounted) return;
+      const resumableOrNeedsReview = records.find((record) =>
+        ['running', 'planning', 'awaiting_approval', 'awaiting_user', 'pause_requested', 'paused', 'blocked', 'cancelling'].includes(record.status),
+      );
+      if (resumableOrNeedsReview) {
+        setTask((current) =>
+          current && (current.updatedAt ?? current.createdAt) > (resumableOrNeedsReview.updatedAt ?? resumableOrNeedsReview.createdAt)
+            ? current
+            : resumableOrNeedsReview,
+        );
+      }
+    }).catch(() => undefined);
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, [bridge]);
 
   // The tray can change the mode; keep the renderer in step.
@@ -322,6 +340,7 @@ function Companion(): React.JSX.Element {
 
     if (listening) {
       setListening(false);
+      void shell.voiceCancel?.();
       return;
     }
 
@@ -337,6 +356,7 @@ function Companion(): React.JSX.Element {
 
         const result = await shell.voiceListen(8000);
         setListening(false);
+        if (result.error?.toLowerCase().includes('cancelled')) return;
         if (result.ok && result.text.length > 0) {
           setDraft((current) => (current.length > 0 ? current + ' ' + result.text : result.text));
           return;
@@ -398,9 +418,12 @@ function Companion(): React.JSX.Element {
   }, [bridge]);
 
   const clearStop = useCallback(() => {
-    setStopped(false);
-    showNotice('Emergency stop cleared. Pixel will ask before acting again.');
-  }, [showNotice]);
+    if (bridge.kind !== 'ready') return;
+    void bridge.bridge.system.emergencyClear().then(() => {
+      setStopped(false);
+      showNotice('Emergency stop cleared. Pixel will ask before acting again.');
+    }).catch(() => showNotice('Pixel could not clear the emergency stop.'));
+  }, [bridge, showNotice]);
 
   const collapseRef = useRef(collapse);
   collapseRef.current = collapse;
@@ -464,11 +487,11 @@ function Companion(): React.JSX.Element {
       {surface === 'idle' ? (
         <button
           type="button"
-          onPointerDown={drag.onPointerDown}
+          onPointerDown={settings.companion.visualMode === 'stationary' ? drag.onPointerDown : undefined}
           onClick={() => setInputOpen(true)}
           aria-label={`Open Pixel. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className="group relative grid size-[76px] cursor-grab place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.04] active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-sky-400/70"
+          className={`group relative grid size-[76px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-sky-400/70 ${settings.companion.visualMode === 'stationary' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
           style={{
             transform:
               drag.dragging && drag.offset
@@ -521,6 +544,12 @@ function Companion(): React.JSX.Element {
               onPause={() => runTaskAction('pause', task.id)}
               onResume={() => runTaskAction('resume', task.id)}
               onCancel={() => runTaskAction('cancel', task.id)}
+              onContinue={() => {
+                if (bridge.kind !== 'ready') return;
+                void bridge.bridge.tasks.continueAfterHandoff(task.id).then((continued) => {
+                  if (!continued) showNotice('Pixel could not continue this handoff. It may already have ended.');
+                }).catch(() => showNotice('Pixel could not continue this handoff.'));
+              }}
             />
           ) : null}
 

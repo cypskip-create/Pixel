@@ -59,6 +59,8 @@ let windows: WindowManager | null = null;
 let shortcuts: ShortcutManager | null = null;
 let tray: TrayController | null = null;
 let settings: SettingsStore | null = null;
+let stopRoutineScheduler: (() => void) | null = null;
+let shutdownAgentWorkers: (() => void) | null = null;
 let quitting = false;
 
 /** __dirname of the compiled main bundle: <root>/dist/main/main. */
@@ -196,6 +198,12 @@ export async function start(): Promise<void> {
   const store = settings;
 
   windows = createWindowManager(store);
+  windows.setVisualMode(
+    store.get().companion.visualMode,
+    store.get().companion.followSpeed,
+    store.get().companion.cursorOffset,
+    store.get().companion.reducedMotion,
+  );
 
   // Capture is authorized per explicit UI action only.
   let captureAuthorized = false;
@@ -252,6 +260,8 @@ export async function start(): Promise<void> {
       app.quit();
     },
   });
+  stopRoutineScheduler = () => controller.routines.stop();
+  shutdownAgentWorkers = controller.shutdown;
 
   // The tray may fail on some desktop configurations; Pixel still runs.
   tray = new TrayController({
@@ -350,6 +360,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   quitting = true;
   boot.info('Quitting.');
+  stopRoutineScheduler?.();
+  stopRoutineScheduler = null;
+  shutdownAgentWorkers?.();
+  shutdownAgentWorkers = null;
   shortcuts?.unregisterAll();
   tray?.destroy();
 });

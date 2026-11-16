@@ -486,7 +486,7 @@ describe('memory tools', () => {
 
   it('every memory tool is declared for the registry', () => {
     const names = MEMORY_TOOL_DEFINITIONS.map((tool) => tool.name);
-    expect(names).toEqual(['memory_save', 'memory_search', 'memory_list', 'memory_forget']);
+    expect(names).toEqual(['memory_save', 'memory_search', 'memory_list', 'memory_update', 'memory_forget']);
   });
 
   it('writes and reads back a memory', () => {
@@ -522,6 +522,33 @@ describe('memory tools', () => {
     const id = (saved.detail as { id: string }).id;
     expect(api.run('memory_forget', { id }).ok).toBe(true);
     expect(api.run('memory_list', {}).content).toMatch(/no stored memories/i);
+  });
+
+  it('corrects only memories in the active project and verifies the write', () => {
+    const { tools: api, store, project } = tools();
+    const saved = api.run('memory_save', { content: 'The project uses port 8080.', kind: 'fact' });
+    const id = (saved.detail as { id: string }).id;
+    const corrected = api.run('memory_update', { id, content: 'The project uses port 8443.' });
+    expect(corrected.ok).toBe(true);
+    expect(corrected.verification?.source).toBe('SQLite memory read-back');
+    expect(store.get(id)?.content).toBe('The project uses port 8443.');
+
+    const otherProject = store.ensureProject('other');
+    const otherMemory = store.save({ projectId: otherProject, kind: 'fact', content: 'private project fact', source: 'test' });
+    expect(api.run('memory_update', { id: otherMemory.memory.id, content: 'changed' }).errorCode).toBe('DENIED');
+    expect(api.run('memory_update', { id, content: 'password=do-not-save' }).errorCode).toBe('DENIED');
+    expect(store.get(id)?.projectId).toBe(project);
+  });
+
+  it('exports the complete project scope with source and verification metadata', () => {
+    const { store, project } = tools();
+    for (let index = 0; index < 55; index += 1) {
+      store.save({ projectId: project, kind: 'fact', content: `export fact ${index}`, source: 'test source', confidence: 'source_backed' });
+    }
+    const bundle = store.exportProject(project);
+    expect(bundle.schemaVersion).toBe(1);
+    expect(bundle.memories).toHaveLength(55);
+    expect(bundle.memories[0]).toMatchObject({ source: 'test source', confidence: 'source_backed' });
   });
 
   it('rejects an unknown memory id on forget', () => {

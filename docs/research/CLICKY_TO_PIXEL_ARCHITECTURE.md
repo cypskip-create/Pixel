@@ -87,9 +87,9 @@ Each entry records the reference source, what it does and how, Pixel's nearest e
 
 - **Clicky source:** `leanring-buddy/ElementLocationDetector.swift`.
 - **What/how:** Sends a screenshot and question to a vision model, requests a location, and maps the image/display dimensions into display-local coordinates. This is visual estimation, not native Windows accessibility enumeration.
-- **Pixel equivalent:** Pixel has existing screen-analysis tools and a browser DOM snapshot route (`src/main/screen.ts`, `src/main/agent/browser.ts`). No Windows UI Automation element tree or typed native element result was found in the audited sources.
-- **Need and Windows approach:** Add native Windows UI Automation as the first stage for accessible controls, with typed role/name/bounds/window data. Fall back to configured vision only when native data is missing; report ambiguity instead of treating a visual estimate as verified.
-- **Risk / verification:** Accessibility providers can return stale, incomplete, or protected-window data. Test buttons, fields, menus, links, app windows, inaccessible/custom-drawn controls, ambiguity and stale elements. Keep UIA access read-only until a separate approved action.
+- **Pixel equivalent:** Pixel has screen-analysis tools, browser DOM snapshots, and a compiled Windows UI Automation helper (`native/PixelNative/PixelNative.cs`) for foreground title/bounds, bounded semantic search, exact `InvokePattern` activation, and presence/absence postcondition checks.
+- **Need and Windows approach:** Use native UI Automation first for accessible controls, with typed role/name/bounds/window data. Invocation is separately approval-gated and requires an exact expected accessible UI state; the helper checks that state was false before activation. The agent must later observe that exact state in the same titled foreground window to clear pending verification. Ambiguity or incomplete UIA trees fail closed.
+- **Risk / verification:** Accessibility providers can return stale, incomplete, or protected-window data. Validate buttons, menus, links, app windows, inaccessible/custom-drawn controls, ambiguity, state transitions and stale elements on a normal Windows desktop. UIA postconditions only cover exact accessible control presence or absence, not control values or newly titled windows.
 
 ### 9. Visual pointing
 
@@ -152,7 +152,7 @@ Each entry records the reference source, what it does and how, Pixel's nearest e
 1. **Baseline/release gate:** preserve the existing installer branch and uncommitted work; run typecheck/tests/build, build `win-unpacked`, then execute actual Windows GUI/portable/NSIS validation. A successful build is not proof of installation.
 2. **Safety before control:** enforce real cancellation across side-effecting executors; persist privacy-safe audit events; scope approvals by tool and operation/context; harden browser networking at the actual destination/redirect boundary.
 3. **Companion state and visual mode:** extend the existing assistant state source and add opt-in cursor visuals as a separate passive overlay; preserve stationary mode and existing Guide/Agent/Hybrid modes.
-4. **Guidance/voice:** add UI Automation as a read-only target source, use vision fallback with confidence/ambiguity handling, and improve PTT/provider feedback without replacing local speech.
+4. **Guidance/voice:** use UI Automation as the semantic target source, retain vision fallback with confidence/ambiguity handling, and improve PTT/provider feedback without replacing local speech. Keep native activation approval-gated and require an observed postcondition.
 5. **Release evidence:** record real Windows results separately from unit/browser tests, including monitor/DPI behavior and installer upgrades.
 
 ## Verification status recorded for this comparison

@@ -474,8 +474,12 @@ export interface CypsError {
 export type TaskStatus =
   | 'planning'
   | 'running'
+  | 'pause_requested'
   | 'awaiting_approval'
+  | 'awaiting_user'
   | 'paused'
+  | 'blocked'
+  | 'cancelling'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -483,11 +487,31 @@ export type TaskStatus =
 export interface TaskStep {
   id: string;
   title: string;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'done' | 'verified' | 'failed' | 'skipped';
   toolName?: string;
+  /** Persisted task arguments are redacted before they reach the renderer or disk. */
+  args?: Record<string, unknown>;
   startedAt?: number;
   endedAt?: number;
   detail?: string;
+}
+
+export interface TaskEvidence {
+  id: string;
+  kind: 'observation' | 'verification' | 'recovery';
+  summary: string;
+  source: string;
+  at: number;
+}
+
+export interface TaskBudget {
+  deadlineAt: number;
+  maxTurns: number;
+  turnsUsed: number;
+  retryCount: number;
+  maxRetries: number;
+  maxModelTokens: number;
+  modelTokensUsed: number;
 }
 
 export interface TaskRecord {
@@ -496,7 +520,131 @@ export interface TaskRecord {
   status: TaskStatus;
   steps: TaskStep[];
   createdAt: number;
+  updatedAt?: number;
   endedAt?: number;
+  /** Sanitised user request retained for recovery and task history. */
+  request?: string;
+  /** Sanitised final response retained so recovered task history has an outcome. */
+  result?: string;
+  projectId?: string;
+  /** Optional capability ceiling used by routine and delegated tasks. */
+  allowedTools?: string[];
+  budget?: TaskBudget;
+  approvalRefs?: string[];
+  evidence?: TaskEvidence[];
+  checkpoint?: { phase: 'before_model' | 'before_tool' | 'awaiting_approval'; at: number; summary: string };
+  /** True while the executor is finishing the current safe operation. */
+  pauseRequested?: boolean;
+  /** Set after a process restart; those tasks cannot resume their old call stack. */
+  recoveryNote?: string;
+  /** The user-facing reason Pixel released control for a handoff. */
+  handoffReason?: string;
+  /** Set after a handoff; cleared only after Pixel observes the environment again. */
+  reobserveRequired?: boolean;
+  /** Successful state changes that still need an explicit postcondition check. */
+  pendingVerifications?: Array<{
+    stepId: string;
+    toolName: string;
+    /** Exact UIA postcondition captured from an approved native action. */
+    expectedWindowTitle?: string;
+    verificationSelector?: string;
+    verificationRole?: string;
+    verificationState?: 'present' | 'absent';
+  }>;
+}
+
+/* ------------------------------------------------------------------ *
+ * Reviewed skills and local routines
+ * ------------------------------------------------------------------ */
+
+export interface SkillInputDefinition {
+  name: string;
+  description: string;
+  required: boolean;
+}
+
+export interface SkillStepDefinition {
+  ordinal: number;
+  kind: 'tool' | 'browser' | 'native';
+  locator: string;
+  action: string;
+  params: Record<string, unknown>;
+  expectation: Record<string, unknown>;
+  approvalRequired: boolean;
+}
+
+export interface SkillDraftRequest {
+  schemaVersion: 1;
+  name: string;
+  purpose: string;
+  triggers: string[];
+  inputs: SkillInputDefinition[];
+  requiredTools: string[];
+  steps: SkillStepDefinition[];
+  decisionBranches: string[];
+  verificationRules: string[];
+  failureHandling: string[];
+  approvalRequirements: string[];
+}
+
+export interface SkillRecord extends SkillDraftRequest {
+  id: string;
+  projectId: string;
+  status: 'draft' | 'active';
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RoutineRecord {
+  id: string;
+  projectId: string;
+  skillId: string;
+  name: string;
+  localTime: string;
+  timezone: string;
+  enabled: boolean;
+  retryPolicy: 'manual';
+  missedRunPolicy: 'skip';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RoutineRunRecord {
+  id: string;
+  routineId: string;
+  skillId: string;
+  scheduledKey: string;
+  startedAt: number;
+  endedAt: number | null;
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'missed' | 'denied';
+  taskId: string | null;
+  summary: string | null;
+  failure: string | null;
+}
+
+export type PixelMemoryKind = 'preference' | 'project' | 'fact' | 'workflow' | 'outcome' | 'document';
+export interface MemoryRecordView {
+  id: string;
+  projectId: string;
+  kind: PixelMemoryKind;
+  content: string;
+  source: string;
+  confidence: 'user_approved' | 'source_backed' | 'inferred';
+  retention: 'permanent' | 'session' | 'expiring';
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+  lastUsedAt: number | null;
+  useCount: number;
+  expiresAt: number | null;
+}
+
+export interface MemoryExportView {
+  schemaVersion: 1;
+  projectId: string;
+  exportedAt: number;
+  memories: MemoryRecordView[];
 }
 
 /* ------------------------------------------------------------------ *
@@ -521,6 +669,9 @@ export interface PermissionRequest {
   /** Raw arguments, shown in the expanded details view. */
   args: Record<string, unknown>;
   createdAt: number;
+  /** Whether this action has a narrow target suitable for a session grant. */
+  allowPersistent?: boolean;
+  scopeLabel?: string;
 }
 
 export interface PermissionDecision {
@@ -648,6 +799,7 @@ export interface CypsBridge {
     diagnostics(): Promise<DiagnosticsSnapshot>;
     /** Global emergency stop: halts tools, cancels tasks, revokes grants. */
     emergencyStop(): Promise<EmergencyStopReport>;
+    emergencyClear(): Promise<void>;
     onEmergencyStop(handler: (report: EmergencyStopReport) => void): () => void;
   };
   permissions: {
@@ -657,10 +809,33 @@ export interface CypsBridge {
     revokeAll(): Promise<number>;
   };
   tasks: {
+    list(): Promise<TaskRecord[]>;
     onUpdate(handler: (task: TaskRecord) => void): () => void;
     pause(taskId: string): Promise<void>;
     resume(taskId: string): Promise<void>;
     cancel(taskId: string): Promise<void>;
+    continueAfterHandoff(taskId: string): Promise<boolean>;
+  };
+  skills: {
+    list(): Promise<SkillRecord[]>;
+    createDraft(draft: SkillDraftRequest): Promise<SkillRecord>;
+    activate(skillId: string): Promise<SkillRecord>;
+    delete(skillId: string): Promise<boolean>;
+  };
+  routines: {
+    list(): Promise<RoutineRecord[]>;
+    create(input: { skillId: string; name: string; localTime: string; timezone: string }): Promise<RoutineRecord>;
+    setEnabled(routineId: string, enabled: boolean): Promise<boolean>;
+    delete(routineId: string): Promise<boolean>;
+    history(routineId: string, limit?: number): Promise<RoutineRunRecord[]>;
+    cancel(routineId: string): Promise<boolean>;
+    retry(routineId: string): Promise<boolean>;
+  };
+  memory: {
+    list(): Promise<MemoryRecordView[]>;
+    update(id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }): Promise<MemoryRecordView>;
+    delete(id: string): Promise<boolean>;
+    export(): Promise<MemoryExportView>;
   };
   audit: {
     list(limit?: number): Promise<AuditEntry[]>;
@@ -707,6 +882,8 @@ export interface GrantScope {
   origin?: string;
   /** Normalised application name, e.g. "notepad". */
   app?: string;
+  /** Exact folder scope for document indexing. */
+  directory?: string;
 }
 
 export interface PermissionGrant {

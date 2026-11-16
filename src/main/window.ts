@@ -13,9 +13,18 @@
 import { BrowserWindow, screen } from 'electron';
 import type { Rectangle, Display } from 'electron';
 import { join } from 'node:path';
-import type { Surface } from '../shared/types';
+import type { Surface, VisualMode } from '../shared/types';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
+import {
+  companionTarget,
+  createFollower,
+  DEFAULT_FOLLOW_CONFIG,
+  isSettled,
+  settle,
+  stepFollower,
+} from '../shared/companion/cursorFollow';
+import type { FollowState } from '../shared/companion/cursorFollow';
 
 export { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES };
 
@@ -33,6 +42,13 @@ export class WindowManager {
   private main: BrowserWindow | null = null;
   private settings: BrowserWindow | null = null;
   private surface: Surface = 'idle';
+  private visualMode: VisualMode = 'stationary';
+  private followSpeed = 1;
+  private cursorOffset = { x: 22, y: 20 };
+  private reducedMotion = false;
+  private followTimer: ReturnType<typeof setInterval> | null = null;
+  private follower: FollowState | null = null;
+  private followTickAt = 0;
   /** True while the UI asked for click-through (guidance overlay). */
   private ignoringMouse = false;
   private readonly deps: WindowManagerDeps;
@@ -91,9 +107,13 @@ export class WindowManager {
     win.once('ready-to-show', () => {
       win.showInactive();
       this.deps.onVisibilityChange(true);
+      this.startCursorFollow();
     });
 
     win.on('moved', () => {
+      // Cursor-follow motion is transient and should not rewrite the user's
+      // remembered stationary position every frame.
+      if (this.visualMode === 'cursor') return;
       const [x, y] = win.getPosition();
       this.deps.onPositionChange({ x, y });
     });
@@ -184,9 +204,13 @@ export class WindowManager {
   setSurface(surface: Surface): void {
     this.surface = surface;
     const win = this.main;
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed()) {
+      if (surface !== 'idle') this.stopCursorFollow();
+      return;
+    }
 
     if (surface === 'hidden') {
+      this.stopCursorFollow();
       win.hide();
       this.deps.onVisibilityChange(false);
       return;
@@ -212,6 +236,28 @@ export class WindowManager {
 
     if (!win.isVisible()) win.showInactive();
     this.deps.onPositionChange({ x: target.x, y: target.y });
+    if (surface === 'idle') this.startCursorFollow();
+    else this.stopCursorFollow();
+  }
+
+  /** Apply presentation preferences independently of Guide/Agent/Hybrid mode. */
+  setVisualMode(
+    mode: VisualMode,
+    followSpeed: number,
+    cursorOffset: { x: number; y: number },
+    reducedMotion: boolean,
+  ): void {
+    const wasFollowing = this.visualMode === 'cursor';
+    this.visualMode = mode;
+    this.followSpeed = followSpeed;
+    this.cursorOffset = cursorOffset;
+    this.reducedMotion = reducedMotion;
+    if (mode === 'cursor') {
+      this.startCursorFollow();
+    } else {
+      this.stopCursorFollow();
+      if (wasFollowing) this.deps.onPositionChange(this.currentPosition());
+    }
   }
 
   moveTo(x: number, y: number): void {
@@ -250,11 +296,13 @@ export class WindowManager {
     if (win.isMinimized()) win.restore();
     win.showInactive();
     this.deps.onVisibilityChange(true);
+    this.startCursorFollow();
   }
 
   hide(): void {
     const win = this.main;
     if (!win || win.isDestroyed()) return;
+    this.stopCursorFollow();
     win.hide();
     this.deps.onVisibilityChange(false);
   }
@@ -297,6 +345,56 @@ export class WindowManager {
 
   closeSettings(): void {
     if (this.settings && !this.settings.isDestroyed()) this.settings.close();
+  }
+
+  private startCursorFollow(): void {
+    if (this.visualMode !== 'cursor' || this.surface !== 'idle' || this.followTimer) return;
+    const win = this.main;
+    if (!win || win.isDestroyed() || !win.isVisible()) return;
+    const [x, y] = win.getPosition();
+    this.follower = createFollower({ x, y });
+    this.followTickAt = Date.now();
+    // Cursor mode is opt-in and polls only while its compact orb is visible.
+    this.followTimer = setInterval(() => this.tickCursorFollow(), 33);
+    this.followTimer.unref?.();
+  }
+
+  private stopCursorFollow(): void {
+    if (this.followTimer) clearInterval(this.followTimer);
+    this.followTimer = null;
+    this.follower = null;
+  }
+
+  private tickCursorFollow(): void {
+    const win = this.main;
+    if (this.visualMode !== 'cursor' || this.surface !== 'idle' || !win || win.isDestroyed() || !win.isVisible()) {
+      this.stopCursorFollow();
+      return;
+    }
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    const bounds = win.getBounds();
+    const target = companionTarget(cursor, display.workArea, {
+      offset: this.cursorOffset,
+      size: { width: bounds.width, height: bounds.height },
+      margin: 8,
+    });
+    const now = Date.now();
+    if (this.reducedMotion || !this.follower) {
+      this.follower = createFollower(target);
+    } else {
+      this.follower = stepFollower(
+        this.follower,
+        target,
+        Math.min(0.1, Math.max(0, (now - this.followTickAt) / 1000)),
+        { ...DEFAULT_FOLLOW_CONFIG, speed: this.followSpeed },
+      );
+      if (isSettled(this.follower, target)) this.follower = settle(target);
+    }
+    this.followTickAt = now;
+    const nextX = Math.round(this.follower.position.x);
+    const nextY = Math.round(this.follower.position.y);
+    if (Math.abs(nextX - bounds.x) > 1 || Math.abs(nextY - bounds.y) > 1) win.setPosition(nextX, nextY);
   }
 
   /* ------------------------------ displays ---------------------------- */

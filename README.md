@@ -9,28 +9,27 @@ largest surface it ever draws is 480 logical pixels wide.
 
 ## Status
 
-This is the Wave 1 foundation: a real Electron application with a working
-DeepSeek client, a floating window, a tray, global shortcuts, encrypted
-credential storage, an agent permission model, and tests.
+Pixel has a bounded DeepSeek tool loop, a main-process permission gateway,
+project-scoped SQLite memory, browser/file/document capabilities, a compact task
+timeline, reviewed skills and local routines. The Windows UI Automation helper
+can inspect accessible controls and invoke a uniquely matched control after
+approval. Cursor-follow is an optional presentation setting. Tasks are stored
+durably; work interrupted by restart is restored as paused and is never resumed
+automatically. State-changing actions that lack postcondition evidence finish as
+**Needs verification**.
 
-**What is verified by automated checks** (run `npm run verify`):
+Use [`docs/research/PIXEL_CURRENT_STATE.md`](docs/research/PIXEL_CURRENT_STATE.md)
+for the source-backed feature inventory and latest test totals. Type checking,
+unit tests and the production build are automated checks; they do not prove the
+Windows window, tray, microphone, installer or multi-monitor behavior. The
+current environment also lacks Playwright Chromium and NSIS, so browser and
+installer integration cases are skipped. Follow
+[`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+for the target-machine acceptance run.
 
-- TypeScript compiles under `strict` for both the main and renderer programs.
-- The renderer builds for production.
-- The main bundle compiles to loadable CommonJS.
-- 212 tests pass against real logic: the DeepSeek wire protocol, SSE parsing,
-  the conversation engine, the agent tool loop (approval, denial, failure,
-  cancellation), the tool permission policy, diagnostics, the PNG encoder, and
-  the process-boundary invariants. Fourteen of them drive a live headless
-  Chromium against a real page, and the speech capability probe runs against
-  your actual Windows speech services.
-
-**What has not been verified in the authoring environment:** the window actually
-appearing, tray behaviour, global shortcuts, drag and edge snapping, and real
-screen capture. The machine this was built on cannot start any Chromium GUI
-process (see [docs/ELECTRON-CONSTRAINTS.md](docs/ELECTRON-CONSTRAINTS.md)), so
-those paths are compiled, packaged and reviewed but not exercised. They must be
-confirmed on a normal Windows desktop. No part of this README claims otherwise.
+The current architecture and security boundaries are in
+[`docs/architecture/PIXEL_AGENT_RUNTIME.md`](docs/architecture/PIXEL_AGENT_RUNTIME.md)
+and [`docs/architecture/PIXEL_SECURITY_MODEL.md`](docs/architecture/PIXEL_SECURITY_MODEL.md).
 
 ## Requirements
 
@@ -80,6 +79,7 @@ npm install --ignore-scripts   # see note below
 node node_modules\electron\install.js   # fetch the Electron binary
 npx playwright install chromium  # only needed for browser tools
 npm run build
+npm run build:native  # optional native UI Automation helper for development
 npm start
 ```
 
@@ -229,9 +229,14 @@ transparency, taskbar visibility, DPI) and writes a JSON report.
 - Typing into elevated (administrator) windows is blocked by Windows integrity
   levels.
 - `open_application` only launches an allowlist of applications by design.
-- The audit trail is held in memory (the last 50 execution records are persisted
-  to disk, the audit log is not).
-- Cyps Code is out of scope. Only the integration seam is reserved.
+- Browser Chromium and the full app UI require a normal desktop runtime; the
+  current Codex environment cannot start Electron's Chromium window.
+- Skills are model-mediated and have no interaction recorder or deterministic
+  live replay runner. Specialist roles are not backed by an independent model
+  delegation loop.
+- There is no general credential broker. Passwords, MFA, passkeys and payment
+  confirmation remain human-controlled.
+- Pixel Code is out of scope. Only the integration seam is reserved.
 - Disk and battery readings are unavailable where WMI is blocked; the UI says
   "unavailable" rather than showing a fabricated number.
 

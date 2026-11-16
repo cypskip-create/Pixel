@@ -271,6 +271,69 @@ describe('workflow replay', () => {
     expect(result.steps).toHaveLength(0);
   });
 
+  it('passes cancellation into an in-flight step and reports possible partial completion', async () => {
+    const db = database();
+    const p = project(db);
+    const workflow = new WorkflowStore(db).create(p, 'Cancel in flight', [step()]);
+    const controller = new AbortController();
+    let started = false;
+    const runner: StepRunner = {
+      run(_workflowStep, signal) {
+        started = true;
+        return new Promise((resolve) => {
+          signal?.addEventListener('abort', () => {
+            resolve({ ok: false, observed: 'cancelled by runner' });
+          }, { once: true });
+        });
+      },
+    };
+
+    const replay = replayWorkflow(workflow, runner, {
+      mode: 'agent',
+      authorize: () => ({ allowed: true, reason: 'allowed', needsApproval: false }),
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+    const result = await replay;
+
+    expect(started).toBe(true);
+    expect(result.status).toBe('cancelled');
+    expect(result.steps[0]).toMatchObject({ status: 'cancelled' });
+    expect(result.failure).toMatch(/partly completed/i);
+  });
+
+  it('does not execute a step when cancellation arrives during approval', async () => {
+    const db = database();
+    const p = project(db);
+    const workflow = new WorkflowStore(db).create(p, 'Cancel approval', [step()]);
+    const controller = new AbortController();
+    let executed = false;
+    const replay = replayWorkflow(workflow, {
+      async run() {
+        executed = true;
+        return { ok: true, observed: 'must not run' };
+      },
+    }, {
+      mode: 'agent',
+      authorize: () => ({ allowed: false, reason: 'needs approval', needsApproval: true }),
+      requestApproval: async (_workflowStep, signal) => {
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return true;
+      },
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+    const result = await replay;
+
+    expect(executed).toBe(false);
+    expect(result.status).toBe('cancelled');
+    expect(result.steps).toHaveLength(0);
+  });
+
   it('maps workflow steps onto the central tool policy', () => {
     const guide = authorizeStep(registry, 'guide', step({ kind: 'browser' }));
     expect(guide.allowed).toBe(false);
@@ -640,6 +703,24 @@ describe('python worker supervision', () => {
     const result = await worker.extract('C:/nope.txt');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(['TIMEOUT', 'CAPABILITY_MISSING', 'WORKER_UNAVAILABLE']).toContain(result.error.code);
+    await worker.shutdown();
+  });
+
+  it('cancels an in-flight request and terminates its worker process', async () => {
+    const worker = fakeWorker('process.stdin.on("data", () => {}); setInterval(() => {}, 1000);');
+    const controller = new AbortController();
+    const pending = worker.extract('C:/nope.txt', controller.signal);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const child = (worker as unknown as { child: { once: (event: string, cb: () => void) => void; exitCode: number | null } | null }).child;
+    expect(child).not.toBeNull();
+    const exited = new Promise<void>((resolve) => child?.once('exit', () => resolve()));
+
+    controller.abort();
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false, error: { code: 'CANCELLED' } });
+    await exited;
+    expect(child?.exitCode).not.toBeNull();
+    expect(worker.isRunning).toBe(false);
     await worker.shutdown();
   });
 });

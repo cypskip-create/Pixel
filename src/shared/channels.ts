@@ -39,6 +39,7 @@ export const CHANNELS = {
 
   systemDiagnostics: 'system:diagnostics',
   systemEmergencyStop: 'system:emergencyStop',
+  systemEmergencyClear: 'system:emergencyClear',
   systemEmergencyStopEvent: 'system:emergencyStopEvent',
 
   permissionsRespond: 'permissions:respond',
@@ -49,7 +50,27 @@ export const CHANNELS = {
   tasksPause: 'tasks:pause',
   tasksResume: 'tasks:resume',
   tasksCancel: 'tasks:cancel',
+  tasksContinueAfterHandoff: 'tasks:continueAfterHandoff',
+  tasksList: 'tasks:list',
   tasksUpdate: 'tasks:update',
+
+  skillsList: 'skills:list',
+  skillsCreateDraft: 'skills:createDraft',
+  skillsActivate: 'skills:activate',
+  skillsDelete: 'skills:delete',
+
+  routinesList: 'routines:list',
+  routinesCreate: 'routines:create',
+  routinesSetEnabled: 'routines:setEnabled',
+  routinesDelete: 'routines:delete',
+  routinesHistory: 'routines:history',
+  routinesCancel: 'routines:cancel',
+  routinesRetry: 'routines:retry',
+
+  memoryList: 'memory:list',
+  memoryUpdate: 'memory:update',
+  memoryDelete: 'memory:delete',
+  memoryExport: 'memory:export',
 
   auditList: 'audit:list',
 

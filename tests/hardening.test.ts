@@ -204,6 +204,7 @@ describe('grants for high-risk tools', () => {
       scope: 'session',
       grantedAt: Date.now(),
       expiresAt: Date.now() + 60_000,
+      target: { app: 'notepad' },
     });
     expect(registry.activeGrants().find((g) => g.toolName === 'open_application')?.scope).toBe('session');
   });

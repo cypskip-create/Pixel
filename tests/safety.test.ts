@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AuditEntry } from '../src/shared/types';
 import { ToolExecutors } from '../src/main/agent/executors';
 import type { ToolResult } from '../src/main/agent/executors';
+import { DesktopInputLease } from '../src/main/agent/inputLease';
 import { runWithDeadline } from '../src/main/agent/executor';
 import { NetworkGuard } from '../src/main/agent/netGuard';
 import { JsonlAuditSink, readAuditFile, redactAuditText, sanitiseAuditEntry } from '../src/main/agent/auditStore';
-import { AuditLog } from '../src/main/agent/runtime';
+import { AuditLog, EmergencyController, PermissionBroker, TaskManager } from '../src/main/agent/runtime';
 import { deriveGrantScope, scopeCovers, originOf, describeScope } from '../src/main/agent/scope';
 import { ToolRegistry, applyDecision } from '../src/main/agent/tools';
 
@@ -86,6 +87,94 @@ describe('scoped grants in the registry', () => {
       { toolName: 'open_application', args: { name: 'notepad' } },
     );
     expect(grant?.target).toEqual({ app: 'notepad' });
+  });
+});
+
+describe('approval response correlation', () => {
+  it('denies safely if the renderer cannot receive the approval request', async () => {
+    const broker = new PermissionBroker(new ToolRegistry(), new AuditLog(), () => {
+      throw new Error('renderer closed');
+    });
+    const decision = await broker.ask({
+      id: 'undelivered',
+      toolName: 'open_application',
+      action: 'Open Notepad',
+      target: 'notepad',
+      args: { name: 'notepad' },
+      risk: 'medium',
+      changesData: true,
+      duration: 'once',
+      createdAt: Date.now(),
+      allowPersistent: true,
+    });
+
+    expect(decision).toMatchObject({ approved: false, duration: 'once' });
+    expect(broker.isPending()).toBe(false);
+  });
+
+  it('ignores a response for a different pending request id', async () => {
+    const registry = new ToolRegistry();
+    const audit = new AuditLog();
+    let requestedId = '';
+    const broker = new PermissionBroker(registry, audit, (request) => {
+      requestedId = request.id;
+    });
+    const pending = broker.ask({
+      id: 'expected-request',
+      toolName: 'open_application',
+      action: 'Open Notepad',
+      target: 'notepad',
+      args: { name: 'notepad' },
+      risk: 'medium',
+      changesData: true,
+      duration: 'once',
+      createdAt: Date.now(),
+      allowPersistent: true,
+      scopeLabel: 'only notepad',
+    });
+
+    broker.respond({ requestId: 'stale-request', approved: true, duration: 'session' });
+    expect(broker.isPending()).toBe(true);
+    expect(registry.activeGrants()).toHaveLength(0);
+
+    broker.respond({ requestId: requestedId, approved: true, duration: 'session' });
+    await expect(pending).resolves.toMatchObject({ approved: true });
+    expect(registry.activeGrants()[0]).toMatchObject({ target: { app: 'notepad' } });
+  });
+
+  it('downgrades a standing grant the request did not allow', async () => {
+    const registry = new ToolRegistry();
+    const broker = new PermissionBroker(registry, new AuditLog(), () => undefined);
+    const pending = broker.ask({
+      id: 'one-shot-only',
+      toolName: 'type_text',
+      action: 'Type into the focused window',
+      target: 'focused window',
+      args: { text: 'hello' },
+      risk: 'high',
+      changesData: true,
+      duration: 'once',
+      createdAt: Date.now(),
+      allowPersistent: false,
+    });
+
+    broker.respond({ requestId: 'one-shot-only', approved: true, duration: 'always' });
+
+    await expect(pending).resolves.toMatchObject({ approved: true, duration: 'once' });
+    expect(registry.activeGrants()[0]?.scope).toBe('once');
+  });
+
+  it('clears an approval prompt when its task signal is cancelled', async () => {
+    const broker = new PermissionBroker(new ToolRegistry(), new AuditLog(), () => undefined);
+    const controller = new AbortController();
+    const pending = broker.ask({
+      id: 'abort-approval', toolName: 'type_text', action: 'Type text', target: 'focused window',
+      args: { text: 'hello' }, risk: 'high', changesData: true, duration: 'once', createdAt: Date.now(),
+    }, controller.signal);
+    expect(broker.isPending()).toBe(true);
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ approved: false, requestId: 'abort-approval' });
+    expect(broker.isPending()).toBe(false);
   });
 });
 
@@ -167,6 +256,26 @@ describe('runWithDeadline', () => {
   });
 });
 
+describe('emergency stop lifecycle', () => {
+  it('keeps the main-process stop active until the clear action is received', () => {
+    const registry = new ToolRegistry();
+    const audit = new AuditLog();
+    const tasks = new TaskManager(() => undefined);
+    const permissions = new PermissionBroker(registry, audit, () => undefined);
+    const controller = new EmergencyController({
+      registry, permissions, tasks, audit,
+      abortStream: () => false,
+      killChildren: () => 0,
+      completedActions: () => [],
+      notify: () => undefined,
+    });
+    controller.trigger();
+    expect(controller.isStopped()).toBe(true);
+    controller.clear();
+    expect(controller.isStopped()).toBe(false);
+  });
+});
+
 describe('ToolExecutors cancellation', () => {
   it('refuses to start a call whose signal is already aborted', async () => {
     const controller = new AbortController();
@@ -187,6 +296,67 @@ describe('ToolExecutors cancellation', () => {
 
   it('runs normally when no signal is given', async () => {
     expect((await new ToolExecutors().run('get_current_time', {})).ok).toBe(true);
+  });
+});
+
+describe('desktop input lease', () => {
+  it('hands the lease to queued callers in order', async () => {
+    const lease = new DesktopInputLease();
+    const releaseFirst = await lease.acquire();
+    if (!releaseFirst) throw new Error('The first caller did not get the lease.');
+    const second = lease.acquire();
+    const third = lease.acquire();
+    let thirdReady = false;
+    const thirdObserved = third.then((release) => {
+      thirdReady = true;
+      return release;
+    });
+
+    expect(lease.isHeld).toBe(true);
+    releaseFirst();
+    const releaseSecond = await second;
+    if (!releaseSecond) throw new Error('The second caller did not get the lease.');
+    expect(thirdReady).toBe(false);
+    releaseSecond();
+    const releaseThird = await thirdObserved;
+    if (!releaseThird) throw new Error('The third caller did not get the lease.');
+    releaseThird();
+    expect(lease.isHeld).toBe(false);
+  });
+
+  it('removes a cancelled waiter without releasing the current owner', async () => {
+    const lease = new DesktopInputLease();
+    const releaseOwner = await lease.acquire();
+    const controller = new AbortController();
+    const queued = lease.acquire(controller.signal);
+    controller.abort();
+
+    await expect(queued).resolves.toBeNull();
+    expect(lease.isHeld).toBe(true);
+    releaseOwner?.();
+    expect(lease.isHeld).toBe(false);
+  });
+
+  it('does not hand over while an aborted owner is still winding down', async () => {
+    const lease = new DesktopInputLease();
+    const ownerController = new AbortController();
+    const releaseOwner = await lease.acquire(ownerController.signal);
+    const next = lease.acquire();
+    ownerController.abort();
+    let nextReady = false;
+    const nextObserved = next.then((release) => {
+      nextReady = true;
+      return release;
+    });
+
+    await Promise.resolve();
+    expect(nextReady).toBe(false);
+    expect(lease.isHeld).toBe(true);
+    releaseOwner?.();
+    const nextRelease = await nextObserved;
+    if (!nextRelease) throw new Error('The next caller did not get the lease.');
+    nextRelease();
+    expect(lease.isHeld).toBe(false);
   });
 });
 

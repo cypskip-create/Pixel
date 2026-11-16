@@ -88,6 +88,13 @@ export interface MemoryStats {
   expired: number;
 }
 
+export interface MemoryExportBundle {
+  schemaVersion: 1;
+  projectId: string;
+  exportedAt: number;
+  memories: MemoryRecord[];
+}
+
 /** Ranking weights, exported so tests can assert the ordering rules. */
 export const RANK = {
   confidenceUserApproved: 1.0,

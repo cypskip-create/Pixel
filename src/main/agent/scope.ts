@@ -1,4 +1,5 @@
 import type { GrantScope } from '../../shared/types';
+import { resolve } from 'node:path';
 
 /**
  * Work out what an invocation is aimed at, so an approval can be limited to it.
@@ -17,6 +18,10 @@ export function deriveGrantScope(toolName: string, args: Record<string, unknown>
       const app = normaliseApp(args.name);
       return app ? { app } : {};
     }
+    case 'documents_index': {
+      const directory = canonicalDirectory(args.directory);
+      return directory ? { directory } : {};
+    }
     default:
       return {};
   }
@@ -27,6 +32,7 @@ export function scopeCovers(granted: GrantScope | undefined, wanted: GrantScope)
   if (!granted) return true;
   if (granted.origin !== undefined && granted.origin !== wanted.origin) return false;
   if (granted.app !== undefined && granted.app !== wanted.app) return false;
+  if (granted.directory !== undefined && canonicalDirectory(granted.directory) !== canonicalDirectory(wanted.directory)) return false;
   return true;
 }
 
@@ -47,9 +53,20 @@ export function normaliseApp(value: unknown): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+function canonicalDirectory(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  try {
+    const path = resolve(value.trim());
+    return process.platform === 'win32' ? path.toLowerCase() : path;
+  } catch {
+    return null;
+  }
+}
+
 /** Human description of a scope for the approval card. */
 export function describeScope(scope: GrantScope): string {
   if (scope.origin) return `only ${scope.origin}`;
   if (scope.app) return `only ${scope.app}`;
+  if (scope.directory) return `only ${scope.directory}`;
   return 'this action anywhere';
 }

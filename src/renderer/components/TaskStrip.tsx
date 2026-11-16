@@ -16,13 +16,18 @@ interface TaskStripProps {
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
+  onContinue: () => void;
 }
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   planning: 'Planning',
   running: 'Running',
+  pause_requested: 'Pausing',
   awaiting_approval: 'Needs your OK',
+  awaiting_user: 'Your turn',
   paused: 'Paused',
+  blocked: 'Needs verification',
+  cancelling: 'Stopping',
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Cancelled',
@@ -31,8 +36,12 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 const STATUS_TONE: Record<TaskStatus, string> = {
   planning: 'text-violet-200 border-violet-400/35 bg-violet-400/12',
   running: 'text-amber-100 border-amber-400/35 bg-amber-400/12',
+  pause_requested: 'text-amber-100 border-amber-400/35 bg-amber-400/12',
   awaiting_approval: 'text-amber-100 border-amber-400/45 bg-amber-400/18',
+  awaiting_user: 'text-sky-100 border-sky-300/45 bg-sky-400/14',
   paused: 'text-slate-200 border-slate-400/35 bg-slate-400/12',
+  blocked: 'text-rose-100 border-rose-400/40 bg-rose-400/14',
+  cancelling: 'text-amber-100 border-amber-400/35 bg-amber-400/12',
   completed: 'text-emerald-100 border-emerald-400/35 bg-emerald-400/12',
   failed: 'text-rose-100 border-rose-400/40 bg-rose-400/14',
   cancelled: 'text-slate-300 border-slate-400/30 bg-slate-400/10',
@@ -45,17 +54,19 @@ const STATUS_TONE: Record<TaskStatus, string> = {
  * never a full-screen view - the whole point is that the answer stays legible
  * while Pixel works.
  */
-export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps) {
+export function TaskStrip({ task, onPause, onResume, onCancel, onContinue }: TaskStripProps) {
   const [open, setOpen] = useState(false);
 
-  const done = task.steps.filter((step) => step.status === 'done').length;
+  const done = task.steps.filter((step) => step.status === 'done' || step.status === 'verified').length;
   const total = task.steps.length;
   const progress = total === 0 ? 0 : (done / total) * 100;
   const activeStep =
     task.steps.find((step) => step.status === 'running') ??
     task.steps.find((step) => step.status === 'pending');
-  const live = task.status === 'running' || task.status === 'planning';
-  const canResume = task.status === 'paused';
+  const live = ['running', 'planning', 'pause_requested', 'awaiting_approval', 'cancelling'].includes(task.status);
+  const canPause = ['running', 'planning', 'awaiting_approval'].includes(task.status);
+  const canResume = task.status === 'paused' && !task.recoveryNote;
+  const canCancel = live || task.status === 'awaiting_user' || task.status === 'paused' || task.status === 'blocked';
 
   return (
     <section
@@ -118,6 +129,16 @@ export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps)
               </>
             ) : null}
           </span>
+          {task.recoveryNote ? (
+            <span className="mt-0.5 block truncate text-[10px] text-amber-100/85" title={task.recoveryNote}>
+              Interrupted after restart. Review the last step before continuing.
+            </span>
+          ) : null}
+          {task.status === 'awaiting_user' && task.handoffReason ? (
+            <span className="mt-0.5 block truncate text-[10px] text-sky-100/85" title={task.handoffReason}>
+              {task.handoffReason}
+            </span>
+          ) : null}
         </button>
 
         <span className="sr-only" role="status" aria-live="polite">
@@ -125,7 +146,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps)
         </span>
 
         <div className="no-drag flex shrink-0 items-center gap-1">
-          {live ? (
+          {canPause ? (
             <button
               type="button"
               onClick={onPause}
@@ -145,7 +166,16 @@ export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps)
               Resume
             </button>
           ) : null}
-          {live || canResume ? (
+          {task.status === 'awaiting_user' ? (
+            <button
+              type="button"
+              onClick={onContinue}
+              className="rounded-full border border-sky-300/40 bg-sky-400/18 px-2 py-1 text-[10px] font-semibold text-sky-100 hover:bg-sky-400/28"
+            >
+              Recheck and continue
+            </button>
+          ) : null}
+          {canCancel ? (
             <button
               type="button"
               onClick={onCancel}
@@ -188,6 +218,11 @@ export function TaskStrip({ task, onPause, onResume, onCancel }: TaskStripProps)
             Started {relativeTime(task.createdAt)}
             {task.endedAt !== undefined ? ` · ended ${relativeTime(task.endedAt)}` : ''}
           </li>
+          {task.result ? (
+            <li className="pt-1 text-[10.5px] leading-relaxed text-[var(--color-ink-soft)]" title={task.result}>
+              {truncate(task.result, 320)}
+            </li>
+          ) : null}
         </ol>
       ) : null}
     </section>
@@ -198,8 +233,8 @@ function StepRow({ step }: { step: TaskStep }) {
   return (
     <div className="flex items-start gap-2 py-1">
       <span aria-hidden="true" className="mt-0.5 text-[var(--color-ink-dim)]">
-        {step.status === 'done' ? (
-          <Check size={12} strokeWidth={2.8} className="text-emerald-300" />
+        {step.status === 'done' || step.status === 'verified' ? (
+          <Check size={12} strokeWidth={2.8} className={step.status === 'verified' ? 'text-emerald-300' : 'text-amber-200'} />
         ) : step.status === 'running' ? (
           <Loader2 size={12} strokeWidth={2.4} className="orb-spin text-amber-200" />
         ) : step.status === 'failed' ? (
@@ -213,7 +248,9 @@ function StepRow({ step }: { step: TaskStep }) {
       <span className="min-w-0 flex-1">
         <span
           className={`block text-[11.5px] leading-snug ${
-            step.status === 'done'
+            step.status === 'verified'
+              ? 'text-emerald-100'
+              : step.status === 'done'
               ? 'text-[var(--color-ink-dim)] line-through decoration-white/25'
               : step.status === 'failed'
                 ? 'text-rose-200'
@@ -226,6 +263,9 @@ function StepRow({ step }: { step: TaskStep }) {
           <span className="mt-0.5 block truncate text-[10px] text-[var(--color-ink-dim)]" title={step.detail}>
             {step.detail}
           </span>
+        ) : null}
+        {step.status === 'verified' ? (
+          <span className="mt-0.5 block text-[9.5px] font-medium text-emerald-200/85">Verified</span>
         ) : null}
         {step.toolName !== undefined ? (
           <code className="mt-0.5 inline-block rounded bg-white/8 px-1 font-mono text-[9.5px] text-[var(--color-ink-dim)]">

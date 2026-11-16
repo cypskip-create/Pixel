@@ -241,6 +241,88 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_agent_runs_project ON agent_runs(project_id, started_at DESC);
     `,
   },
+  {
+    version: 5,
+    name: 'durable-task-events',
+    sql: `
+      ALTER TABLE tasks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE task_events (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        at         INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        status     TEXT NOT NULL,
+        summary    TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_task_events_task ON task_events(task_id, at, id);
+      CREATE INDEX idx_tasks_updated ON tasks(updated_at DESC, created_at DESC);
+    `,
+  },
+  {
+    version: 6,
+    name: 'reviewed-skills-and-local-routines',
+    sql: `
+      CREATE TABLE skills (
+        id              TEXT PRIMARY KEY,
+        project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name            TEXT NOT NULL,
+        version         INTEGER NOT NULL,
+        status          TEXT NOT NULL CHECK (status IN ('draft', 'active')),
+        definition      TEXT NOT NULL,
+        definition_hash TEXT NOT NULL,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL,
+        UNIQUE (project_id, name, version)
+      );
+
+      CREATE INDEX idx_skills_project ON skills(project_id, updated_at DESC);
+
+      CREATE TABLE skill_runs (
+        id         TEXT PRIMARY KEY,
+        skill_id   TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        started_at INTEGER NOT NULL,
+        ended_at   INTEGER,
+        status     TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'cancelled', 'denied')),
+        step_count INTEGER NOT NULL DEFAULT 0,
+        failure    TEXT
+      );
+
+      CREATE INDEX idx_skill_runs_skill ON skill_runs(skill_id, started_at DESC);
+
+      CREATE TABLE routines (
+        id         TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        skill_id   TEXT NOT NULL REFERENCES skills(id) ON DELETE RESTRICT,
+        name       TEXT NOT NULL,
+        local_time TEXT NOT NULL,
+        timezone   TEXT NOT NULL,
+        enabled    INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX idx_routines_enabled ON routines(enabled, local_time);
+
+      CREATE TABLE routine_runs (
+        id             TEXT PRIMARY KEY,
+        routine_id     TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+        skill_id       TEXT NOT NULL REFERENCES skills(id) ON DELETE RESTRICT,
+        scheduled_key  TEXT NOT NULL,
+        started_at     INTEGER NOT NULL,
+        ended_at       INTEGER,
+        status         TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'cancelled', 'missed', 'denied')),
+        task_id        TEXT,
+        summary        TEXT,
+        failure        TEXT,
+        UNIQUE (routine_id, scheduled_key)
+      );
+
+      CREATE INDEX idx_routine_runs_routine ON routine_runs(routine_id, started_at DESC);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

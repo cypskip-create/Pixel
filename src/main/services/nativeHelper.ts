@@ -12,9 +12,11 @@ import type { Rect } from '../../shared/companion/geometry';
  * rectangles, which are far more reliable than estimating positions from a
  * screenshot.
  *
- * The helper is strictly READ-ONLY. It can describe windows and elements; it has
- * no command that clicks, types or moves anything. Acting on what it finds still
- * goes through Pixel's normal tools and approvals.
+ * The helper observes windows and elements, and has one bounded InvokePattern
+ * action for an exact unique foreground control with an explicit UIA postcondition.
+ * Pixel's permission gateway must approve it, and the helper rechecks the approved
+ * window title immediately before invoking. It has no coordinate click, typing,
+ * or arbitrary script API.
  *
  * Lifecycle: it is started on first use and stopped after a short idle period,
  * so an idle Pixel runs no extra process.
@@ -47,10 +49,22 @@ export interface FindElementsQuery {
   maxResults?: number;
 }
 
+export interface VerifyElementStateQuery {
+  selector: string;
+  expectedWindowTitle: string;
+  state: 'present' | 'absent';
+  role?: string;
+}
+
 export interface NativeCommands {
   ping: { args: Record<string, never>; result: { version: string } };
   foreground_window: { args: Record<string, never>; result: WindowInfo | null };
   find_elements: { args: FindElementsQuery; result: { window: WindowInfo; elements: UiElement[]; truncated: boolean } };
+  verify_element_state: { args: VerifyElementStateQuery; result: { window: WindowInfo; matches: boolean; matchedCount: number; element?: UiElement } };
+  invoke_element: {
+    args: { selector: string; expectedWindowTitle: string; role?: string; expectedResult: { selector: string; state: 'present' | 'absent'; role?: string } };
+    result: { window: WindowInfo; element: UiElement; invoked: true };
+  };
 }
 
 export class NativeHelperError extends Error {
@@ -81,6 +95,7 @@ interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: NativeHelperError) => void;
   timer: ReturnType<typeof setTimeout>;
+  cleanup: () => void;
 }
 
 export class NativeHelper {
@@ -132,24 +147,24 @@ export class NativeHelper {
 
     const id = this.nextId++;
     return new Promise<NativeCommands[K]['result']>((resolve, reject) => {
+      const onAbort = (): void => {
+        const entry = this.pending.get(id);
+        if (!entry) return;
+        // UI Automation calls can block inside COM. Killing the dedicated helper
+        // process is the only reliable way to stop a pending call from continuing
+        // after its task has been cancelled.
+        this.dispose();
+      };
       const timer = setTimeout(() => {
+        const entry = this.pending.get(id);
+        if (!entry) return;
         this.pending.delete(id);
+        entry.cleanup();
         reject(new NativeHelperError(`"${command}" took too long.`, 'TIMEOUT'));
       }, this.options.requestTimeoutMs);
-
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
-
-      signal?.addEventListener(
-        'abort',
-        () => {
-          const entry = this.pending.get(id);
-          if (!entry) return;
-          clearTimeout(entry.timer);
-          this.pending.delete(id);
-          entry.reject(new NativeHelperError('The request was cancelled.', 'CANCELLED'));
-        },
-        { once: true },
-      );
+      const cleanup = (): void => signal?.removeEventListener('abort', onAbort);
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, cleanup });
+      signal?.addEventListener('abort', onAbort, { once: true });
 
       child.stdin.write(`${JSON.stringify({ id, cmd: command, args })}\n`, (error) => {
         if (error) this.failAll(new NativeHelperError('Could not talk to PixelNative.exe.', 'CRASHED'));
@@ -202,6 +217,7 @@ export class NativeHelper {
     if (!entry) return;
     this.pending.delete(message.id);
     clearTimeout(entry.timer);
+    entry.cleanup();
     if (message.ok === true) entry.resolve(message.result);
     else entry.reject(new NativeHelperError(String(message.error ?? 'The helper reported an error.'), 'FAILED'));
   }
@@ -209,6 +225,7 @@ export class NativeHelper {
   private failAll(error: NativeHelperError): void {
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer);
+      entry.cleanup();
       entry.reject(error);
     }
     this.pending.clear();

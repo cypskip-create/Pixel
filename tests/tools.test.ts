@@ -146,6 +146,19 @@ describe('applyDecision', () => {
 });
 
 describe('ToolRegistry', () => {
+  it('validates required arguments and rejects undeclared properties', () => {
+    const registry = new ToolRegistry();
+    expect(registry.validateArgs('open_application', { name: 'notepad' })).toEqual({ ok: true });
+    expect(registry.validateArgs('open_application', {})).toMatchObject({ ok: false });
+    expect(registry.validateArgs('open_application', { name: 'notepad', command: 'calc' })).toMatchObject({ ok: false });
+  });
+
+  it('validates enum values in tool contracts', () => {
+    const registry = new ToolRegistry();
+    expect(registry.validateArgs('analyze_screen', { target: 'active_window' })).toEqual({ ok: true });
+    expect(registry.validateArgs('analyze_screen', { target: 'desktop_everywhere' })).toMatchObject({ ok: false });
+  });
+
   it('exposes only read-only tools in guide mode', () => {
     const registry = new ToolRegistry();
     const available = registry.availableFor('guide');

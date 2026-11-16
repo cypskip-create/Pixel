@@ -13,6 +13,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { terminateProcessTree } from '../services/process';
 
 /** Longest single dictation window. */
 export const MAX_LISTEN_MS = 20_000;
@@ -34,6 +35,14 @@ export interface RecognitionResult {
 
 export class VoiceService {
   private speaking = false;
+  private readonly activeControllers = new Set<AbortController>();
+
+  /** Cancel current recognition and speech workers. */
+  cancelAll(): number {
+    const controllers = [...this.activeControllers];
+    for (const controller of controllers) controller.abort();
+    return controllers.length;
+  }
 
   /** Probe the machine once and cache the answer. */
   async capability(): Promise<VoiceCapability> {
@@ -82,9 +91,14 @@ export class VoiceService {
 
     const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 8_000, 1_000), MAX_LISTEN_MS);
     const script = buildRecognitionScript(timeoutMs);
+    const controller = new AbortController();
+    const onParentAbort = (): void => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    else options.signal?.addEventListener('abort', onParentAbort, { once: true });
+    this.activeControllers.add(controller);
 
     try {
-      const output = await runPowerShell(script, timeoutMs + 10_000, options.signal);
+      const output = await runPowerShell(script, timeoutMs + 10_000, controller.signal);
       const parsed = parseRecognition(output);
       if (!parsed) {
         return {
@@ -97,6 +111,9 @@ export class VoiceService {
       return parsed;
     } catch (error) {
       return { ok: false, text: '', confidence: 0, error: message(error) };
+    } finally {
+      options.signal?.removeEventListener('abort', onParentAbort);
+      this.activeControllers.delete(controller);
     }
   }
 
@@ -112,15 +129,18 @@ export class VoiceService {
     }
 
     this.speaking = true;
+    const controller = new AbortController();
+    this.activeControllers.add(controller);
     try {
       // The text is passed through the environment so it cannot break out of
       // the PowerShell command.
-      await runPowerShell(SPEAK_SCRIPT, 60_000, undefined, { CYPS_SPEAK_TEXT: clean });
+      await runPowerShell(SPEAK_SCRIPT, 60_000, controller.signal, { CYPS_SPEAK_TEXT: clean });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: message(error) };
     } finally {
       this.speaking = false;
+      this.activeControllers.delete(controller);
     }
   }
 
@@ -246,11 +266,7 @@ function runPowerShell(
       () => {
         if (settled) return;
         settled = true;
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // already gone
-        }
+        terminateProcessTree(child);
         reject(new Error('Listening was cancelled.'));
       },
       { once: true },

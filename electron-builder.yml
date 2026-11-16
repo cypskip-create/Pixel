@@ -37,6 +37,10 @@ files:
   - package.json
   - '!**/*.map'
 
+extraResources:
+  - from: native/bin/PixelNative.exe
+    to: native/PixelNative.exe
+
 # The main process bundle lives at dist/main/main/main.js and declares
 # "type": "commonjs" for the compiled tree.
 extraMetadata:

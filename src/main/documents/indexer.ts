@@ -261,7 +261,7 @@ export class DocumentIndex {
           }
         }
 
-        const extraction = await this.worker.extract(entry.path);
+        const extraction = await this.worker.extract(entry.path, options.signal);
         if (!extraction.ok) {
           progress.failed += 1;
           errors.push({ path: entry.path, message: extraction.error.message });
