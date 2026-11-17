@@ -17,6 +17,7 @@ interface TaskStripProps {
   onResume: () => void;
   onCancel: () => void;
   onContinue: () => void;
+  compact?: boolean;
 }
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -54,7 +55,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
  * never a full-screen view - the whole point is that the answer stays legible
  * while Pixel works.
  */
-export function TaskStrip({ task, onPause, onResume, onCancel, onContinue }: TaskStripProps) {
+export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compact = false }: TaskStripProps) {
   const [open, setOpen] = useState(false);
 
   const done = task.steps.filter((step) => step.status === 'done' || step.status === 'verified').length;
@@ -72,7 +73,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue }: Tas
     <section
       aria-label={`Task: ${task.title}`}
       data-layout-panel
-      className="glass animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
+      className={`glass animate-slide-down flex ${compact ? 'w-full' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
     >
       <div
         aria-hidden="true"

@@ -36,6 +36,12 @@ jobs:
           npm ci 2>&1 | Tee-Object artifacts/logs/npm-ci.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Install and verify the locked Electron runtime
+        shell: pwsh
+        run: |
+          npm run ensure:electron-runtime 2>&1 | Tee-Object artifacts/logs/electron-runtime.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install Playwright Chromium
         shell: pwsh
         run: |
@@ -100,5 +106,6 @@ jobs:
             artifacts/test-results/*.xml
             artifacts/windows-acceptance/*.json
             artifacts/windows-acceptance/*.log
+            dist/main/preload/index.js
             release/**
             native/bin/PixelNative.exe

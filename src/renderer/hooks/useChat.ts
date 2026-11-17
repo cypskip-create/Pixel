@@ -49,6 +49,8 @@ interface Outgoing {
 export function useChat(persistHistory = true) {
   const bridge = useBridge();
   const [state, setState] = useState<ChatState>(EMPTY);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const activeId = useRef<string | null>(null);
   const pendingEvents = useRef<StreamEvent[]>([]);
@@ -68,9 +70,15 @@ export function useChat(persistHistory = true) {
     setState((previous) => ({ ...previous, historyLoading: true }));
     void (async () => {
       try {
-        const recent = await bridge.bridge.history.list({ limit: 1 });
-        const restored = recent[0] ? await bridge.bridge.history.open(recent[0].id) : null;
-        const record = restored ?? await bridge.bridge.history.create();
+        const history = bridge.bridge.history;
+        let record: ConversationRecordView | null;
+        if (typeof history.getActive === 'function') {
+          record = await history.getActive();
+        } else {
+          const recent = await history.list({ limit: 1 });
+          record = recent[0] ? await history.open(recent[0].id) : null;
+        }
+        record ??= await history.create();
         if (cancelled || !alive.current) return;
         setState(fromRecord(record, record.messages.length > 0));
       } catch {
@@ -83,6 +91,28 @@ export function useChat(persistHistory = true) {
       }
     })();
     return () => { cancelled = true; };
+  }, [bridge]);
+
+  useEffect(() => {
+    if (bridge.kind !== 'ready' || typeof bridge.bridge.history.onActiveChanged !== 'function') return;
+    return bridge.bridge.history.onActiveChanged((record) => {
+      if (!alive.current) return;
+      if (!record) {
+        if (!stateRef.current.streaming) {
+          activeId.current = null;
+          setState((previous) => ({ ...EMPTY, historyLoading: false, persistence: previous.persistence }));
+        }
+        return;
+      }
+      setState((previous) => {
+        if (previous.conversationId === record.id && previous.streaming) {
+          return { ...previous, messages: record.messages, persistence: record.persistence };
+        }
+        activeId.current = null;
+        pendingEvents.current = [];
+        return fromRecord(record, record.messages.length > 0);
+      });
+    });
   }, [bridge]);
 
   /**
@@ -161,6 +191,20 @@ export function useChat(persistHistory = true) {
 
     const unsubscribe = api.onStream((event: StreamEvent) => {
       if (!alive.current || event === null || typeof event !== 'object') return;
+
+      if (typeof event.conversationId === 'string') {
+        const current = stateRef.current;
+        if (event.conversationId !== current.conversationId) return;
+        if (activeId.current === null) {
+          if (event.type !== 'started') return;
+          activeId.current = event.requestId;
+          setState((previous) => ({ ...previous, requestId: event.requestId, streaming: true }));
+          applyEvent(event);
+          return;
+        }
+        if (event.requestId === activeId.current) applyEvent(event);
+        return;
+      }
 
       if (activeId.current === null) {
         // Frames can beat the send() promise. Buffer the newest few.

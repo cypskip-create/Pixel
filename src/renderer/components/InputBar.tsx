@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { AssistantState, ImageAttachment, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
-import { Avatar } from '@/components/Avatar';
+import { PixelMark } from '@/components/PixelMark';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { truncate } from '@/lib/format';
@@ -173,9 +173,9 @@ export function InputBar(props: InputBarProps) {
       ) : null}
 
       <div className="flex items-end gap-2">
-        {/* Left rail: the orb doubles as the status indicator. */}
-        <div className="no-drag flex shrink-0 items-center pb-0.5 pl-0.5">
-          <Avatar state={state} size={28} halo />
+        {/* The brand stays constant; the state label remains explicit and accessible. */}
+        <div className="no-drag flex shrink-0 items-center pb-0.5 pl-0.5" data-state={state} title={`Pixel is ${state}`}>
+          <PixelMark size={22} />
         </div>
 
         <textarea

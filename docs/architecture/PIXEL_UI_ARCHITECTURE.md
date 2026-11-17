@@ -133,6 +133,59 @@ formats. Failed/completed task cards dismiss after four seconds without deleting
 their persisted task evidence. The Settings window is sized around its compact,
 internally scrolling panel.
 
+## Supplied P mark and frosted surfaces
+
+The user supplied the visual reference used for the Pixel mark. Its geometry is
+hand-traced once in [`src/shared/pixelMark.json`](../../src/shared/pixelMark.json):
+the block-built P, cyan upper-left tile, pale-aqua bowl, white inner square and
+the sparkle as a true negative-space cutout. [`PixelMark.tsx`](../../src/renderer/components/PixelMark.tsx)
+renders that same geometry in the collapsed island, toolbar wordmark lockup,
+composer, assistant responses, Settings and Workspace. `scripts/make-icon.mjs`
+uses it for the dark rounded Windows app tile; the native tray icon uses the
+mark alone with transparent surroundings so Windows can blend it with the tray.
+The cursor buddy stays a separate pointer character and uses the same cyan/aqua
+palette.
+
+The island and compact toolbar use translucent layered fills, a thin edge, an
+inner highlight and backdrop blur, with a more solid surface fallback when the
+renderer lacks backdrop-filter support. Workspace uses a readable dark glass
+surface and Windows Mica when the OS supports it. The main island opts into
+Windows Acrylic on supported Windows 11 builds. GPU acceleration is not disabled
+in production; `npm run dev:electron` keeps `--disable-gpu` as a diagnostic
+launch option.
+
+## Separate Pixel Workspace window
+
+Workspace is a second `BrowserWindow` loading the same renderer with
+`?window=workspace`. It is launched from the island, tray or configurable
+`CommandOrControl+Shift+P` shortcut; it starts maximized and restores a bounded,
+clamped size and position when it was last unmaximized. Native window controls
+provide minimize, maximize/restore and fullscreen. Closing Workspace leaves the
+tray application and island available.
+
+Workspace does not construct another `AgentExecutor`, provider, history store,
+task manager or permission broker. It uses the same typed `window.cyps` methods
+and main-process services as the island. Main owns the active conversation and
+broadcasts its changes and request-id-scoped stream frames to the island,
+Settings and Workspace renderers. One main-process `agent.isRunning` guard
+rejects a second simultaneous send. Task updates, pending/finished approval
+events, emergency-stop state, settings/API-key status and project selection are
+also fanned out to all three app windows, so an approval or stop in either
+surface applies to the same work.
+
+All invoke handlers first require a registered Pixel window's top-level frame
+to be the configured local/dev renderer URL. Workspace window-control methods
+are scoped to the Workspace sender; island geometry and click-through controls
+are scoped to the island; only the Settings window can close itself. The
+preload remains sandboxed, context-isolated and narrow. Links are parsed and
+constrained to credential-free HTTP(S) URLs before `shell.openExternal`; no raw
+`ipcRenderer`, Node APIs or agent internals are exposed.
+
+Native restore geometry and shared-state logic have automated source/policy
+tests, but native focus behavior, window restoration, stream/approval behavior
+in two real Electron windows, and monitor/DPI rendering require the laptop
+acceptance steps. Those are not inferred from the DOM or type checker.
+
 ## Electron references
 
 - [BrowserWindow options](https://www.electronjs.org/docs/latest/api/browser-window) cover preload paths, context isolation, sandboxing, web security and native window behavior.

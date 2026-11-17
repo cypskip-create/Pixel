@@ -13,6 +13,8 @@ export const CHANNELS = {
   settingsHasApiKey: 'settings:hasApiKey',
   settingsClearApiKey: 'settings:clearApiKey',
   settingsTestConnection: 'settings:testConnection',
+  settingsChanged: 'settings:changed',
+  settingsApiKeyStatusChanged: 'settings:apiKeyStatusChanged',
 
   windowSetSurface: 'window:setSurface',
   windowSetLayout: 'window:setLayout',
@@ -25,6 +27,13 @@ export const CHANNELS = {
   windowOpenSettings: 'window:openSettings',
   windowCloseSettings: 'window:closeSettings',
   windowSetIgnoreMouseEvents: 'window:setIgnoreMouseEvents',
+  workspaceOpen: 'workspace:open',
+  workspaceClose: 'workspace:close',
+  workspaceMinimize: 'workspace:minimize',
+  workspaceToggleMaximize: 'workspace:toggleMaximize',
+  workspaceSetFullscreen: 'workspace:setFullscreen',
+  workspaceGetState: 'workspace:getState',
+  workspaceState: 'workspace:state',
 
   chatSend: 'chat:send',
   chatCancel: 'chat:cancel',
@@ -37,6 +46,8 @@ export const CHANNELS = {
   historyRename: 'history:rename',
   historyDelete: 'history:delete',
   historyClear: 'history:clear',
+  historyGetActive: 'history:getActive',
+  historyActiveChanged: 'history:activeChanged',
 
   screenListDisplays: 'screen:listDisplays',
   screenCaptureActiveWindow: 'screen:captureActiveWindow',
@@ -45,6 +56,7 @@ export const CHANNELS = {
 
   systemDiagnostics: 'system:diagnostics',
   systemEmergencyStop: 'system:emergencyStop',
+  systemIsEmergencyStopped: 'system:isEmergencyStopped',
   systemEmergencyClear: 'system:emergencyClear',
   systemEmergencyStopEvent: 'system:emergencyStopEvent',
 
@@ -52,6 +64,8 @@ export const CHANNELS = {
   permissionsListActiveGrants: 'permissions:listActiveGrants',
   permissionsRevokeAll: 'permissions:revokeAll',
   permissionsRequest: 'permissions:request',
+  permissionsListPending: 'permissions:listPending',
+  permissionsResolved: 'permissions:resolved',
 
   tasksPause: 'tasks:pause',
   tasksResume: 'tasks:resume',
@@ -77,8 +91,12 @@ export const CHANNELS = {
   memoryUpdate: 'memory:update',
   memoryDelete: 'memory:delete',
   memoryExport: 'memory:export',
+  memoryProjectsList: 'memory:projectsList',
+  memorySetActiveProject: 'memory:setActiveProject',
+  memoryProjectChanged: 'memory:projectChanged',
 
   auditList: 'audit:list',
+  toolsList: 'tools:list',
 
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',

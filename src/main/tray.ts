@@ -17,6 +17,7 @@ export interface TrayCallbacks {
   onToggle: () => void;
   onSetMode: (mode: Mode) => void;
   onOpenSettings: () => void;
+  onOpenWorkspace?: () => void;
   onEmergencyStop: () => void;
   onQuit: () => void;
   getMode: () => Mode;
@@ -82,6 +83,7 @@ export class TrayController {
       },
       { type: 'separator' },
       { label: 'Settings...', click: () => this.callbacks.onOpenSettings() },
+      { label: 'Open Workspace', click: () => this.callbacks.onOpenWorkspace?.() },
       {
         label: 'Emergency Stop',
         click: () => this.callbacks.onEmergencyStop(),
@@ -115,8 +117,8 @@ export class TrayController {
  * Build a 32x32 RGBA icon and encode it as a PNG.
  *
  * Deliberately dependency-free: PNG container written by hand, pixel data
- * deflated with Node's zlib. The mark is a soft ring with a bright dot, which
- * reads clearly at 16px in the notification area.
+ * deflated with Node's zlib. Its cyan and white grid P matches the renderer
+ * mark and is rasterized with a small supersampling pass for 16px clarity.
  */
 /** Build a 32x32 RGBA icon and decode it into a nativeImage. */
 export function buildTrayIcon(size = 32): NativeImage {

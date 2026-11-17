@@ -24,6 +24,7 @@ function conversation(id: string, content: string): ConversationRecordView {
 
 function setup() {
   let streamHandler: ((event: StreamEvent) => void) | null = null;
+  let activeHandler: ((record: ConversationRecordView | null) => void) | null = null;
   let requestIndex = 0;
   const history = {
     list: vi.fn(async () => [{ id: 'latest', title: 'latest', createdAt: 1, updatedAt: 2, preview: 'Earlier context', persistence: 'persistent' } as ConversationSummary]),
@@ -32,6 +33,11 @@ function setup() {
     rename: vi.fn(async () => null),
     delete: vi.fn(async () => true),
     clear: vi.fn(async () => undefined),
+    getActive: vi.fn(async () => conversation('latest', 'Earlier context')),
+    onActiveChanged: vi.fn((handler: (record: ConversationRecordView | null) => void) => {
+      activeHandler = handler;
+      return () => { activeHandler = null; };
+    }),
   };
   const chat = {
     send: vi.fn(async (_request: ChatRequest): Promise<{ requestId: string; persistence: 'persistent' | 'session' }> => {
@@ -61,7 +67,13 @@ function setup() {
       <Harness />
     </BridgeContext.Provider>,
   ));
-  return { history, chat, get current() { return current; }, get streamHandler() { return streamHandler; } };
+  return {
+    history,
+    chat,
+    get current() { return current; },
+    get streamHandler() { return streamHandler; },
+    emitActive: (record: ConversationRecordView | null) => activeHandler?.(record),
+  };
 }
 
 async function settle(): Promise<void> {
@@ -132,5 +144,25 @@ describe('persistent chat lifecycle', () => {
     expect(fixture.current?.messages.map((message) => message.content)).toContain('Keep this question');
     expect(fixture.current?.messages.at(-1)?.error).toContain('Could not reach Pixel');
     expect(fixture.current?.streaming).toBe(false);
+  });
+
+  it('synchronizes the active conversation and ignores stream events from another chat', async () => {
+    const fixture = setup();
+    await settle();
+    await act(async () => {
+      fixture.emitActive(conversation('workspace-selected', 'Selected in Workspace'));
+    });
+    expect(fixture.current?.conversationId).toBe('workspace-selected');
+    expect(fixture.current?.messages[0]?.content).toBe('Selected in Workspace');
+
+    await act(async () => {
+      fixture.streamHandler?.({ type: 'started', requestId: 'stale', conversationId: 'other', model: 'deepseek-chat' });
+      fixture.streamHandler?.({ type: 'started', requestId: 'live', conversationId: 'workspace-selected', model: 'deepseek-chat' });
+      fixture.streamHandler?.({ type: 'text', requestId: 'stale', conversationId: 'other', delta: 'not this chat' });
+      fixture.streamHandler?.({ type: 'text', requestId: 'live', conversationId: 'workspace-selected', delta: 'Shared reply' });
+    });
+    expect(fixture.current?.streaming).toBe(true);
+    expect(fixture.current?.content).toBe('Shared reply');
+    expect(fixture.current?.requestId).toBe('live');
   });
 });

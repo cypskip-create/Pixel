@@ -60,12 +60,13 @@ describe('entry point ordering', () => {
     expect(appSource).toContain('export async function start()');
   });
 
-  it('uses the Vite dev server and preserves Chromium software rendering', () => {
+  it('uses the Vite dev server and keeps GPU disablement diagnostic-only', () => {
     expect(packageJson.scripts['dev:electron']).toContain(
       'CYPS_DEV_SERVER_URL=http://localhost:5199',
     );
     expect(packageJson.scripts['dev:electron']).toContain('electron --disable-gpu .');
-    expect(appSource).toContain("appendSwitch('disable-gpu')");
+    expect(appSource).not.toContain("appendSwitch('disable-gpu')");
+    expect(appSource).toContain("hasSwitch('disable-gpu')");
     expect(appSource).not.toContain("appendSwitch('disable-software-rasterizer')");
   });
 

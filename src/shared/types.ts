@@ -276,6 +276,10 @@ export interface AppSettings {
   globalAccelerator: string;
   /** Global shortcut for emergency stop. */
   emergencyStopAccelerator: string;
+  /** Global shortcut that opens the maximized workspace. */
+  workspaceAccelerator: string;
+  /** Last workspace size and state. */
+  workspaceWindow: { x: number | null; y: number | null; width: number; height: number; maximized: boolean };
   launchOnStartup: boolean;
   theme: 'system' | 'dark' | 'light';
 }
@@ -330,6 +334,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   globalAccelerator: 'CommandOrControl+Shift+C',
   emergencyStopAccelerator: 'CommandOrControl+Shift+Escape',
+  workspaceAccelerator: 'CommandOrControl+Shift+P',
+  workspaceWindow: { x: null, y: null, width: 1280, height: 820, maximized: true },
   launchOnStartup: false,
   theme: 'system',
 };
@@ -363,6 +369,12 @@ export function mergeSettings(partial: unknown): AppSettings {
 
   // Never allow the screenshot-approval invariant to be turned off.
   base.privacy.screenshotRequiresApproval = true;
+  base.workspaceWindow.width = finiteWithin(base.workspaceWindow.width, 900, 3840, DEFAULT_SETTINGS.workspaceWindow.width);
+  base.workspaceWindow.height = finiteWithin(base.workspaceWindow.height, 600, 2160, DEFAULT_SETTINGS.workspaceWindow.height);
+  base.workspaceWindow.x = typeof base.workspaceWindow.x === 'number' && Number.isFinite(base.workspaceWindow.x) ? Math.min(Math.max(base.workspaceWindow.x, -20_000), 20_000) : null;
+  base.workspaceWindow.y = typeof base.workspaceWindow.y === 'number' && Number.isFinite(base.workspaceWindow.y) ? Math.min(Math.max(base.workspaceWindow.y, -20_000), 20_000) : null;
+  base.workspaceWindow.maximized = base.workspaceWindow.maximized !== false;
+  if (typeof base.workspaceAccelerator !== 'string') base.workspaceAccelerator = DEFAULT_SETTINGS.workspaceAccelerator;
   if (!SEARCH_PROVIDERS.includes(base.browserSearchProvider)) base.browserSearchProvider = 'google';
   if (!MODES.includes(base.companion.mode)) base.companion.mode = DEFAULT_MODE;
   if (migrateCursorPresentation) base.companion.cursorCompanionEnabled = true;
@@ -462,14 +474,14 @@ export interface TokenUsage {
  * ------------------------------------------------------------------ */
 
 export type StreamEvent =
-  | { type: 'started'; requestId: string; model: string }
-  | { type: 'reasoning'; requestId: string; delta: string }
-  | { type: 'text'; requestId: string; delta: string }
-  | { type: 'tool_calls'; requestId: string; toolCalls: ToolCall[] }
-  | { type: 'usage'; requestId: string; usage: TokenUsage }
-  | { type: 'done'; requestId: string; finishReason: string; persistence?: 'persistent' | 'session' }
-  | { type: 'aborted'; requestId: string; hadContent: boolean; persistence?: 'persistent' | 'session' }
-  | { type: 'error'; requestId: string; message: string; code: CypsErrorCode; persistence?: 'persistent' | 'session' };
+  | { type: 'started'; requestId: string; conversationId?: string; model: string }
+  | { type: 'reasoning'; requestId: string; conversationId?: string; delta: string }
+  | { type: 'text'; requestId: string; conversationId?: string; delta: string }
+  | { type: 'tool_calls'; requestId: string; conversationId?: string; toolCalls: ToolCall[] }
+  | { type: 'usage'; requestId: string; conversationId?: string; usage: TokenUsage }
+  | { type: 'done'; requestId: string; conversationId?: string; finishReason: string; persistence?: 'persistent' | 'session' }
+  | { type: 'aborted'; requestId: string; conversationId?: string; hadContent: boolean; persistence?: 'persistent' | 'session' }
+  | { type: 'error'; requestId: string; conversationId?: string; message: string; code: CypsErrorCode; persistence?: 'persistent' | 'session' };
 
 export type CypsErrorCode =
   | 'NO_API_KEY'
@@ -730,6 +742,15 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>;
 }
 
+export interface ToolCatalogEntry {
+  name: string;
+  description: string;
+  category: ToolCategory;
+  risk: RiskLevel;
+  requiresApproval: boolean;
+  changesState: boolean;
+}
+
 /* ------------------------------------------------------------------ *
  * Diagnostics
  * ------------------------------------------------------------------ */
@@ -787,6 +808,8 @@ export interface CypsBridge {
     hasApiKey(): Promise<boolean>;
     clearApiKey(): Promise<void>;
     testConnection(model?: string): Promise<ConnectionTestResult>;
+    onChanged(handler: (settings: AppSettings) => void): () => void;
+    onApiKeyStatus(handler: (configured: boolean) => void): () => void;
   };
   window: {
     setSurface(surface: Surface): Promise<void>;
@@ -797,6 +820,13 @@ export interface CypsBridge {
     show(): Promise<void>;
     openSettings(): Promise<void>;
     closeSettings(): Promise<void>;
+    openWorkspace(): Promise<void>;
+    closeWorkspace(): Promise<void>;
+    minimizeWorkspace(): Promise<void>;
+    toggleWorkspaceMaximize(): Promise<boolean>;
+    setWorkspaceFullscreen(fullscreen: boolean): Promise<void>;
+    getWorkspaceState(): Promise<WorkspaceWindowState>;
+    onWorkspaceState(handler: (state: WorkspaceWindowState) => void): () => void;
     setIgnoreMouseEvents(ignore: boolean): Promise<void>;
     onFocusLost(handler: () => void): () => void;
     onSummon(handler: () => void): () => void;
@@ -814,6 +844,8 @@ export interface CypsBridge {
     rename(id: string, title: string): Promise<ConversationSummary | null>;
     delete(id: string): Promise<boolean>;
     clear(): Promise<void>;
+    getActive(): Promise<ConversationRecordView | null>;
+    onActiveChanged(handler: (record: ConversationRecordView | null) => void): () => void;
   };
   browser: {
     openSearch(query: string, requestText: string, conversationId: string): Promise<{ query: string; provider: SearchProvider }>;
@@ -831,6 +863,7 @@ export interface CypsBridge {
   };
   system: {
     diagnostics(): Promise<DiagnosticsSnapshot>;
+    isEmergencyStopped(): Promise<boolean>;
     /** Global emergency stop: halts tools, cancels tasks, revokes grants. */
     emergencyStop(): Promise<EmergencyStopReport>;
     emergencyClear(): Promise<void>;
@@ -838,6 +871,8 @@ export interface CypsBridge {
   };
   permissions: {
     onRequest(handler: (request: PermissionRequest) => void): () => void;
+    listPending(): Promise<PermissionRequest[]>;
+    onResolved(handler: (requestId: string) => void): () => void;
     respond(decision: PermissionDecision): Promise<void>;
     listActiveGrants(): Promise<PermissionGrant[]>;
     revokeAll(): Promise<number>;
@@ -867,12 +902,18 @@ export interface CypsBridge {
   };
   memory: {
     list(): Promise<MemoryRecordView[]>;
+    listProjects(): Promise<ProjectView[]>;
+    setActiveProject(name: string): Promise<ProjectView>;
+    onProjectChanged(handler: (project: ProjectView) => void): () => void;
     update(id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }): Promise<MemoryRecordView>;
     delete(id: string): Promise<boolean>;
     export(): Promise<MemoryExportView>;
   };
   audit: {
     list(limit?: number): Promise<AuditEntry[]>;
+  };
+  tools: {
+    list(): Promise<ToolCatalogEntry[]>;
   };
   app: {
     getVersion(): Promise<string>;
@@ -965,6 +1006,18 @@ export interface ConversationSummary {
 
 export interface ConversationRecordView extends ConversationSummary {
   messages: ChatMessage[];
+}
+
+export interface ProjectView {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+}
+
+export interface WorkspaceWindowState {
+  maximized: boolean;
+  fullscreen: boolean;
 }
 
 export interface HistoryQuery {

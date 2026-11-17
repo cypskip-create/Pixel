@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditEntry } from '../src/shared/types';
 import { ToolExecutors } from '../src/main/agent/executors';
 import type { ToolResult } from '../src/main/agent/executors';
@@ -165,7 +165,8 @@ describe('approval response correlation', () => {
   });
 
   it('clears an approval prompt when its task signal is cancelled', async () => {
-    const broker = new PermissionBroker(new ToolRegistry(), new AuditLog(), () => undefined);
+    const resolved = vi.fn();
+    const broker = new PermissionBroker(new ToolRegistry(), new AuditLog(), () => undefined, resolved);
     const controller = new AbortController();
     const pending = broker.ask({
       id: 'abort-approval', toolName: 'type_text', action: 'Type text', target: 'focused window',
@@ -175,6 +176,7 @@ describe('approval response correlation', () => {
     controller.abort();
     await expect(pending).resolves.toMatchObject({ approved: false, requestId: 'abort-approval' });
     expect(broker.isPending()).toBe(false);
+    expect(resolved).toHaveBeenCalledWith('abort-approval');
   });
 });
 

@@ -13,6 +13,7 @@
  */
 
 import { app, ipcMain, screen, shell } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
@@ -30,6 +31,7 @@ import type {
   EmergencyStopReport,
   PermissionDecision,
   PermissionGrant,
+  PermissionRequest,
   StreamEvent,
   Surface,
   SkillRecord,
@@ -40,6 +42,7 @@ import type {
   MemoryExportView,
   PixelMemoryKind,
   SearchProvider,
+  ToolCatalogEntry,
 } from '../shared/types';
 import { DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
@@ -81,6 +84,7 @@ import { collectDiagnostics } from './system/diagnostics';
 import type { WindowManager } from './window';
 import { redactTaskText } from './tasks/schema';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../shared/browserSearch';
+import { safeExternalHttpUrl } from '../shared/externalUrl';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -100,6 +104,7 @@ export interface IpcContext {
   };
   /** Request the UI's permission prompt surfaces. */
   sendToRenderer: (channel: string, payload: unknown) => void;
+  onSettingsChange?: (settings: AppSettings) => void;
   onQuit: () => void;
 }
 
@@ -129,6 +134,18 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   shutdown: () => void;
 }> {
   const { settings, windows, provider, captures } = context;
+
+  const registerHandler = (
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown,
+  ): void => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!windows.isTrustedApplicationSender(event.sender, event.senderFrame)) {
+        throw new Error('This Pixel IPC request came from an untrusted renderer.');
+      }
+      return listener(event, ...args);
+    });
+  };
 
   const audit = new AuditLog(
     new JsonlAuditSink(join(app.getPath('userData'), 'audit', 'audit.jsonl')),
@@ -180,6 +197,16 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       persistence: record.persistence ?? 'persistent',
       messages,
     };
+  };
+
+  const broadcastActiveConversation = (): void => {
+    const record = activeConversationId ? getConversation(activeConversationId) : null;
+    context.sendToRenderer(CHANNELS.historyActiveChanged, record ? toRecordView(record) : null);
+  };
+
+  const projectView = (id: string) => {
+    const row = memoryStore.listProjects().find((project) => project.id === id);
+    return row ? { ...row, active: row.id === projectId() } : null;
   };
 
   const toSessionSummary = (record: ConversationRecord): ConversationSummary => {
@@ -244,21 +271,24 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     sessionConversations.set(record.id, record);
     if (record.persistence === 'persistent') saveConversation(record);
     activeConversationId = record.id;
+    broadcastActiveConversation();
     return record;
   };
 
   const emitChatEvent = (event: StreamEvent): void => {
     const conversationId = streamConversations.get(event.requestId)?.conversationId;
     recordConversationStreamEvent(streamConversations, event, getConversation, addTranscriptMessage);
+    const coordinatedEvent = { ...event, ...(conversationId ? { conversationId } : {}) } as StreamEvent;
     if ((event.type === 'done' || event.type === 'aborted' || event.type === 'error') && conversationId) {
       const record = getConversation(conversationId);
       context.sendToRenderer(CHANNELS.chatStream, {
-        ...event,
+        ...coordinatedEvent,
         ...(record ? { persistence: record.persistence ?? 'persistent' } : {}),
       });
+      if (activeConversationId === conversationId) broadcastActiveConversation();
       return;
     }
-    context.sendToRenderer(CHANNELS.chatStream, event);
+    context.sendToRenderer(CHANNELS.chatStream, coordinatedEvent);
   };
 
   const memoryTools = new MemoryTools(memoryStore, projectId);
@@ -293,8 +323,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       audit.record('system', 'Task manager update failed', 'error');
     },
   );
-  const permissions = new PermissionBroker(toolRegistry, audit, (request) =>
-    context.sendToRenderer(CHANNELS.permissionsRequest, request),
+  const permissions = new PermissionBroker(
+    toolRegistry,
+    audit,
+    (request) => context.sendToRenderer(CHANNELS.permissionsRequest, request),
+    (requestId) => context.sendToRenderer(CHANNELS.permissionsResolved, requestId),
   );
   const voice = new VoiceService();
 
@@ -374,7 +407,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const executors = new ToolExecutors({
     browser,
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: (url) => {
+      const safeUrl = safeExternalHttpUrl(url);
+      if (!safeUrl) throw new Error('Only valid HTTP or HTTPS links can be opened externally.');
+      return shell.openExternal(safeUrl);
+    },
     searchProvider: () => settings.get().browserSearchProvider,
     memory: memoryTools,
     documents: documentTools,
@@ -480,66 +517,66 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   routineScheduler = routines;
   routines.start();
 
-  ipcMain.handle(CHANNELS.skillsList, (): SkillRecord[] =>
+  registerHandler(CHANNELS.skillsList, (): SkillRecord[] =>
     skillStore.list(projectId()) as SkillRecord[],
   );
-  ipcMain.handle(CHANNELS.skillsCreateDraft, (_event, draft: SkillDraftRequest): SkillRecord => {
+  registerHandler(CHANNELS.skillsCreateDraft, (_event, draft: SkillDraftRequest): SkillRecord => {
     if (!draft || typeof draft !== 'object') throw new Error('A skill draft is required.');
     return skillStore.createDraft({ ...draft, projectId: projectId() }) as SkillRecord;
   });
-  ipcMain.handle(CHANNELS.skillsActivate, (_event, skillId: string): SkillRecord => {
+  registerHandler(CHANNELS.skillsActivate, (_event, skillId: string): SkillRecord => {
     const draft = skillStore.get(skillId);
     if (!draft || draft.projectId !== projectId()) throw new Error('The skill is not available in the active project.');
     const unavailable = draft.requiredTools.filter((name) => !toolRegistry.get(name));
     if (unavailable.length > 0) throw new Error(`This build cannot activate the skill because these tools are unavailable: ${unavailable.join(', ')}.`);
     return skillStore.activate(skillId) as SkillRecord;
   });
-  ipcMain.handle(CHANNELS.skillsDelete, (_event, skillId: string): boolean => {
+  registerHandler(CHANNELS.skillsDelete, (_event, skillId: string): boolean => {
     const skill = skillStore.get(skillId);
     if (!skill || skill.projectId !== projectId()) return false;
     return skillStore.delete(skillId);
   });
 
-  ipcMain.handle(CHANNELS.routinesList, (): RoutineRecord[] =>
+  registerHandler(CHANNELS.routinesList, (): RoutineRecord[] =>
     routineStore.list(projectId()) as RoutineRecord[],
   );
-  ipcMain.handle(CHANNELS.routinesCreate, (_event, input: { skillId: string; name: string; localTime: string; timezone: string }): RoutineRecord => {
+  registerHandler(CHANNELS.routinesCreate, (_event, input: { skillId: string; name: string; localTime: string; timezone: string }): RoutineRecord => {
     if (!input || typeof input !== 'object' || typeof input.skillId !== 'string' ||
         typeof input.name !== 'string' || typeof input.localTime !== 'string' || typeof input.timezone !== 'string') {
       throw new Error('Routine settings are required.');
     }
     return routineStore.create({ ...input, projectId: projectId() }) as RoutineRecord;
   });
-  ipcMain.handle(CHANNELS.routinesSetEnabled, (_event, routineId: string, enabled: boolean): boolean => {
+  registerHandler(CHANNELS.routinesSetEnabled, (_event, routineId: string, enabled: boolean): boolean => {
     if (typeof enabled !== 'boolean') return false;
     const routine = routineStore.get(routineId);
     if (!routine || routine.projectId !== projectId()) return false;
     return routineStore.setEnabled(routineId, enabled);
   });
-  ipcMain.handle(CHANNELS.routinesDelete, (_event, routineId: string): boolean => {
+  registerHandler(CHANNELS.routinesDelete, (_event, routineId: string): boolean => {
     const routine = routineStore.get(routineId);
     if (!routine || routine.projectId !== projectId()) return false;
     if (routines.cancel(routineId)) return false;
     return routineStore.delete(routineId);
   });
-  ipcMain.handle(CHANNELS.routinesHistory, (_event, routineId: string, limit?: number): RoutineRunRecord[] => {
+  registerHandler(CHANNELS.routinesHistory, (_event, routineId: string, limit?: number): RoutineRunRecord[] => {
     const routine = routineStore.get(routineId);
     if (!routine || routine.projectId !== projectId()) return [];
     return routineStore.history(routineId, limit) as RoutineRunRecord[];
   });
-  ipcMain.handle(CHANNELS.routinesCancel, (_event, routineId: string): boolean => {
+  registerHandler(CHANNELS.routinesCancel, (_event, routineId: string): boolean => {
     const routine = routineStore.get(routineId);
     return routine?.projectId === projectId() && routines.cancel(routineId);
   });
-  ipcMain.handle(CHANNELS.routinesRetry, (_event, routineId: string): boolean => {
+  registerHandler(CHANNELS.routinesRetry, (_event, routineId: string): boolean => {
     const routine = routineStore.get(routineId);
     return routine?.projectId === projectId() && routines.retry(routineId);
   });
 
-  ipcMain.handle(CHANNELS.memoryList, (): MemoryRecordView[] =>
+  registerHandler(CHANNELS.memoryList, (): MemoryRecordView[] =>
     memoryStore.list({ projectId: projectId(), limit: 50 }) as MemoryRecordView[],
   );
-  ipcMain.handle(CHANNELS.memoryUpdate, (_event, id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }): MemoryRecordView => {
+  registerHandler(CHANNELS.memoryUpdate, (_event, id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }): MemoryRecordView => {
     const existing = memoryStore.get(id);
     if (!existing || existing.projectId !== projectId()) throw new Error('That memory is not in the active project.');
     if (!patch || typeof patch !== 'object') throw new Error('Memory changes are required.');
@@ -551,40 +588,64 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     }
     return memoryStore.update(id, patch) as MemoryRecordView;
   });
-  ipcMain.handle(CHANNELS.memoryDelete, (_event, id: string): boolean => {
+  registerHandler(CHANNELS.memoryDelete, (_event, id: string): boolean => {
     const existing = memoryStore.get(id);
     if (!existing || existing.projectId !== projectId()) return false;
     return memoryStore.delete(id) && memoryStore.get(id) === null;
   });
-  ipcMain.handle(CHANNELS.memoryExport, (): MemoryExportView =>
+  registerHandler(CHANNELS.memoryExport, (): MemoryExportView =>
     memoryStore.exportProject(projectId()) as MemoryExportView,
   );
+  registerHandler(CHANNELS.memoryProjectsList, () =>
+    memoryStore.listProjects().map((project) => ({ ...project, active: project.id === projectId() })),
+  );
+  registerHandler(CHANNELS.memorySetActiveProject, (_event, name: string) => {
+    if (agent.isRunning || tasks.list().some((task) => !['completed', 'failed', 'cancelled'].includes(task.status))) {
+      throw new Error('Finish or cancel active tasks before switching projects.');
+    }
+    if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > 80) {
+      throw new Error('Project names must contain 1 to 80 characters.');
+    }
+    const id = memoryStore.setActiveProject(name.trim());
+    const project = projectView(id);
+    if (!project) throw new Error('Pixel could not select that project.');
+    const next = history.list({ limit: 1, projectId: id })[0]
+      ?? [...sessionConversations.values()].filter((record) => record.projectId === id).sort((a, b) => b.updatedAt - a.updatedAt).map(toSessionSummary)[0];
+    activeConversationId = next?.id ?? null;
+    if (!activeConversationId) newConversation();
+    context.sendToRenderer(CHANNELS.memoryProjectChanged, project);
+    broadcastActiveConversation();
+    return project;
+  });
 
   /* ----------------------------- settings ---------------------------- */
 
-  ipcMain.handle(CHANNELS.settingsGet, (): AppSettings => settings.get());
+  registerHandler(CHANNELS.settingsGet, (): AppSettings => settings.get());
 
-  ipcMain.handle(CHANNELS.settingsSet, (_event, patch: DeepSeekSettingsPatch): AppSettings => {
+  registerHandler(CHANNELS.settingsSet, (_event, patch: DeepSeekSettingsPatch): AppSettings => {
     const next = settings.set(patch ?? {});
     windows.setPresentationSettings(next.companion);
+    context.onSettingsChange?.(next);
     audit.record('system', 'Settings updated', 'ok', Object.keys(patch ?? {}).join(', '));
     return next;
   });
 
-  ipcMain.handle(CHANNELS.settingsSetApiKey, (_event, key: string) => {
+  registerHandler(CHANNELS.settingsSetApiKey, (_event, key: string) => {
     const result = settings.setApiKey(typeof key === 'string' ? key : '');
     audit.record('system', 'API key updated', result.ok ? 'ok' : 'error');
+    context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, settings.hasApiKey());
     return result;
   });
 
-  ipcMain.handle(CHANNELS.settingsHasApiKey, (): boolean => settings.hasApiKey());
+  registerHandler(CHANNELS.settingsHasApiKey, (): boolean => settings.hasApiKey());
 
-  ipcMain.handle(CHANNELS.settingsClearApiKey, (): void => {
+  registerHandler(CHANNELS.settingsClearApiKey, (): void => {
     settings.clearApiKey();
     audit.record('system', 'API key removed', 'ok');
+    context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, false);
   });
 
-  ipcMain.handle(
+  registerHandler(
     CHANNELS.settingsTestConnection,
     async (_event, model?: string): Promise<ConnectionTestResult> => {
       const key = settings.getApiKey();
@@ -617,13 +678,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------ window ----------------------------- */
 
-  ipcMain.handle(CHANNELS.windowSetSurface, (_event, surface: Surface): void => {
+  registerHandler(CHANNELS.windowSetSurface, (event, surface: Surface): void => {
+    if (!windows.isMainSender(event.sender)) return;
     if (typeof surface === 'string' && Object.prototype.hasOwnProperty.call(SURFACE_SIZES, surface)) {
       windows.setSurface(surface);
     }
   });
 
-  ipcMain.handle(CHANNELS.windowSetLayout, (event, surface: Surface, size: unknown): void => {
+  registerHandler(CHANNELS.windowSetLayout, (event, surface: Surface, size: unknown): void => {
     if (event.sender !== windows.getMainWindow()?.webContents) return;
     if (typeof surface !== 'string' || !Object.prototype.hasOwnProperty.call(SURFACE_SIZES, surface)) return;
     if (typeof size !== 'object' || size === null) return;
@@ -632,26 +694,43 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     windows.setLayout(surface, { width: candidate.width, height: candidate.height });
   });
 
-  ipcMain.handle(CHANNELS.windowSetExpanded, (_event, expanded: boolean): void => {
+  registerHandler(CHANNELS.windowSetExpanded, (_event, expanded: boolean): void => {
+    if (!_event || !windows.isMainSender(_event.sender)) return;
     windows.setSurface(expanded ? 'active' : 'idle');
   });
 
-  ipcMain.handle(CHANNELS.windowHide, (): void => windows.hide());
-  ipcMain.handle(CHANNELS.windowShow, (): void => windows.show());
+  registerHandler(CHANNELS.windowHide, (event): void => { if (windows.isMainSender(event.sender)) windows.hide(); });
+  registerHandler(CHANNELS.windowShow, (event): void => { if (windows.isMainSender(event.sender)) windows.show(); });
 
-  ipcMain.handle(CHANNELS.windowOpenSettings, (): void => {
+  registerHandler(CHANNELS.windowOpenSettings, (_event): void => {
     windows.createSettingsWindow();
   });
 
-  ipcMain.handle(CHANNELS.windowCloseSettings, (): void => windows.closeSettings());
+  registerHandler(CHANNELS.windowCloseSettings, (event): void => {
+    if (windows.isSettingsSender(event.sender)) windows.closeSettings();
+  });
 
-  ipcMain.handle(CHANNELS.windowSetIgnoreMouseEvents, (_event, ignore: boolean): void => {
+  registerHandler(CHANNELS.windowSetIgnoreMouseEvents, (_event, ignore: boolean): void => {
+    if (!_event || !windows.isMainSender(_event.sender)) return;
     windows.setIgnoreMouseEvents(Boolean(ignore));
   });
 
+  registerHandler(CHANNELS.workspaceOpen, (): void => { windows.openWorkspace(); });
+  registerHandler(CHANNELS.workspaceClose, (event): void => { if (windows.isWorkspaceSender(event.sender)) windows.closeWorkspace(); });
+  registerHandler(CHANNELS.workspaceMinimize, (event): void => { if (windows.isWorkspaceSender(event.sender)) windows.minimizeWorkspace(); });
+  registerHandler(CHANNELS.workspaceToggleMaximize, (event): boolean =>
+    windows.isWorkspaceSender(event.sender) ? windows.toggleWorkspaceMaximize() : false,
+  );
+  registerHandler(CHANNELS.workspaceSetFullscreen, (event, fullscreen: boolean): void => {
+    if (windows.isWorkspaceSender(event.sender) && typeof fullscreen === 'boolean') windows.setWorkspaceFullscreen(fullscreen);
+  });
+  registerHandler(CHANNELS.workspaceGetState, (event) =>
+    windows.isWorkspaceSender(event.sender) ? windows.getWorkspaceState() : { maximized: false, fullscreen: false },
+  );
+
   /* ------------------------------- chat ------------------------------ */
 
-  ipcMain.handle(CHANNELS.chatSend, async (_event, request: ChatRequest) => {
+  registerHandler(CHANNELS.chatSend, async (_event, request: ChatRequest) => {
     const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const current = settings.get();
     if (!request || typeof request !== 'object' || typeof request.text !== 'string' || request.text.length > 20_000) {
@@ -684,6 +763,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       createdAt: Date.now(),
     });
     streamConversations.set(requestId, { conversationId: record.id, content: '' });
+    broadcastActiveConversation();
 
     // Fire and forget: progress arrives via chat:stream. The handler returns
     // the id immediately so the UI can pair events with this request.
@@ -714,7 +794,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return { requestId, persistence: record.persistence ?? 'persistent' };
   });
 
-  ipcMain.handle(CHANNELS.chatCancel, (_event, requestId: string): void => {
+  registerHandler(CHANNELS.chatCancel, (_event, requestId: string): void => {
     agent.cancel('user');
     conversation.abort();
     permissions.rejectPending();
@@ -723,7 +803,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ----------------------------- history ----------------------------- */
 
-  ipcMain.handle(CHANNELS.historyList, (_event, query?: HistoryQuery): ConversationSummary[] => {
+  registerHandler(CHANNELS.historyList, (_event, query?: HistoryQuery): ConversationSummary[] => {
     const safeQuery = query && typeof query === 'object' ? query : {};
     const limit = typeof safeQuery.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(safeQuery.limit))) : 30;
     const offset = typeof safeQuery.offset === 'number' ? Math.max(0, Math.min(50, Math.floor(safeQuery.offset))) : 0;
@@ -741,21 +821,28 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       .slice(offset, offset + limit);
   });
 
-  ipcMain.handle(CHANNELS.historyOpen, (_event, id: string): ConversationRecordView | null => {
+  registerHandler(CHANNELS.historyOpen, (_event, id: string): ConversationRecordView | null => {
     if (agent.isRunning) throw new Error('Cancel or finish the active task before switching conversations.');
     if (typeof id !== 'string') return null;
     const record = getConversation(id);
     if (!record || (record.projectId && record.projectId !== projectId())) return null;
     activeConversationId = record.id;
+    broadcastActiveConversation();
     return toRecordView(record);
   });
 
-  ipcMain.handle(CHANNELS.historyCreate, (): ConversationRecordView => {
+  registerHandler(CHANNELS.historyCreate, (): ConversationRecordView => {
     if (agent.isRunning) throw new Error('Cancel or finish the active task before starting a new conversation.');
     return toRecordView(newConversation());
   });
 
-  ipcMain.handle(CHANNELS.historyRename, (_event, id: string, title: string): ConversationSummary | null => {
+  registerHandler(CHANNELS.historyGetActive, (): ConversationRecordView | null => {
+    if (!activeConversationId) return toRecordView(newConversation());
+    const record = getConversation(activeConversationId);
+    return record ? toRecordView(record) : toRecordView(newConversation());
+  });
+
+  registerHandler(CHANNELS.historyRename, (_event, id: string, title: string): ConversationSummary | null => {
     if (typeof id !== 'string' || typeof title !== 'string') return null;
     const record = getConversation(id);
     if (!record || (record.projectId && record.projectId !== projectId())) return null;
@@ -763,29 +850,34 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (!safeTitle) return null;
     record.title = safeTitle;
     saveConversation(record);
+    broadcastActiveConversation();
     return toSessionSummary(record);
   });
 
-  ipcMain.handle(CHANNELS.historyDelete, (_event, id: string): boolean => {
+  registerHandler(CHANNELS.historyDelete, (_event, id: string): boolean => {
     if (agent.isRunning) throw new Error('Cancel or finish the active task before deleting a conversation.');
     if (typeof id !== 'string') return false;
     const record = getConversation(id);
     if (!record || (record.projectId && record.projectId !== projectId())) return false;
     sessionConversations.delete(id);
     history.delete(id);
-    if (activeConversationId === id) activeConversationId = null;
+    if (activeConversationId === id) {
+      activeConversationId = null;
+    }
+    broadcastActiveConversation();
     return true;
   });
 
-  ipcMain.handle(CHANNELS.historyClear, (): void => {
+  registerHandler(CHANNELS.historyClear, (): void => {
     if (agent.isRunning) throw new Error('Cancel or finish the active task before clearing chat history.');
     history.clear();
     sessionConversations.clear();
     activeConversationId = null;
+    broadcastActiveConversation();
     audit.record('system', 'History cleared', 'ok');
   });
 
-  ipcMain.handle(CHANNELS.browserOpenSearch, async (_event, queryValue: unknown, requestTextValue: unknown, conversationIdValue: unknown) => {
+  registerHandler(CHANNELS.browserOpenSearch, async (_event, queryValue: unknown, requestTextValue: unknown, conversationIdValue: unknown) => {
     if (agent.isRunning) throw new Error('Finish or cancel the active task before opening a browser search.');
     if (typeof queryValue !== 'string' || queryValue.trim().length === 0 || queryValue.length > MAX_SEARCH_QUERY_LENGTH) {
       throw new Error('Enter a search query with 1–500 characters.');
@@ -807,7 +899,9 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       createdAt: Date.now(),
     });
     try {
-      await shell.openExternal(url);
+      const safeUrl = safeExternalHttpUrl(url);
+      if (!safeUrl) throw new Error('Pixel could not create a safe browser search URL.');
+      await shell.openExternal(safeUrl);
       addTranscriptMessage(record, {
         id: `search_${Date.now().toString(36)}_assistant`,
         role: 'assistant',
@@ -829,12 +923,12 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------ screen ----------------------------- */
 
-  ipcMain.handle(CHANNELS.screenListDisplays, () => captures.listDisplays());
-  ipcMain.handle(CHANNELS.screenCaptureActiveWindow, () => captures.captureActiveWindow());
-  ipcMain.handle(CHANNELS.screenCaptureDisplay, (_event, displayId?: string) =>
+  registerHandler(CHANNELS.screenListDisplays, () => captures.listDisplays());
+  registerHandler(CHANNELS.screenCaptureActiveWindow, () => captures.captureActiveWindow());
+  registerHandler(CHANNELS.screenCaptureDisplay, (_event, displayId?: string) =>
     captures.captureDisplay(displayId),
   );
-  ipcMain.handle(
+  registerHandler(
     CHANNELS.screenCaptureRegion,
     (_event, region: { x: number; y: number; width: number; height: number }) =>
       captures.captureRegion(region),
@@ -842,7 +936,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------ system ----------------------------- */
 
-  ipcMain.handle(CHANNELS.systemDiagnostics, (): DiagnosticsSnapshot => {
+  registerHandler(CHANNELS.systemDiagnostics, (): DiagnosticsSnapshot => {
     const displays = captures.listDisplays();
     return collectDiagnostics(
       {
@@ -853,16 +947,17 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     );
   });
 
-  ipcMain.handle(CHANNELS.systemEmergencyStop, (): EmergencyStopReport => {
+  registerHandler(CHANNELS.systemEmergencyStop, (): EmergencyStopReport => {
     return emergency.trigger();
   });
-  ipcMain.handle(CHANNELS.systemEmergencyClear, (): void => {
+  registerHandler(CHANNELS.systemIsEmergencyStopped, (): boolean => emergency.isStopped());
+  registerHandler(CHANNELS.systemEmergencyClear, (): void => {
     emergency.clear();
   });
 
   /* --------------------------- permissions --------------------------- */
 
-  ipcMain.handle(CHANNELS.permissionsRespond, (_event, decision: PermissionDecision): void => {
+  registerHandler(CHANNELS.permissionsRespond, (_event, decision: PermissionDecision): void => {
     if (!decision || typeof decision.requestId !== 'string') return;
     permissions.respond({
       requestId: decision.requestId,
@@ -871,11 +966,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     });
   });
 
-  ipcMain.handle(CHANNELS.permissionsListActiveGrants, (): PermissionGrant[] =>
+  registerHandler(CHANNELS.permissionsListPending, (): PermissionRequest[] => permissions.pendingRequests());
+
+  registerHandler(CHANNELS.permissionsListActiveGrants, (): PermissionGrant[] =>
     permissions.activeGrants(),
   );
 
-  ipcMain.handle(CHANNELS.permissionsRevokeAll, (): number => {
+  registerHandler(CHANNELS.permissionsRevokeAll, (): number => {
     const count = permissions.revokeAll();
     audit.record('permission', 'All permissions revoked', 'ok', `${count} grant(s)`);
     return count;
@@ -883,19 +980,19 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------- tasks ----------------------------- */
 
-  ipcMain.handle(CHANNELS.tasksList, (): ReturnType<TaskManager['list']> => tasks.list());
-  ipcMain.handle(CHANNELS.tasksPause, (_event, taskId: string): void => tasks.pause(taskId));
-  ipcMain.handle(CHANNELS.tasksResume, (_event, taskId: string): void => tasks.resume(taskId));
-  ipcMain.handle(CHANNELS.tasksCancel, (_event, taskId: string): void => tasks.cancel(taskId));
-  ipcMain.handle(CHANNELS.tasksContinueAfterHandoff, (_event, taskId: string): boolean =>
+  registerHandler(CHANNELS.tasksList, (): ReturnType<TaskManager['list']> => tasks.list());
+  registerHandler(CHANNELS.tasksPause, (_event, taskId: string): void => tasks.pause(taskId));
+  registerHandler(CHANNELS.tasksResume, (_event, taskId: string): void => tasks.resume(taskId));
+  registerHandler(CHANNELS.tasksCancel, (_event, taskId: string): void => tasks.cancel(taskId));
+  registerHandler(CHANNELS.tasksContinueAfterHandoff, (_event, taskId: string): boolean =>
     tasks.continueAfterHandoff(taskId),
   );
 
   /* ------------------------------- voice ----------------------------- */
 
-  ipcMain.handle(CHANNELS.voiceCapability, () => voice.capability());
+  registerHandler(CHANNELS.voiceCapability, () => voice.capability());
 
-  ipcMain.handle(CHANNELS.voiceListen, async (_event, timeoutMs?: number) => {
+  registerHandler(CHANNELS.voiceListen, async (_event, timeoutMs?: number) => {
     const result = await voice.listen(
       typeof timeoutMs === 'number' ? { timeoutMs } : {},
     );
@@ -909,13 +1006,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return result;
   });
 
-  ipcMain.handle(CHANNELS.voiceCancel, (): number => {
+  registerHandler(CHANNELS.voiceCancel, (): number => {
     const cancelled = voice.cancelAll();
     audit.record('system', 'Voice operation cancelled', 'cancelled', `${cancelled} worker(s)`);
     return cancelled;
   });
 
-  ipcMain.handle(CHANNELS.voiceSpeak, async (_event, text: string) => {
+  registerHandler(CHANNELS.voiceSpeak, async (_event, text: string) => {
     if (typeof text !== 'string' || text.trim().length === 0) {
       return { ok: false, error: 'There is nothing to say.' };
     }
@@ -926,15 +1023,23 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------- audit ----------------------------- */
 
-  ipcMain.handle(CHANNELS.auditList, (_event, limit?: number): AuditEntry[] =>
+  registerHandler(CHANNELS.auditList, (_event, limit?: number): AuditEntry[] =>
     audit.list(typeof limit === 'number' ? limit : 100),
   );
+  registerHandler(CHANNELS.toolsList, (): ToolCatalogEntry[] => toolRegistry.list().map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    category: tool.category,
+    risk: tool.risk,
+    requiresApproval: tool.requiresApproval,
+    changesState: tool.changesState,
+  })));
 
   /* -------------------------------- app ------------------------------ */
 
-  ipcMain.handle(CHANNELS.appGetVersion, (): string => app.getVersion());
+  registerHandler(CHANNELS.appGetVersion, (): string => app.getVersion());
 
-  ipcMain.handle(CHANNELS.appQuit, (): void => {
+  registerHandler(CHANNELS.appQuit, (): void => {
     context.onQuit();
   });
 

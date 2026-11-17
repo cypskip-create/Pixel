@@ -7,8 +7,10 @@
  */
 
 import { app, BrowserWindow, Menu, shell } from 'electron';
+import { release as osRelease } from 'node:os';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/channels';
+import { safeExternalHttpUrl } from '../shared/externalUrl';
 import { boot, describeError } from './startup/boot';
 import {
   APP_NAME,
@@ -95,6 +97,10 @@ function createWindowManager(store: SettingsStore): WindowManager {
       tray?.rebuild();
       void visible;
     },
+    workspaceWindow: store.get().workspaceWindow,
+    onWorkspaceBoundsChange: (state) => {
+      try { store.set({ workspaceWindow: state }); } catch { /* window state is best-effort */ }
+    },
   });
   return manager;
 }
@@ -121,11 +127,8 @@ export async function start(): Promise<void> {
 
   resolveUserDataDir();
 
-  // Some user machines run Electron without a usable GPU (VMs, headless RDP,
-  // cloud desktops, or broken drivers). A GPU launch failure kills the renderer
-  // before the window can paint, so prefer software rendering over a silent
-  // crash. Transparent, always-on-top windows still work without the GPU path.
-  app.commandLine.appendSwitch('disable-gpu');
+  // Keep production on Electron's normal GPU path. Development can opt in to
+  // --disable-gpu for diagnosis; packaged GPU failures are logged independently.
   app.commandLine.appendSwitch('enable-transparent-visuals');
   if (process.platform === 'win32') {
     app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
@@ -134,6 +137,7 @@ export async function start(): Promise<void> {
   boot.stage('waiting for electron ready');
   await app.whenReady();
   boot.stage('electron ready');
+  boot.info(`Renderer startup: platform=${process.platform} os=${osRelease()} disableGpu=${app.commandLine.hasSwitch('disable-gpu')}`);
 
   // No application menu: Pixel is not a document application and a menu bar in a
   // floating window would be visual noise.
@@ -242,11 +246,20 @@ export async function start(): Promise<void> {
       },
     },
     sendToRenderer: (channel, payload) => {
-      const win = windows?.getMainWindow();
-      if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-      const settingsWin = windows?.getSettingsWindow();
-      if (settingsWin && !settingsWin.isDestroyed()) {
-        settingsWin.webContents.send(channel, payload);
+      const recipients = [windows?.getMainWindow(), windows?.getSettingsWindow(), windows?.getWorkspaceWindow()];
+      for (const win of recipients) {
+        if (!win || win.isDestroyed() || win.webContents.isDestroyed()) continue;
+        try { win.webContents.send(channel, payload); } catch { /* a closing window may reject delivery */ }
+      }
+    },
+    onSettingsChange: (next) => {
+      shortcuts?.apply(next);
+      tray?.rebuild();
+      const recipients = [windows?.getMainWindow(), windows?.getSettingsWindow(), windows?.getWorkspaceWindow()];
+      for (const win of recipients) {
+        if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+          try { win.webContents.send(CHANNELS.settingsChanged, next); } catch { /* closing renderer */ }
+        }
       }
     },
     onQuit: () => {
@@ -265,11 +278,16 @@ export async function start(): Promise<void> {
       void next;
       tray?.rebuild();
       const win = windows?.getMainWindow();
-      if (win && !win.isDestroyed()) {
-        win.webContents.send(CHANNELS.modeChanged, mode);
+      const recipients = [win, windows?.getSettingsWindow(), windows?.getWorkspaceWindow()];
+      for (const recipient of recipients) {
+        if (recipient && !recipient.isDestroyed() && !recipient.webContents.isDestroyed()) {
+          try { recipient.webContents.send(CHANNELS.modeChanged, mode); } catch { /* closing renderer */ }
+          try { recipient.webContents.send(CHANNELS.settingsChanged, next); } catch { /* closing renderer */ }
+        }
       }
     },
     onOpenSettings: () => windows?.createSettingsWindow(),
+    onOpenWorkspace: () => windows?.openWorkspace(),
     onEmergencyStop: () => {
       controller.emergency.trigger();
     },
@@ -284,6 +302,7 @@ export async function start(): Promise<void> {
 
   shortcuts = new ShortcutManager({
     onToggle: () => windows?.toggle(),
+    onOpenWorkspace: () => windows?.openWorkspace(),
     onEmergencyStop: () => {
       controller.emergency.trigger();
     },
@@ -306,8 +325,7 @@ export async function start(): Promise<void> {
 
   const showFallback = setTimeout(() => {
     if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      boot.warn('ready-to-show did not fire within 8s; showing the window anyway.');
-      mainWindow.showInactive();
+      boot.warn('ready-to-show did not fire within 8s; leaving the island hidden to avoid exposing an unpainted transparent window. Check renderer and GPU child-process diagnostics.');
     }
   }, 8000);
   mainWindow.once('closed', () => clearTimeout(showFallback));
@@ -330,7 +348,8 @@ export async function start(): Promise<void> {
   // Open external links in the user's browser, never inside the app window.
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://')) void shell.openExternal(url);
+      const safeUrl = safeExternalHttpUrl(url);
+      if (safeUrl) void shell.openExternal(safeUrl);
       return { action: 'deny' };
     });
   });
