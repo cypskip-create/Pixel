@@ -11,11 +11,13 @@ import type { AppSettings } from '../shared/types';
 
 export interface ShortcutCallbacks {
   onToggle: () => void;
+  onOpenWorkspace?: () => void;
   onEmergencyStop: () => void;
 }
 
 export interface ShortcutStatus {
   summon: { accelerator: string; ok: boolean };
+  workspace: { accelerator: string; ok: boolean };
   emergencyStop: { accelerator: string; ok: boolean };
 }
 
@@ -23,6 +25,7 @@ export class ShortcutManager {
   private readonly callbacks: ShortcutCallbacks;
   private status: ShortcutStatus = {
     summon: { accelerator: '', ok: false },
+    workspace: { accelerator: '', ok: false },
     emergencyStop: { accelerator: '', ok: false },
   };
 
@@ -38,9 +41,11 @@ export class ShortcutManager {
     this.unregisterAll();
 
     const summon = settings.globalAccelerator;
+    const workspace = settings.workspaceAccelerator;
     const emergency = settings.emergencyStopAccelerator;
 
     let summonOk = false;
+    let workspaceOk = false;
     let emergencyOk = false;
 
     if (summon) {
@@ -65,8 +70,17 @@ export class ShortcutManager {
       }
     }
 
+    if (workspace && workspace !== summon && workspace !== emergency) {
+      try {
+        workspaceOk = globalShortcut.register(workspace, () => this.callbacks.onOpenWorkspace?.());
+      } catch {
+        workspaceOk = false;
+      }
+    }
+
     this.status = {
       summon: { accelerator: summon, ok: summonOk },
+      workspace: { accelerator: workspace, ok: workspaceOk },
       emergencyStop: { accelerator: emergency, ok: emergencyOk },
     };
     return this.status;

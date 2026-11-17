@@ -40,6 +40,22 @@ tray, microphone, installer or multi-monitor behavior. Follow
 [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
 for the target-machine acceptance run.
 
+The separate Pixel Workspace opens from the island toolbar, tray menu or its
+configurable global shortcut. It shares the same main-process conversation,
+tasks, project memory, tools, permissions, settings and emergency stop; it does
+not start a second assistant engine. Its window size, maximized state and
+position are saved locally. The supplied cyan, aqua and white P mark is defined
+once in `src/shared/pixelMark.json` and reused by the renderer, tray and Windows
+app icon.
+
+The latest local check passed TypeScript validation, the production source
+build, native-helper compilation and **718 tests**. Another 26 tests were
+skipped because this environment lacks Playwright Chromium, NSIS and the opt-in
+foreground desktop fixture. Windows GUI and packaged application acceptance
+remain open; Chromium download and isolated packaging were blocked by DNS. See
+the [current release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md)
+before treating this tree as a release candidate.
+
 The current architecture and security boundaries are in
 [`docs/architecture/PIXEL_AGENT_RUNTIME.md`](docs/architecture/PIXEL_AGENT_RUNTIME.md)
 and [`docs/architecture/PIXEL_SECURITY_MODEL.md`](docs/architecture/PIXEL_SECURITY_MODEL.md).
@@ -133,6 +149,7 @@ store the key** rather than falling back to plaintext.
 | Action | Shortcut |
 | --- | --- |
 | Summon or hide Pixel | `Ctrl+Shift+C` |
+| Open Workspace | `Ctrl+Shift+P` (configurable in Settings) |
 | Emergency stop | `Ctrl+Shift+Escape` |
 | Open settings | `Ctrl+,` |
 | Collapse to the orb | `Esc` |

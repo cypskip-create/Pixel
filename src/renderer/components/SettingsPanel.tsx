@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, X } from 'lucide-react';
 import type { AppSettings, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { AutomationPanel } from '@/components/AutomationPanel';
 import { MemoryPanel } from '@/components/MemoryPanel';
+import { PixelMark } from '@/components/PixelMark';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -21,6 +22,7 @@ interface SettingsPanelProps {
   /** Latest write failure, if any. */
   error: string | null;
   saving: boolean;
+  workspaceLayout?: boolean;
 }
 
 export type DeepPartial<T> = {
@@ -48,6 +50,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onTestConnection,
     error,
     saving,
+    workspaceLayout = false,
   } = props;
   const [advanced, setAdvanced] = useState(false);
   const [automationOpen, setAutomationOpen] = useState(false);
@@ -75,12 +78,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
   return (
     <section
       aria-label="Pixel settings"
-      className="glass-raised animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
-      style={{ maxHeight: 'min(calc(100vh - 24px), 520px)' }}
+      className={`glass-raised animate-slide-down flex ${workspaceLayout ? 'w-full max-w-[720px]' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
+      style={workspaceLayout ? { minHeight: 0, height: '100%' } : { maxHeight: 'min(calc(100vh - 24px), 520px)' }}
     >
       <header className="flex items-center gap-2 border-b border-[var(--color-glass-border)] px-3 py-2">
-        <Sparkles size={14} strokeWidth={2.3} aria-hidden="true" className="text-sky-300" />
-        <h2 className="flex-1 text-[12.5px] font-semibold text-[var(--color-ink)]">Companion</h2>
+        <PixelMark size={16} />
+        <h2 className="flex-1 text-[12.5px] font-semibold text-[var(--color-ink)]">{workspaceLayout ? 'Pixel Settings' : 'Companion'}</h2>
         {saving ? (
           <span role="status" aria-live="polite" className="text-[10px] text-[var(--color-ink-dim)]">
             Saving…
@@ -235,12 +238,15 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <Row label="Emergency stop">
             <Accelerator value={settings.emergencyStopAccelerator} />
           </Row>
+          <Row label="Open Workspace">
+            <ShortcutEditor value={settings.workspaceAccelerator} onCommit={(value) => onPatch({ workspaceAccelerator: value })} />
+          </Row>
           <Row label="Push to talk">
             <Accelerator value={settings.voice.pushToTalkAccelerator} />
           </Row>
           <p className="mt-1 px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
-            Change these in your system settings file. The emergency stop always works, even
-            while Pixel is mid-task.
+            Workspace uses the configured accelerator above. Global shortcuts must be unique;
+            the emergency stop always works, even while Pixel is mid-task.
           </p>
         </Group>
 
@@ -637,6 +643,23 @@ function Accelerator({ value }: { value: string }) {
     <kbd className="rounded-md border border-[var(--color-glass-border)] bg-white/8 px-1.5 py-0.5 font-sans text-[10px] text-[var(--color-ink-soft)]">
       {pretty}
     </kbd>
+  );
+}
+
+function ShortcutEditor({ value, onCommit }: { value: string; onCommit: (value: string) => void }): React.JSX.Element {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <input
+      aria-label="Open Workspace shortcut"
+      value={draft}
+      maxLength={80}
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+      onBlur={() => { const next = draft.trim(); if (next && next !== value) onCommit(next); else setDraft(value); }}
+      placeholder="CommandOrControl+Shift+P"
+      className="no-drag w-[180px] rounded-md border border-[var(--color-glass-border)] bg-black/20 px-2 py-1 font-mono text-[10px] text-[var(--color-ink-soft)] outline-none focus:border-sky-300/60"
+    />
   );
 }
 function Toggle({

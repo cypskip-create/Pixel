@@ -3,10 +3,26 @@
 **Reviewed:** 2026-11-17 (UI Experience 2.0)
 **Version:** 0.2.1
 **Branch:** `codex/ui-experience-2`
-**Current HEAD:** `f10084e6f11129e4c453ba546ed09e50e6b9d8de`
-**Decision:** Source type checking, automated tests and production source build pass. Pixel is **not release-ready** because native UI acceptance and packaged Windows launch were not verified, and the isolated packaging attempt could not reach GitHub. The worktree is intentionally uncommitted so the user can commit it.
+**Current local HEAD:** `01213c233372dddd68a2e794b65f19bfbc717abc` (uncommitted worktree)
+**Decision:** Source validation is green, but Pixel is **not release-ready** because no current Windows package was produced and the app's Workspace, native window effects and packaged behavior have not been accepted on an interactive Windows desktop. No commit or push was made.
 
-## Current UI Experience 2.0 evidence
+## Current local evidence — frosted glass, Workspace and supplied P mark
+
+- `npm run typecheck`: passed for renderer and main TypeScript projects.
+- `npm run build`: passed. This compiled main/preload, built the production renderer, and generated `build/icon.png` plus `build/pixel-mark.svg` from `src/shared/pixelMark.json`.
+- `npm run build:native`: passed; `PixelNative.exe` compiled and its JSON protocol ping passed.
+- `npm run ensure:electron-runtime`: passed earlier in this run; verified installed Electron `45.2.3` against the lockfile.
+- Full Vitest suite: **718 passed, 0 failed, 26 skipped across 36 passed files and 1 skipped file (744 tests total)**. The skips are 17 Chromium browser cases, 7 NSIS cases and 2 opt-in foreground integration cases. JUnit: [`artifacts/test-results/vitest-junit.xml`](../../artifacts/test-results/vitest-junit.xml); test output: [`artifacts/full-tests-final.log`](../../artifacts/full-tests-final.log).
+- `npx playwright install chromium` was attempted and failed with `getaddrinfo ENOTFOUND cdn.playwright.dev`. No browser tests are counted as run.
+- Isolated `electron-builder --win --dir --publish never` reached packaging but failed on `getaddrinfo ENOTFOUND github.com`; no Windows package was produced. The attempt used `release/ui-experience-2-validation`, not the normal release directory. Log: [`artifacts/package-final.log`](../../artifacts/package-final.log).
+- The sandboxed Electron smoke remains blocked before its app entry: Electron `45.2.3` returned `2147483651` (`0x80000003`). This run did not exercise the window or preload bridge assertions.
+- Interactive Windows validation of the orb, Workspace, icon/tray appearance, multi-window state sharing, cursor following, Windows glass effects, monitor/DPI behavior, native actions, packaged app, portable executable or installer is **unverified**. Follow [`PIXEL_WINDOWS_ACCEPTANCE.md`](PIXEL_WINDOWS_ACCEPTANCE.md) on the target laptop.
+- The prior GPU/renderer child-process failures are investigated separately in the earlier findings below. The current Electron runner failed before Pixel main-process startup, so this run does not establish their cause or resolution. `--disable-gpu` remains a development diagnostic only; it is not applied in production.
+- Current Git SHA: `01213c233372dddd68a2e794b65f19bfbc717abc`. No commit or push was made.
+
+Historical checkpoint results later in this report refer to earlier repository states; their test totals and package evidence are superseded by this current section.
+
+## Previous UI Experience 2.0 evidence (historical)
 
 - `npm run typecheck`: passed for renderer and main TypeScript projects.
 - Focused UI/history/search tests: **69 passed across 8 files**.

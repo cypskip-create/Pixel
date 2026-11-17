@@ -11,10 +11,13 @@
  */
 
 import { BrowserWindow, screen } from 'electron';
-import type { Display } from 'electron';
+import type { Display, WebContents, WebFrameMain } from 'electron';
 import { join } from 'node:path';
+import { release as osRelease } from 'node:os';
 import type { CompanionSettings, Surface } from '../shared/types';
+import type { WorkspaceWindowState } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
+import { isTrustedRendererUrl, supportsWindowsBackdrop } from './windowPolicy';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
 import {
@@ -32,7 +35,7 @@ import {
 } from '../shared/companion/cursorFollow';
 import type { FollowState } from '../shared/companion/cursorFollow';
 
-export { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES };
+export { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES, isTrustedRendererUrl, supportsWindowsBackdrop };
 
 export interface WindowManagerDeps {
   preloadPath: string;
@@ -42,6 +45,8 @@ export interface WindowManagerDeps {
   rendererIndexPath: string;
   onAnchorChange: (anchor: { monitorId: string; position: null }) => void;
   onVisibilityChange: (visible: boolean) => void;
+  workspaceWindow?: { x: number | null; y: number | null; width: number; height: number; maximized: boolean };
+  onWorkspaceBoundsChange?: (state: { x: number; y: number; width: number; height: number; maximized: boolean }) => void;
 }
 
 type PresentationSettings = Pick<
@@ -54,6 +59,10 @@ const CURSOR_WINDOW_SIZE = 64;
 export class WindowManager {
   private main: BrowserWindow | null = null;
   private settings: BrowserWindow | null = null;
+  private workspace: BrowserWindow | null = null;
+  private mainReady = false;
+  private workspaceFocused = false;
+  private mainVisibleRequested = true;
   private cursorWindow: BrowserWindow | null = null;
   private surface: Surface = 'idle';
   private anchorDisplayId: string | null = null;
@@ -99,6 +108,7 @@ export class WindowManager {
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
+      ...(process.platform === 'win32' && supportsWindowsBackdrop(osRelease()) ? { backgroundMaterial: 'acrylic' as const } : {}),
       resizable: false,
       movable: false,
       minimizable: false,
@@ -125,8 +135,11 @@ export class WindowManager {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
 
     win.once('ready-to-show', () => {
-      win.showInactive();
-      this.deps.onVisibilityChange(true);
+      this.mainReady = true;
+      if (this.mainVisibleRequested && !this.workspaceFocused && this.surface !== 'hidden') {
+        win.showInactive();
+        this.deps.onVisibilityChange(true);
+      }
     });
 
     win.on('blur', () => {
@@ -141,6 +154,7 @@ export class WindowManager {
 
     win.on('closed', () => {
       this.main = null;
+      this.mainReady = false;
     });
 
     this.loadRenderer(win);
@@ -181,6 +195,191 @@ export class WindowManager {
     this.loadRenderer(win, '?window=settings');
     this.settings = win;
     return win;
+  }
+
+  openWorkspace(): BrowserWindow {
+    if (this.workspace && !this.workspace.isDestroyed()) {
+      if (this.workspace.isMinimized()) this.workspace.restore();
+      if (!this.workspace.isVisible()) this.workspace.show();
+      this.workspace.focus();
+      return this.workspace;
+    }
+
+    const saved = this.deps.workspaceWindow ?? { x: null, y: null, width: 1280, height: 820, maximized: true };
+    const primaryArea = screen.getPrimaryDisplay().workArea;
+    const preferred = {
+      x: saved.x ?? Math.round(primaryArea.x + (primaryArea.width - saved.width) / 2),
+      y: saved.y ?? Math.round(primaryArea.y + (primaryArea.height - saved.height) / 2),
+      width: saved.width,
+      height: saved.height,
+    };
+    const displayArea = screen.getDisplayMatching(preferred).workArea;
+    const initialWidth = Math.min(preferred.width, displayArea.width);
+    const initialHeight = Math.min(preferred.height, displayArea.height);
+    const initialBounds = {
+      ...preferred,
+      width: initialWidth,
+      height: initialHeight,
+      x: Math.round(Math.min(Math.max(preferred.x, displayArea.x), displayArea.x + displayArea.width - initialWidth)),
+      y: Math.round(Math.min(Math.max(preferred.y, displayArea.y), displayArea.y + displayArea.height - initialHeight)),
+    };
+    const win = new BrowserWindow({
+      ...initialBounds,
+      minWidth: Math.min(960, displayArea.width),
+      minHeight: Math.min(640, displayArea.height),
+      title: 'Pixel Workspace',
+      frame: false,
+      show: false,
+      resizable: true,
+      minimizable: true,
+      maximizable: true,
+      fullscreenable: true,
+      autoHideMenuBar: true,
+      backgroundColor: '#10141d',
+      ...(process.platform === 'win32' && supportsWindowsBackdrop(osRelease()) ? { backgroundMaterial: 'mica' as const } : {}),
+      webPreferences: {
+        preload: this.deps.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        spellcheck: true,
+      },
+    });
+
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    let restoreBounds = { ...initialBounds };
+    const persistBounds = (): void => {
+      if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return;
+      restoreBounds = win.getBounds();
+      if (saveTimer !== null) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        saveTimer = null;
+        if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return;
+        const bounds = win.getBounds();
+        this.deps.onWorkspaceBoundsChange?.({ ...bounds, maximized: false });
+      }, 250);
+      saveTimer.unref?.();
+    };
+    const emitState = (): void => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+        const state: WorkspaceWindowState = { maximized: win.isMaximized(), fullscreen: win.isFullScreen() };
+        try { win.webContents.send(CHANNELS.workspaceState, state); } catch { /* window is closing */ }
+      }
+      if (!win.isDestroyed() && !win.isMaximized() && !win.isFullScreen()) {
+        const bounds = win.getBounds();
+        this.deps.onWorkspaceBoundsChange?.({ ...bounds, maximized: false });
+      } else if (!win.isDestroyed() && win.isMaximized() && !win.isFullScreen()) {
+        this.deps.onWorkspaceBoundsChange?.({ ...restoreBounds, maximized: true });
+      }
+    };
+
+    win.once('ready-to-show', () => {
+      if (win.isDestroyed()) return;
+      if (saved.maximized) win.maximize();
+      win.show();
+      win.focus();
+      emitState();
+    });
+    win.on('focus', () => {
+      this.workspaceFocused = true;
+      this.hideForWorkspace();
+      emitState();
+    });
+    win.on('blur', () => {
+      this.workspaceFocused = false;
+      this.restoreIslandAfterWorkspace();
+      emitState();
+    });
+    win.on('maximize', emitState);
+    win.on('unmaximize', emitState);
+    win.on('enter-full-screen', emitState);
+    win.on('leave-full-screen', emitState);
+    win.on('resize', persistBounds);
+    win.on('move', persistBounds);
+    win.on('closed', () => {
+      if (saveTimer !== null) clearTimeout(saveTimer);
+      saveTimer = null;
+      if (this.workspace === win) this.workspace = null;
+      this.workspaceFocused = false;
+      this.restoreIslandAfterWorkspace();
+    });
+
+    this.workspace = win;
+    this.loadRenderer(win, '?window=workspace');
+    return win;
+  }
+
+  minimizeWorkspace(): void {
+    if (this.workspace && !this.workspace.isDestroyed()) this.workspace.minimize();
+  }
+
+  closeWorkspace(): void {
+    if (this.workspace && !this.workspace.isDestroyed()) this.workspace.close();
+  }
+
+  toggleWorkspaceMaximize(): boolean {
+    const win = this.workspace;
+    if (!win || win.isDestroyed()) return false;
+    if (win.isFullScreen()) win.setFullScreen(false);
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+    return win.isMaximized();
+  }
+
+  setWorkspaceFullscreen(fullscreen: boolean): void {
+    const win = this.workspace;
+    if (!win || win.isDestroyed()) return;
+    win.setFullScreen(fullscreen);
+  }
+
+  getWorkspaceState(): WorkspaceWindowState {
+    const win = this.workspace;
+    return {
+      maximized: Boolean(win && !win.isDestroyed() && win.isMaximized()),
+      fullscreen: Boolean(win && !win.isDestroyed() && win.isFullScreen()),
+    };
+  }
+
+  getWorkspaceWindow(): BrowserWindow | null {
+    return this.workspace;
+  }
+
+  isMainSender(sender: WebContents): boolean {
+    return Boolean(this.main && !this.main.isDestroyed() && this.main.webContents === sender);
+  }
+
+  isWorkspaceSender(sender: WebContents): boolean {
+    return Boolean(this.workspace && !this.workspace.isDestroyed() && this.workspace.webContents === sender);
+  }
+
+  isSettingsSender(sender: WebContents): boolean {
+    return Boolean(this.settings && !this.settings.isDestroyed() && this.settings.webContents === sender);
+  }
+
+  /** Only the main frames of the three intended application windows may use IPC. */
+  isTrustedApplicationSender(sender: WebContents, frame: WebFrameMain | null): boolean {
+    if (!frame || frame !== sender.mainFrame) return false;
+    const owners = [this.main, this.settings, this.workspace];
+    if (!owners.some((owner) => owner && !owner.isDestroyed() && owner.webContents === sender)) return false;
+    return isTrustedRendererUrl(frame.url, this.deps.rendererIndexPath, this.deps.devServerUrl);
+  }
+
+  private hideForWorkspace(): void {
+    const win = this.main;
+    if (win && !win.isDestroyed() && win.isVisible()) {
+      win.hide();
+      this.deps.onVisibilityChange(false);
+    }
+  }
+
+  private restoreIslandAfterWorkspace(): void {
+    if (this.workspaceFocused) return;
+    const win = this.main;
+    if (this.mainVisibleRequested && win && !win.isDestroyed() && this.mainReady && this.surface !== 'hidden' && !win.isVisible()) {
+      win.showInactive();
+      this.deps.onVisibilityChange(true);
+    }
   }
 
   private loadRenderer(win: BrowserWindow, query = ''): void {
@@ -232,9 +431,13 @@ export class WindowManager {
     const size = fitPresentationSize(requestedSize, display.workArea);
     const target = anchoredTopCenterBounds(display.workArea, size, this.topOffset);
 
-    win.setBounds(target);
+    const current = win.getBounds();
+    if (!sameBounds(current, target)) win.setBounds(target, false);
 
-    if (!win.isVisible()) win.showInactive();
+    if (this.mainReady && !this.workspaceFocused && !win.isVisible()) {
+      win.showInactive();
+      this.deps.onVisibilityChange(true);
+    }
     this.syncCursorFollow();
   }
 
@@ -259,7 +462,8 @@ export class WindowManager {
     if (win && !win.isDestroyed()) {
       const bounds = win.getBounds();
       const display = this.anchorDisplay();
-      win.setBounds(anchoredTopCenterBounds(display.workArea, bounds, this.topOffset));
+      const target = anchoredTopCenterBounds(display.workArea, bounds, this.topOffset);
+      if (!sameBounds(bounds, target)) win.setBounds(target, false);
     }
     this.syncCursorWindow();
     this.syncCursorFollow();
@@ -269,11 +473,14 @@ export class WindowManager {
 
   show(): void {
     const win = this.createMainWindow();
+    this.mainVisibleRequested = true;
     if (win.isMinimized()) win.restore();
-    win.showInactive();
-    this.deps.onVisibilityChange(true);
     this.pendingSummon = true;
-    if (!win.webContents.isLoading()) {
+    if (this.mainReady && !this.workspaceFocused) {
+      if (!win.isVisible()) win.showInactive();
+      this.deps.onVisibilityChange(true);
+    }
+    if (this.mainReady && !win.webContents.isLoading()) {
       this.pendingSummon = false;
       win.webContents.send(CHANNELS.windowSummon);
     }
@@ -283,6 +490,7 @@ export class WindowManager {
 
   hide(): void {
     const win = this.main;
+    this.mainVisibleRequested = false;
     if (!win || win.isDestroyed()) return;
     win.hide();
     this.deps.onVisibilityChange(false);
@@ -505,6 +713,12 @@ export class WindowManager {
 
   dispose(): void {
     this.stopCursorFollow();
+    this.workspace?.close();
+    this.workspace = null;
+    this.settings?.close();
+    this.settings = null;
+    this.main?.close();
+    this.main = null;
     this.cursorWindow?.close();
     this.cursorWindow = null;
     for (const listener of this.displayListeners) {
@@ -514,6 +728,13 @@ export class WindowManager {
     }
     this.displayListeners.length = 0;
   }
+}
+
+function sameBounds(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
+  return left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
 }
 
 /**

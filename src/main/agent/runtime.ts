@@ -74,11 +74,13 @@ export class PermissionBroker {
   private readonly registry: ToolRegistry;
   private readonly audit: AuditLog;
   private readonly emitRequest: (request: PermissionRequest) => void;
+  private readonly emitResolved: (requestId: string) => void;
 
-  constructor(registry: ToolRegistry, audit: AuditLog, emitRequest: (r: PermissionRequest) => void) {
+  constructor(registry: ToolRegistry, audit: AuditLog, emitRequest: (r: PermissionRequest) => void, emitResolved: (id: string) => void = () => undefined) {
     this.registry = registry;
     this.audit = audit;
     this.emitRequest = emitRequest;
+    this.emitResolved = emitResolved;
   }
 
   /** Ask the user. Resolves with their decision; never resolves to approved by default. */
@@ -98,6 +100,7 @@ export class PermissionBroker {
         if (this.pending?.request.id !== request.id) return;
         this.pending = null;
         cleanup();
+        this.notifyResolved(request.id);
         this.audit.record('permission', `Cancelled "${request.toolName}"`, 'cancelled');
         resolve({ requestId: request.id, approved: false, duration: 'once' });
       };
@@ -112,6 +115,7 @@ export class PermissionBroker {
       } catch {
         this.pending = null;
         cleanup();
+        this.notifyResolved(request.id);
         try {
           this.audit.record('permission', 'Could not deliver the approval request', 'error');
         } catch {
@@ -139,6 +143,7 @@ export class PermissionBroker {
     }
     this.pending = null;
     pending.cleanup();
+    this.notifyResolved(decision.requestId);
 
     // The renderer is not an authority boundary. Even if a modified or stale
     // UI asks for a standing grant, only the exact scoped action represented by
@@ -183,6 +188,7 @@ export class PermissionBroker {
     if (!pending) return;
     this.pending = null;
     pending.cleanup();
+    this.notifyResolved(pending.request.id);
     this.audit.record('permission', `Cancelled "${pending.request.toolName}"`, 'cancelled');
     pending.resolve({ requestId: pending.request.id, approved: false, duration: 'once' });
   }
@@ -210,6 +216,14 @@ export class PermissionBroker {
 
   isPending(): boolean {
     return this.pending !== null;
+  }
+
+  pendingRequests(): PermissionRequest[] {
+    return this.pending ? [this.pending.request] : [];
+  }
+
+  private notifyResolved(requestId: string): void {
+    try { this.emitResolved(requestId); } catch { /* permission completion must not depend on renderer delivery */ }
   }
 }
 

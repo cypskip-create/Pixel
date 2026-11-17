@@ -38,6 +38,9 @@ import type {
   MemoryRecordView,
   MemoryExportView,
   PixelMemoryKind,
+  ProjectView,
+  WorkspaceWindowState,
+  ToolCatalogEntry,
 } from '../shared/types';
 
 export { CHANNELS } from '../shared/channels';
@@ -75,6 +78,8 @@ const bridge: CypsBridge = {
     clearApiKey: () => ipcRenderer.invoke(CH.settingsClearApiKey) as Promise<void>,
     testConnection: (model?: string) =>
       ipcRenderer.invoke(CH.settingsTestConnection, model) as Promise<ConnectionTestResult>,
+    onChanged: (handler: (settings: AppSettings) => void) => subscribe(CH.settingsChanged, handler),
+    onApiKeyStatus: (handler: (configured: boolean) => void) => subscribe(CH.settingsApiKeyStatusChanged, handler),
   },
 
   window: {
@@ -88,6 +93,13 @@ const bridge: CypsBridge = {
     show: () => ipcRenderer.invoke(CH.windowShow) as Promise<void>,
     openSettings: () => ipcRenderer.invoke(CH.windowOpenSettings) as Promise<void>,
     closeSettings: () => ipcRenderer.invoke(CH.windowCloseSettings) as Promise<void>,
+    openWorkspace: () => ipcRenderer.invoke(CH.workspaceOpen) as Promise<void>,
+    closeWorkspace: () => ipcRenderer.invoke(CH.workspaceClose) as Promise<void>,
+    minimizeWorkspace: () => ipcRenderer.invoke(CH.workspaceMinimize) as Promise<void>,
+    toggleWorkspaceMaximize: () => ipcRenderer.invoke(CH.workspaceToggleMaximize) as Promise<boolean>,
+    setWorkspaceFullscreen: (fullscreen: boolean) => ipcRenderer.invoke(CH.workspaceSetFullscreen, fullscreen) as Promise<void>,
+    getWorkspaceState: () => ipcRenderer.invoke(CH.workspaceGetState) as Promise<WorkspaceWindowState>,
+    onWorkspaceState: (handler: (state: WorkspaceWindowState) => void) => subscribe(CH.workspaceState, handler),
     setIgnoreMouseEvents: (ignore: boolean) =>
       ipcRenderer.invoke(CH.windowSetIgnoreMouseEvents, ignore) as Promise<void>,
     onFocusLost: (handler: () => void) => subscribe(CH.windowFocusLost, handler),
@@ -114,6 +126,8 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.historyRename, id, title) as Promise<ConversationSummary | null>,
     delete: (id: string) => ipcRenderer.invoke(CH.historyDelete, id) as Promise<boolean>,
     clear: () => ipcRenderer.invoke(CH.historyClear) as Promise<void>,
+    getActive: () => ipcRenderer.invoke(CH.historyGetActive) as Promise<ConversationRecordView | null>,
+    onActiveChanged: (handler: (record: ConversationRecordView | null) => void) => subscribe(CH.historyActiveChanged, handler),
   },
 
   browser: {
@@ -137,6 +151,7 @@ const bridge: CypsBridge = {
   system: {
     diagnostics: () =>
       ipcRenderer.invoke(CH.systemDiagnostics) as Promise<DiagnosticsSnapshot>,
+    isEmergencyStopped: () => ipcRenderer.invoke(CH.systemIsEmergencyStopped) as Promise<boolean>,
     emergencyStop: () =>
       ipcRenderer.invoke(CH.systemEmergencyStop) as Promise<EmergencyStopReport>,
     emergencyClear: () => ipcRenderer.invoke(CH.systemEmergencyClear) as Promise<void>,
@@ -147,6 +162,8 @@ const bridge: CypsBridge = {
   permissions: {
     onRequest: (handler: (request: PermissionRequest) => void) =>
       subscribe(CH.permissionsRequest, handler),
+    listPending: () => ipcRenderer.invoke(CH.permissionsListPending) as Promise<PermissionRequest[]>,
+    onResolved: (handler: (requestId: string) => void) => subscribe(CH.permissionsResolved, handler),
     respond: (decision: PermissionDecision) =>
       ipcRenderer.invoke(CH.permissionsRespond, decision) as Promise<void>,
     listActiveGrants: () =>
@@ -186,6 +203,9 @@ const bridge: CypsBridge = {
 
   memory: {
     list: () => ipcRenderer.invoke(CH.memoryList) as Promise<MemoryRecordView[]>,
+    listProjects: () => ipcRenderer.invoke(CH.memoryProjectsList) as Promise<ProjectView[]>,
+    setActiveProject: (name: string) => ipcRenderer.invoke(CH.memorySetActiveProject, name) as Promise<ProjectView>,
+    onProjectChanged: (handler: (project: ProjectView) => void) => subscribe(CH.memoryProjectChanged, handler),
     update: (id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }) =>
       ipcRenderer.invoke(CH.memoryUpdate, id, patch) as Promise<MemoryRecordView>,
     delete: (id: string) => ipcRenderer.invoke(CH.memoryDelete, id) as Promise<boolean>,
@@ -194,6 +214,10 @@ const bridge: CypsBridge = {
 
   audit: {
     list: (limit?: number) => ipcRenderer.invoke(CH.auditList, limit) as Promise<AuditEntry[]>,
+  },
+
+  tools: {
+    list: () => ipcRenderer.invoke(CH.toolsList) as Promise<ToolCatalogEntry[]>,
   },
 
   app: {

@@ -1,0 +1,20 @@
+{
+  "viewBox": [0, 0, 262, 324],
+  "palette": {
+    "cyan": "#02F3FE",
+    "aqua": "#73F9FD",
+    "white": "#FAFAFA"
+  },
+  "shapes": [
+    { "kind": "rect", "color": "cyan", "x": 0, "y": 0, "width": 84, "height": 84 },
+    {
+      "kind": "polygon",
+      "color": "aqua",
+      "points": [[84, 0], [204, 0], [262, 58], [262, 145], [185, 222], [166, 164], [84, 164]]
+    },
+    { "kind": "rect", "color": "white", "x": 84, "y": 84, "width": 82, "height": 80 },
+    { "kind": "rect", "color": "white", "x": 0, "y": 164, "width": 84, "height": 80 },
+    { "kind": "rect", "color": "cyan", "x": 0, "y": 244, "width": 84, "height": 80 }
+  ],
+  "sparkle": [[163, 44], [173, 78], [207, 89], [173, 100], [163, 134], [152, 100], [119, 89], [152, 78]]
+}

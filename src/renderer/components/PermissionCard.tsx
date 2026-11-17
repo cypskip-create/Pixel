@@ -8,6 +8,7 @@ interface PermissionCardProps {
   onDecide: (decision: PermissionDecision) => void;
   /** True while the decision is being written back to the shell. */
   pending?: boolean;
+  compact?: boolean;
 }
 
 const RISK_ICON: Record<RiskLevel, typeof ShieldCheck> = {
@@ -31,7 +32,7 @@ const RISK_SENTENCE: Record<RiskLevel, string> = {
  * "remember" default. Every control is a real button so the card is fully
  * keyboard operable, and the highest-risk affordance is styled as such.
  */
-export function PermissionCard({ request, onDecide, pending = false }: PermissionCardProps) {
+export function PermissionCard({ request, onDecide, pending = false, compact = false }: PermissionCardProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const RiskIcon = RISK_ICON[request.risk];
   const argumentEntries = Object.entries(request.args);
@@ -47,7 +48,7 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
       aria-modal="false"
       aria-labelledby={`perm-title-${request.id}`}
       aria-describedby={`perm-body-${request.id}`}
-      className="glass-raised animate-pop flex w-[460px] flex-col gap-2.5 rounded-[var(--cyps-radius)] border-amber-300/25 p-3"
+      className={`glass-raised animate-pop flex ${compact ? 'w-full' : 'w-[460px]'} flex-col gap-2.5 rounded-[var(--cyps-radius)] border-amber-300/25 p-3`}
     >
       <header className="flex items-start gap-2.5">
         <span

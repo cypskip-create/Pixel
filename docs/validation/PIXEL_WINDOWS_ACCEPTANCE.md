@@ -98,6 +98,58 @@ behavior on a real desktop.
 
 The repository's previous environment report explains why a sandboxed Electron/Chromium process may fail before Pixel code runs: [Electron constraints](../ELECTRON-CONSTRAINTS.md). Treat that report as environment-specific; verify on the target laptop.
 
+## Workspace and supplied P mark acceptance
+
+Use the interactive Windows app after the development launch, then repeat the
+relevant checks with the unpacked build:
+
+1. Confirm the geometric P appears in the collapsed island, toolbar lockup,
+   composer, assistant response, Settings, Workspace, tray icon and Windows
+   app icon. Compare the cyan/aqua/white blocks and central sparkle cutout with
+   the supplied logo reference. The tray and app icon may use different
+   backgrounds, but must use the same P geometry.
+2. Open **Pixel Workspace** from the island toolbar, the tray menu and the
+   configured `CommandOrControl+Shift+P` shortcut. Confirm these open/focus the
+   same Workspace window rather than creating duplicate assistant sessions.
+3. Resize Workspace, move it, maximize it, restore it and restart Pixel.
+   Confirm the last usable bounds and maximized state are restored on the
+   correct display and remain on-screen after a display is disconnected.
+4. Start a harmless conversation in the island and continue it in Workspace;
+   then send a reply in Workspace and verify the island receives the same
+   active conversation and response stream. Confirm saved conversation history
+   is identical from both surfaces when history persistence is enabled.
+5. Start one harmless task and confirm both surfaces show the same task state.
+   Request an approval, approve or deny it from either surface, and confirm the
+   result is reflected in both. Trigger emergency stop and confirm it applies
+   to the one shared task and does not leave a second agent running.
+6. Change a Settings value or API-key status and confirm the other open
+   surfaces update without showing or exposing the secret. Confirm projects,
+   tools, memory and skills/routines panels load their existing data.
+7. Close Workspace with its native close control. Confirm the island and tray
+   remain available; reopen Workspace and confirm the prior conversation is
+   still active.
+
+These checks require a real Electron desktop. Renderer screenshots or unit
+tests alone do not prove multi-window synchronization, focus behavior, native
+window restoration, tray rendering or Windows backdrop support.
+
+## Separate packaged GPU diagnosis
+
+The earlier packaged GPU/renderer child-process failure is separate from the
+preload and Workspace changes. Test the normal packaged GPU path without adding
+`--disable-gpu` to the launch command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\capture-startup.ps1 -Exe .\release\win-unpacked\Pixel.exe -Seconds 20 -Report .\artifacts\windows-acceptance\packaged-gpu-startup.txt
+```
+
+Record the process exit code, whether a top-level window appeared, `pixel-startup.log`,
+Chromium/GPU child-process output, Windows version and GPU driver. Compare with
+the development diagnostic launch only as a separate run; the dev script keeps
+`--disable-gpu`, while production and packaged builds retain the normal GPU
+path. Do not call the issue fixed based on the preload smoke or a successful
+build. Preserve both logs if the packaged app fails before `ready-to-show`.
+
 ## Preload bridge acceptance
 
 The compiled preload must be a single bundled file at
@@ -385,15 +437,20 @@ restart check passed unless it was observed directly on that Windows profile.
 
 ### Current checkpoint environment result (2026-11-17)
 
-- Source type checks, the full automated suite and production source build are
-  documented in `PROGRESS.md`. The browser and NSIS test prerequisites and the
-  opt-in native foreground integration were unavailable in that runner.
-- The isolated package attempt failed before creating an output directory
-  because electron-builder could not resolve `github.com` (`ENOTFOUND`).
-  Existing `release` artifacts were preserved.
-- The Windows GUI acceptance for this checkpoint remains unverified. The
-  Computer Use attempt was stopped before an application was selected, so no
-  application settings or user data were changed.
+- `npm run typecheck`, `npm run build`, `npm run build:native` and the Electron
+  runtime version check passed. The full suite passed **718 tests, 0 failed,
+  26 skipped (744 total across 37 files)**. Skips: 17 browser cases due to
+  unavailable Chromium, 7 NSIS cases due to missing `makensis`, and 2 opt-in
+  foreground integration cases. The Chromium download failed DNS resolution
+  for `cdn.playwright.dev`.
+- The isolated package attempt reached Windows packaging, then failed because
+  electron-builder could not resolve `github.com` (`ENOTFOUND`); no app output
+  was produced. Existing `release` artifacts were preserved.
+- The sandboxed Electron smoke exited `2147483651` (`0x80000003`) before the
+  smoke app entry point, so it did not verify bridge calls in this run.
+- Windows GUI, Workspace, backdrop, display behavior, packaged app, portable
+  build and installer acceptance remain unverified. The packaged GPU issue is
+  a separate, unresolved diagnosis; use the command in the section above.
 
 ### Local and laptop validation commands
 
@@ -406,6 +463,7 @@ npm ci
 npx playwright install chromium
 npm run typecheck
 npm test
+npm run ensure:electron-runtime
 npm run build
 npm run build:native
 npm run test:preload-sandbox

@@ -19,8 +19,8 @@ describe('renderIconPixels', () => {
   it('draws an opaque core at the centre', () => {
     const size = 32;
     const pixels = renderIconPixels(size);
-    const centre = (Math.floor(size / 2) * size + Math.floor(size / 2)) * 4;
-    expect(pixels[centre + 3]).toBe(255);
+    const stem = (21 * size + 10) * 4;
+    expect(pixels[stem + 3]).toBe(255);
   });
 
   it('leaves the corners fully transparent', () => {
@@ -30,16 +30,17 @@ describe('renderIconPixels', () => {
     expect(pixels[(size * size - 1) * 4 + 3]).toBe(0); // bottom-right alpha
   });
 
-  it('is horizontally symmetric', () => {
+  it('renders an asymmetric P with its negative-space sparkle', () => {
     const size = 16;
     const pixels = renderIconPixels(size);
-    for (let y = 0; y < size; y += 1) {
-      for (let x = 0; x < size; x += 1) {
-        const left = (y * size + x) * 4 + 3;
-        const right = (y * size + (size - 1 - x)) * 4 + 3;
-        expect(pixels[left]).toBe(pixels[right]);
-      }
-    }
+    const alphaAt = (x: number, y: number): number => pixels[(y * size + x) * 4 + 3] ?? 0;
+    expect(alphaAt(4, 12)).toBeGreaterThan(0); // cyan P stem
+    expect(alphaAt(13, 12)).toBe(0); // no mirrored stem
+    expect(alphaAt(9, 5)).toBeLessThan(255); // sparkle cuts through the bowl
+    const cyanPixel = (2 * size + 4) * 4;
+    expect(pixels[cyanPixel]).toBe(2);
+    expect(pixels[cyanPixel + 1]).toBe(243);
+    expect(pixels[cyanPixel + 2]).toBe(254);
   });
 
   it('rejects a size that cannot form a mark', () => {

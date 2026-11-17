@@ -103,6 +103,17 @@ export function useSettings() {
     };
   }, [bridge]);
 
+  useEffect(() => {
+    if (bridge.kind !== 'ready') return;
+    const unsubscribeSettings = typeof bridge.bridge.settings.onChanged === 'function'
+      ? bridge.bridge.settings.onChanged((next) => setState((previous) => ({ ...previous, settings: mergeSettings(next) })))
+      : () => undefined;
+    const unsubscribeKey = typeof bridge.bridge.settings.onApiKeyStatus === 'function'
+      ? bridge.bridge.settings.onApiKeyStatus((configured) => setState((previous) => ({ ...previous, hasApiKey: configured })))
+      : () => undefined;
+    return () => { unsubscribeSettings(); unsubscribeKey(); };
+  }, [bridge]);
+
   const patch = useCallback(
     (partial: DeepPartial<AppSettings>) => {
       // Optimistic local merge so the UI never lags behind the click.

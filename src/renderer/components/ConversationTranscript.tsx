@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Brain, ChevronRight, Square, X } from 'lucide-react';
 import type { ChatMessage } from '@shared/types';
+import { PixelMark } from '@/components/PixelMark';
 
 interface ConversationTranscriptProps {
   messages: ChatMessage[];
@@ -36,7 +37,7 @@ export function ConversationTranscript({
       <div ref={scrollRef} className="selectable min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
         {messages.map((message) => (
           <article key={message.id} className={message.role === 'user' ? 'ml-7 rounded-xl bg-sky-300/10 px-2.5 py-2' : 'mr-3 rounded-xl bg-white/5 px-2.5 py-2'}>
-            <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]">{message.role === 'user' ? 'You' : 'Pixel'}{message.aborted ? ' · Stopped' : ''}</p>
+            <div className="mb-1 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]">{message.role === 'assistant' ? <PixelMark size={12} /> : null}<span>{message.role === 'user' ? 'You' : 'Pixel'}{message.aborted ? ' · Stopped' : ''}</span></div>
             {message.error && !message.content ? <p role="alert" className="text-[11px] text-rose-200">{message.error}</p> : null}
             <p className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-[var(--color-ink)]">{message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')}</p>
             {message.error && message.content ? <p role="alert" className="mt-1 text-[10px] text-rose-200">{message.error}</p> : null}

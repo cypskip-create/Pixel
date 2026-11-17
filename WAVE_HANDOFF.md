@@ -2,10 +2,21 @@
 
 Updated: 2026-11-17
 
-## Current status: UI Experience 2.0
+## Current handoff — frosted glass, Workspace and P mark
 
-- Dedicated local branch: `codex/ui-experience-2`, starting at
-  `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`.
+- Branch: `codex/ui-experience-2`; current local HEAD: `01213c233372dddd68a2e794b65f19bfbc717abc`. No commit or push was made; the worktree is for the user to review and commit.
+- The new dedicated Workspace and frosted-glass surfaces are implemented, and the supplied block P reference is now the shared mark for renderer, tray and generated app icon. The Workspace uses the same main-process agent, conversation, history, tasks, approvals, settings and emergency-stop state as the island.
+- Final local checks: typecheck passed; production build passed; native helper compiled and pinged; `ensure:electron-runtime` verified Electron 45.2.3; full suite **718 passed, 0 failed, 26 skipped (744 total; 37 files)**. JUnit is `artifacts/test-results/vitest-junit.xml`.
+- The skips are 17 Playwright browser cases because Chromium is unavailable, 7 NSIS cases because `makensis` is unavailable, and 2 opt-in native foreground integration cases. Installing Chromium was blocked by DNS (`cdn.playwright.dev`); isolated Windows packaging stopped at `github.com` DNS before producing an app. Do not report those as successful validations.
+- Sandboxed Electron preload smoke exited with `2147483651` (`0x80000003`) before the app entry point in this environment. The actual Electron GUI, Workspace sharing, Windows visual behavior and packaged application remain unverified here.
+- The previous GPU/renderer child-process failures are still a separate open diagnosis. Development `--disable-gpu` remains only a diagnostic option; production security and GPU settings are unchanged.
+- Read `docs/validation/PIXEL_RELEASE_READINESS.md` for status and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for ordered laptop validation. Earlier checkpoint counts below are historical.
+
+## Previous UI Experience 2.0 wave notes (historical)
+
+- The current branch and HEAD are listed in the handoff section above. The
+  remaining notes in this section describe earlier checkpoints and their
+  test counts are superseded by the current 718-test result above.
 - Checkpoint 1 implements the single measured companion panel stack and one
   accessible mode selector. It has not yet been visually accepted on the
   target laptop.
@@ -29,7 +40,7 @@ Updated: 2026-11-17
 - Do not begin unrelated computer-control, drawing, cloud-computer or Pixel
   Code work during this UI/history/search wave.
 
-### Current tree result
+### Previous integration checkpoint result (historical)
 
 - Completed the panel/layout, display-anchored bar, independent cursor companion, persistent conversations/Recent Chats, configured default-browser search, and compact response/settings/task polish.
 - `npm run typecheck`: passed. `npm run build`: passed.

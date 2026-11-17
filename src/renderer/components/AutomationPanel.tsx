@@ -5,6 +5,7 @@ import { readBridge } from '@/lib/bridge';
 
 interface AutomationPanelProps {
   onBack: () => void;
+  returnLabel?: string;
 }
 
 const EMPTY_SKILL: SkillDraftRequest = {
@@ -40,7 +41,7 @@ const EMPTY_SKILL: SkillDraftRequest = {
   approvalRequirements: ['Pixel rechecks current policy and requests approval for consequential actions.'],
 };
 
-export function AutomationPanel({ onBack }: AutomationPanelProps): React.JSX.Element {
+export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: AutomationPanelProps): React.JSX.Element {
   const bridge = useMemo(() => readBridge(), []);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
@@ -192,7 +193,7 @@ export function AutomationPanel({ onBack }: AutomationPanelProps): React.JSX.Ele
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-2.5">
       <button type="button" onClick={onBack} className="no-drag mb-2 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] text-[var(--color-ink-soft)] hover:bg-white/8">
-        <ArrowLeft size={12} aria-hidden="true" /> Back to settings
+        <ArrowLeft size={12} aria-hidden="true" /> {returnLabel}
       </button>
       <p className="mb-2 text-[10.5px] leading-snug text-[var(--color-ink-dim)]">
         Skills stay in this project and run only after review. Routines run while Pixel is open; missed times are skipped, and a failed run pauses that routine.

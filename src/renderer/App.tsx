@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Settings, ShieldAlert, Square, WifiOff } from 'lucide-react';
+import { History, LayoutDashboard, Settings, ShieldAlert, Square, WifiOff } from 'lucide-react';
 import type {
   AssistantState,
   DiagnosticsSnapshot,
@@ -13,9 +13,11 @@ import { deriveAssistantState } from '@shared/companion-state';
 import { parseExplicitSearchCommand } from '@shared/browserSearch';
 import { getModeDescriptor } from '@shared/types';
 import { Avatar } from '@/components/Avatar';
+import { CursorBuddy } from '@/components/CursorBuddy';
 import { InputBar } from '@/components/InputBar';
 import { ConversationTranscript } from '@/components/ConversationTranscript';
 import { PermissionCard } from '@/components/PermissionCard';
+import { PixelMark } from '@/components/PixelMark';
 import { RecentChatsPanel } from '@/components/RecentChatsPanel';
 import { ResponseBubble } from '@/components/ResponseBubble';
 import { SettingsPanel } from '@/components/SettingsPanel';
@@ -27,6 +29,7 @@ import { usePresentationLayout } from '@/hooks/usePresentationLayout';
 import { useSettings } from '@/hooks/useSettings';
 import { readBridge, safeSubscribe } from '@/lib/bridge';
 import { resolveSurface } from '@/lib/surface';
+import { Workspace } from '@/Workspace';
 
 /** True when the renderer was opened as the settings window by the shell. */
 function isSettingsWindow(): boolean {
@@ -37,11 +40,15 @@ function isCursorWindow(): boolean {
   return new URLSearchParams(window.location.search).get('window') === 'cursor';
 }
 
+function isWorkspaceWindow(): boolean {
+  return new URLSearchParams(window.location.search).get('window') === 'workspace';
+}
+
 export function App(): React.JSX.Element {
   const bridge = readBridge();
   return (
     <BridgeContext.Provider value={bridge}>
-      {isSettingsWindow() ? <SettingsWindow /> : isCursorWindow() ? <CursorCompanionWindow /> : <Companion />}
+      {isSettingsWindow() ? <SettingsWindow /> : isCursorWindow() ? <CursorCompanionWindow /> : isWorkspaceWindow() ? <Workspace /> : <Companion />}
     </BridgeContext.Provider>
   );
 }
@@ -120,7 +127,7 @@ function CursorCompanionWindow(): React.JSX.Element {
 
   return (
     <div aria-hidden="true" className={`${reducedMotion ? 'reduce-motion' : 'motion-ok'} pointer-events-none grid h-screen w-screen place-items-center bg-transparent`}>
-      <Avatar state="idle" size={52} />
+      <CursorBuddy reducedMotion={reducedMotion} />
     </div>
   );
 }
@@ -518,6 +525,10 @@ function Companion(): React.JSX.Element {
     setHistoryOpen(true);
   }, []);
 
+  const openWorkspace = useCallback(() => {
+    if (bridge.kind === 'ready') void bridge.bridge.window.openWorkspace().catch(() => showNotice('Pixel Workspace could not be opened.'));
+  }, [bridge, showNotice]);
+
   const closeHistory = useCallback(() => {
     setHistoryOpen(false);
     void chat.revealTranscript();
@@ -630,9 +641,10 @@ function Companion(): React.JSX.Element {
           }}
           aria-label={`Open Pixel. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className="group relative grid size-[76px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
+          className="glass island-collapsed group relative grid h-[54px] w-[112px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
         >
-          <Avatar state={assistantState} size={56} />
+          <PixelMark size={31} />
+          <span aria-hidden="true" className="absolute bottom-[10px] right-[31px] rounded-full border-2 border-[var(--color-glass)]"><Avatar state={assistantState} size={12} /></span>
         </button>
       ) : (
         <div
@@ -779,7 +791,12 @@ function Companion(): React.JSX.Element {
               disabled={bridge.kind !== 'ready' || chat.historyLoading || searchPending || historyOpen}
             />
 
-            <div className="mt-1.5 flex items-center justify-center gap-1">
+            <div className="glass-toolbar mt-1.5 flex items-center justify-center gap-1 rounded-full px-1.5 py-1">
+              <span className="pixel-brand-lockup" aria-label="Pixel">
+                <PixelMark size={16} />
+                <span className="pixel-brand-divider" />
+                <span className="pixel-wordmark">PIXEL</span>
+              </span>
               <button
                 type="button"
                 onClick={() => historyOpen ? closeHistory() : openHistory()}
@@ -789,6 +806,14 @@ function Companion(): React.JSX.Element {
                 className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-sky-400/70 disabled:opacity-40 ${historyOpen ? 'bg-sky-300/12 text-sky-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
               >
                 <History aria-hidden="true" className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={openWorkspace}
+                aria-label="Open Pixel Workspace"
+                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-sky-300/12 hover:text-sky-200 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+              >
+                <LayoutDashboard aria-hidden="true" className="size-3.5" />
               </button>
               <button
                 type="button"

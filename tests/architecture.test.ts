@@ -99,6 +99,7 @@ describe('ipc channels', () => {
       'browser:',
       'screen:',
       'system:',
+      'workspace:',
       'permissions:',
       'tasks:',
       'audit:',
@@ -106,6 +107,32 @@ describe('ipc channels', () => {
     ]) {
       expect(names).toContain(area);
     }
+  });
+});
+
+describe('shared Pixel Workspace', () => {
+  it('opens as a second secured renderer window that reuses the main-process agent', () => {
+    const app = readFileSync(join(SRC, 'renderer', 'App.tsx'), 'utf8');
+    const workspace = readFileSync(join(SRC, 'renderer', 'Workspace.tsx'), 'utf8');
+    const windowManager = readFileSync(join(SRC, 'main', 'window.ts'), 'utf8');
+    const ipc = readFileSync(join(SRC, 'main', 'ipc.ts'), 'utf8');
+    const preload = readFileSync(join(SRC, 'preload', 'index.ts'), 'utf8');
+
+    expect(app).toContain("get('window') === 'workspace'");
+    expect(windowManager).toContain("this.loadRenderer(win, '?window=workspace')");
+    expect(windowManager).toContain('contextIsolation: true');
+    expect(windowManager).toContain('nodeIntegration: false');
+    expect(windowManager).toContain('sandbox: true');
+    expect(windowManager).toContain('webSecurity: true');
+    expect(workspace).toContain('history.list');
+    expect(workspace).toContain('api.onRequest');
+    expect(workspace).toContain('system.emergencyStop');
+    expect(ipc).toContain('if (agent.isRunning) throw new Error');
+    expect(ipc).toContain('conversationId ? { conversationId }');
+    expect(ipc).toContain('isTrustedApplicationSender(event.sender, event.senderFrame)');
+    expect(preload).toContain('workspaceToggleMaximize');
+    expect(preload).toContain('workspaceSetFullscreen');
+    expect(preload).not.toContain("contextBridge.exposeInMainWorld('electron'");
   });
 });
 
@@ -126,7 +153,8 @@ describe('chat history and browser search trust boundaries', () => {
     const search = readFileSync(join(SRC, 'shared', 'browserSearch.ts'), 'utf8');
     expect(ipc).toContain('CHANNELS.browserOpenSearch');
     expect(ipc).toContain('createSearchUrl(queryValue, provider)');
-    expect(ipc).toContain('shell.openExternal(url)');
+    expect(ipc).toContain('shell.openExternal(safeUrl)');
+    expect(ipc).toContain('safeExternalHttpUrl(url)');
     expect(search).toContain('MAX_SEARCH_QUERY_LENGTH = 500');
     expect(search).toContain("'https://www.google.com/search'");
     expect(search).toContain("'https://www.bing.com/search'");

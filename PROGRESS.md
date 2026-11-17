@@ -2,6 +2,25 @@
 
 Updated: 2026-11-17. Version: 0.2.1.
 
+## Current local validation — frosted glass, Workspace and supplied P mark
+
+Current branch: `codex/ui-experience-2`. Current local HEAD: `01213c233372dddd68a2e794b65f19bfbc717abc` (unchanged; worktree is uncommitted for the user to commit).
+
+- Reused the supplied reference's block P, cyan/aqua/white palette and sparkle cutout as the canonical mark in `src/shared/pixelMark.json`. The renderer, composer, assistant responses, Settings, Workspace, native tray and generated Windows app icon consume this same mark. The icon was generated and visually inspected.
+- Implemented the separate frosted-glass Pixel Workspace, including shared conversation state, history, projects, tasks/activity, skills/routines, memory, tools, approvals and Settings. Its native window state is persisted and clamped; it shares the main-process agent and emergency stop.
+- `npm run typecheck`: passed.
+- `npm run build`: passed; main, bundled preload, Vite renderer, `build/icon.png` and editable `build/pixel-mark.svg` were generated.
+- `npm run build:native`: passed; `PixelNative.exe` compiled and its protocol ping smoke passed.
+- `npm run ensure:electron-runtime`: passed earlier in this run; verified Electron `45.2.3` against the lockfile.
+- Full Vitest run: **718 passed, 0 failed, 26 skipped across 36 passed files and 1 skipped file (744 tests total)**. Skips: 17 Playwright browser cases (Chromium executable unavailable), 7 NSIS cases (`makensis` unavailable), and 2 opt-in native foreground integration cases. JUnit: `artifacts/test-results/vitest-junit.xml`; console log: `artifacts/full-tests-final.log`.
+- Playwright Chromium installation was attempted, but download failed because DNS could not resolve `cdn.playwright.dev` (`ENOTFOUND`).
+- Isolated unpacked packaging ran `electron-builder 26.18.0` through native dependency installation and into Windows packaging, then failed resolving `github.com` (`ENOTFOUND`). No packaged application was produced or validated; existing release artifacts were not targeted. Log: `artifacts/package-final.log`.
+- `npm run test:preload-sandbox` remains unverified in this execution environment: Electron `45.2.3` exited `2147483651` (`0x80000003`) before the smoke app's main-entry marker. The log is `artifacts/windows-acceptance/preload-sandbox-smoke.log`.
+- Actual interactive Windows GUI, Workspace multiwindow synchronization, native backdrop/blur, monitor/DPI behavior, packaged startup and installer flows remain **unverified** here. The prior packaged GPU/renderer child-process issue also remains a separate unresolved diagnosis; the development `--disable-gpu` switch stays diagnostic-only and is not applied to production.
+- `git diff --check`: passed before the final documentation update; rerun after docs are reconciled.
+
+See `docs/validation/PIXEL_RELEASE_READINESS.md` for the release gate and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for exact target-laptop steps. Historical checkpoint counts below are retained as history and do not describe the current full-suite result.
+
 ## UI Experience 2.0 — Checkpoint 1
 
 Branch: `codex/ui-experience-2` (branched from `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`).
