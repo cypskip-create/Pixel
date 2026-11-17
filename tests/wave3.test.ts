@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ModelCapabilities } from '../src/shared/types';
 import { openDatabase } from '../src/main/data/database';
 import type { Database } from '../src/main/data/database';
@@ -710,10 +710,13 @@ describe('python worker supervision', () => {
     const worker = fakeWorker('process.stdin.on("data", () => {}); setInterval(() => {}, 1000);');
     const controller = new AbortController();
     const pending = worker.extract('C:/nope.txt', controller.signal);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const child = (worker as unknown as { child: { once: (event: string, cb: () => void) => void; exitCode: number | null } | null }).child;
-    expect(child).not.toBeNull();
-    const exited = new Promise<void>((resolve) => child?.once('exit', () => resolve()));
+    const currentChild = () => (worker as unknown as {
+      child: { once: (event: string, cb: () => void) => void; exitCode: number | null } | null;
+    }).child;
+    await vi.waitFor(() => expect(currentChild()).not.toBeNull(), { timeout: 5_000, interval: 25 });
+    const child = currentChild();
+    if (!child) throw new Error('Python worker did not start before the deadline.');
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
 
     controller.abort();
     const result = await pending;

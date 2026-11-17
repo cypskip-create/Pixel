@@ -2,24 +2,22 @@
 
 Updated: 2026-11-17. Version: 0.2.1.
 
-## Current local validation — frosted glass, Workspace and supplied P mark
+## Current local validation — glass system and task verification display
 
-Current branch: `codex/ui-experience-2`. Current local HEAD: `01213c233372dddd68a2e794b65f19bfbc717abc` (unchanged; worktree is uncommitted for the user to commit).
+Current branch: `codex/ui-experience-2`. Current HEAD: `c090ec0cfe3d485fb234257e9ec2ccbaeffd72f3`. The repair is uncommitted for the user to review and commit.
 
-- Reused the supplied reference's block P, cyan/aqua/white palette and sparkle cutout as the canonical mark in `src/shared/pixelMark.json`. The renderer, composer, assistant responses, Settings, Workspace, native tray and generated Windows app icon consume this same mark. The icon was generated and visually inspected.
-- Implemented the separate frosted-glass Pixel Workspace, including shared conversation state, history, projects, tasks/activity, skills/routines, memory, tools, approvals and Settings. Its native window state is persisted and clamped; it shares the main-process agent and emergency stop.
-- `npm run typecheck`: passed.
-- `npm run build`: passed; main, bundled preload, Vite renderer, `build/icon.png` and editable `build/pixel-mark.svg` were generated.
-- `npm run build:native`: passed; `PixelNative.exe` compiled and its protocol ping smoke passed.
-- `npm run ensure:electron-runtime`: passed earlier in this run; verified Electron `45.2.3` against the lockfile.
-- Full Vitest run: **718 passed, 0 failed, 26 skipped across 36 passed files and 1 skipped file (744 tests total)**. Skips: 17 Playwright browser cases (Chromium executable unavailable), 7 NSIS cases (`makensis` unavailable), and 2 opt-in native foreground integration cases. JUnit: `artifacts/test-results/vitest-junit.xml`; console log: `artifacts/full-tests-final.log`.
-- Playwright Chromium installation was attempted, but download failed because DNS could not resolve `cdn.playwright.dev` (`ENOTFOUND`).
-- Isolated unpacked packaging ran `electron-builder 26.18.0` through native dependency installation and into Windows packaging, then failed resolving `github.com` (`ENOTFOUND`). No packaged application was produced or validated; existing release artifacts were not targeted. Log: `artifacts/package-final.log`.
-- `npm run test:preload-sandbox` remains unverified in this execution environment: Electron `45.2.3` exited `2147483651` (`0x80000003`) before the smoke app's main-entry marker. The log is `artifacts/windows-acceptance/preload-sandbox-smoke.log`.
-- Actual interactive Windows GUI, Workspace multiwindow synchronization, native backdrop/blur, monitor/DPI behavior, packaged startup and installer flows remain **unverified** here. The prior packaged GPU/renderer child-process issue also remains a separate unresolved diagnosis; the development `--disable-gpu` switch stays diagnostic-only and is not applied to production.
-- `git diff --check`: passed before the final documentation update; rerun after docs are reconciled.
+- Reused the supplied block P mark and palette. The P geometry remains canonical in `src/shared/pixelMark.json`; this repair does not change it.
+- On supported Windows 11 builds, the companion selects DWM Acrylic. A `PIXEL_GLASS_MODE=fallback` override selects the opaque CSS treatment and native `none` backdrop for comparison. Main-window CSS now uses shared, restrained tint/edge/shadow levels; it no longer implies that CSS blur can see through to other desktop apps. Settings and Workspace remain on their existing opaque/Mica window treatments.
+- A completed task record with unresolved `pendingVerifications` now displays **Needs verification** and excludes that step from its verified count. Persisted status and task actions are unchanged. The existing executor already fails closed when it cannot verify a requested postcondition.
+- Added `npm run dev:gpu` / `dev:electron:gpu` for GPU-enabled development comparison. Existing `npm run dev` still uses `--disable-gpu`; production does not disable GPU.
+- `npm run typecheck`: passed. `npm run build`: passed after the glass and task UI changes.
+- Full Vitest suite: **722 passed, 0 failed, 26 skipped (748 total), across 37 passed files and 1 skipped file (38 total)**. Skips: 17 browser tests (Playwright Chromium unavailable), 7 NSIS tests (`makensis` unavailable), and 2 opt-in native foreground tests. The final full run used a disposable temporary `USERPROFILE` because this execution sandbox blocks test fixtures under the real home directory. Python document extraction ran and passed. JUnit: `artifacts/test-results/glass-repair-vitest.xml`.
+- GitHub Actions run `44159366265` (Windows CI run 7, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`, containing the prior `c090ec0` head) failed in the test step: 10 document tests used a hard-coded developer Python path absent on the runner, and one worker cancellation test depended on a fixed 50 ms startup delay. Native compilation and packaging were skipped after the test failure. This repair configures Python 3.12, uses a discovered/explicit interpreter path, and waits with a bounded deadline for worker startup. The workflow has not been rerun because this branch is local and the user will push.
+- Windows DWM readback before this CSS change reported Acrylic (`DWMSBT_TRANSIENTWINDOW`, value 3) for Pixel and Mica (value 2) for Workspace on build `26300.9974`, with system transparency enabled. The supplied screenshot shows the old, overly opaque surfaces. I have not launched this changed build or captured its new appearance; visual acceptance remains unverified.
+- GPU diagnosis remains separate: existing environment evidence includes Chromium Crashpad “not connected” and a sandboxed Electron GUI-start failure. This points to child-process coordination in that environment, but does not identify the root cause of the packaged failure on the user's laptop. No GPU/driver report or post-change packaged GPU run is available.
+- Interactive visual acceptance, normal-GPU startup, packaged app, portable executable and installer flows remain **unverified**. No user data, credentials, history or app identity were changed. No commit or push was made.
 
-See `docs/validation/PIXEL_RELEASE_READINESS.md` for the release gate and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for exact target-laptop steps. Historical checkpoint counts below are retained as history and do not describe the current full-suite result.
+See `docs/validation/PIXEL_RELEASE_READINESS.md` for evidence and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for the exact laptop comparison procedure. Earlier checkpoint counts below are historical.
 
 ## UI Experience 2.0 — Checkpoint 1
 

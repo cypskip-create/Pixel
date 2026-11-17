@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { TaskRecord, TaskStatus, TaskStep } from '@shared/types';
 import { relativeTime, truncate } from '@/lib/format';
+import { countVerifiedSteps, taskDisplayState } from '@/lib/task-presentation';
 
 interface TaskStripProps {
   task: TaskRecord;
@@ -58,7 +59,8 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compact = false }: TaskStripProps) {
   const [open, setOpen] = useState(false);
 
-  const done = task.steps.filter((step) => step.status === 'done' || step.status === 'verified').length;
+  const displayState = taskDisplayState(task);
+  const done = countVerifiedSteps(task);
   const total = task.steps.length;
   const progress = total === 0 ? 0 : (done / total) * 100;
   const activeStep =
@@ -88,12 +90,14 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
       <div className="flex items-center gap-2 px-2.5 py-2">
         <span
           aria-hidden="true"
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${STATUS_TONE[task.status]}`}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${STATUS_TONE[displayState.tone]}`}
         >
           {live ? (
             <Loader2 size={13} strokeWidth={2.4} className="orb-spin" />
-          ) : task.status === 'completed' ? (
+          ) : task.status === 'completed' && !displayState.verificationPending ? (
             <Check size={13} strokeWidth={2.8} />
+          ) : displayState.verificationPending ? (
+            <CircleDashed size={13} strokeWidth={2.4} />
           ) : task.status === 'failed' ? (
             <X size={13} strokeWidth={2.8} />
           ) : task.status === 'paused' ? (
@@ -115,14 +119,14 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
               {truncate(task.title, 46)}
             </span>
             <span
-              className={`shrink-0 rounded-full border px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide ${STATUS_TONE[task.status]}`}
+              className={`shrink-0 rounded-full border px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide ${STATUS_TONE[displayState.tone]}`}
             >
-              {STATUS_LABEL[task.status]}
+              {displayState.verificationPending ? displayState.label : STATUS_LABEL[task.status]}
             </span>
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-[var(--color-ink-dim)]">
             <span>
-              {done}/{total || '?'} steps
+              {done}/{total || '?'} {displayState.verificationPending ? 'verified' : 'steps'}
             </span>
             {activeStep ? (
               <>
@@ -144,7 +148,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
         </button>
 
         <span className="sr-only" role="status" aria-live="polite">
-          {`Task ${task.title}: ${STATUS_LABEL[task.status]}, ${String(done)} of ${String(total)} steps complete`}
+          {`Task ${task.title}: ${displayState.verificationPending ? displayState.label : STATUS_LABEL[task.status]}, ${String(done)} of ${String(total)} ${displayState.verificationPending ? 'steps verified' : 'steps complete'}`}
         </span>
 
         <div className="no-drag flex shrink-0 items-center gap-1">
@@ -212,7 +216,10 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
           ) : (
             task.steps.map((step) => (
               <li key={step.id}>
-                <StepRow step={step} />
+                <StepRow
+                  step={step}
+                  verificationPending={(task.pendingVerifications ?? []).some((item) => item.stepId === step.id)}
+                />
               </li>
             ))
           )}
@@ -225,17 +232,24 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
               {truncate(task.result, 320)}
             </li>
           ) : null}
+          {displayState.verificationPending ? (
+            <li className="pt-1 text-[10.5px] leading-relaxed text-amber-100/90">
+              The action finished, but its postcondition still needs verification.
+            </li>
+          ) : null}
         </ol>
       ) : null}
     </section>
   );
 }
 
-function StepRow({ step }: { step: TaskStep }) {
+function StepRow({ step, verificationPending }: { step: TaskStep; verificationPending: boolean }) {
   return (
     <div className="flex items-start gap-2 py-1">
       <span aria-hidden="true" className="mt-0.5 text-[var(--color-ink-dim)]">
-        {step.status === 'done' || step.status === 'verified' ? (
+        {verificationPending ? (
+          <CircleDashed size={12} strokeWidth={2.2} className="text-amber-200" />
+        ) : step.status === 'done' || step.status === 'verified' ? (
           <Check size={12} strokeWidth={2.8} className={step.status === 'verified' ? 'text-emerald-300' : 'text-amber-200'} />
         ) : step.status === 'running' ? (
           <Loader2 size={12} strokeWidth={2.4} className="orb-spin text-amber-200" />
@@ -250,7 +264,9 @@ function StepRow({ step }: { step: TaskStep }) {
       <span className="min-w-0 flex-1">
         <span
           className={`block text-[11.5px] leading-snug ${
-            step.status === 'verified'
+            verificationPending
+              ? 'text-amber-100'
+              : step.status === 'verified'
               ? 'text-emerald-100'
               : step.status === 'done'
               ? 'text-[var(--color-ink-dim)] line-through decoration-white/25'
@@ -265,6 +281,9 @@ function StepRow({ step }: { step: TaskStep }) {
           <span className="mt-0.5 block truncate text-[10px] text-[var(--color-ink-dim)]" title={step.detail}>
             {step.detail}
           </span>
+        ) : null}
+        {verificationPending ? (
+          <span className="mt-0.5 block text-[9.5px] font-medium text-amber-200/90">Awaiting postcondition verification</span>
         ) : null}
         {step.status === 'verified' ? (
           <span className="mt-0.5 block text-[9.5px] font-medium text-emerald-200/85">Verified</span>

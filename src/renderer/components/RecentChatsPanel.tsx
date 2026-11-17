@@ -131,7 +131,7 @@ export function RecentChatsPanel({ selectedId, disabled = false, onOpen, onNew, 
       ref={panelRef}
       aria-label="Recent Chats"
       data-layout-panel
-      className="glass-raised relative flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)] border border-[var(--color-glass-border)] shadow-[0_14px_42px_rgb(0_0_0/0.3)]"
+      className="glass-raised relative flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
       style={{ maxHeight: 'min(56vh, 420px)' }}
     >
       <header className="flex items-center gap-2 border-b border-[var(--color-glass-border)] px-3 py-2">

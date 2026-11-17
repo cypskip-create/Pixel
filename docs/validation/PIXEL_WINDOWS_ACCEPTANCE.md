@@ -25,6 +25,50 @@ uses harmless stub IPC handlers and a test-only API-key placeholder. It writes
 `preload-sandbox-smoke.log` on success. A failure before the Electron app starts
 is an environment failure, not a pass.
 
+## Floating glass and task status comparison
+
+The supplied screenshot is the pre-repair state. Do the comparison on the
+target laptop and record a fresh screenshot for each run. Close Pixel normally
+between runs so the single-instance lock does not redirect a launch to the old
+process.
+
+1. Test the default Windows Acrylic path, with the existing GPU-disabled
+   development diagnostic:
+
+   ```powershell
+   Remove-Item Env:PIXEL_GLASS_MODE -ErrorAction SilentlyContinue
+   npm run dev
+   ```
+
+2. Stop the process with `Ctrl+C`, confirm Pixel has exited, then compare the
+   opaque CSS fallback:
+
+   ```powershell
+   $env:PIXEL_GLASS_MODE = 'fallback'
+   npm run dev
+   ```
+
+3. Stop it, clear the override, and separately test the normal GPU path:
+
+   ```powershell
+   Remove-Item Env:PIXEL_GLASS_MODE -ErrorAction SilentlyContinue
+   npm run dev:gpu
+   ```
+
+Check that the P mark is unchanged; Recent Chats, the composer and toolbar read
+as related surfaces; text and controls remain legible over both dark and bright
+desktop content; edges and shadows stay subtle; and Acrylic does not leave a
+visible rectangular patch outside the rounded island. Open Settings, an
+approval card and the task strip to check their elevated surfaces. If a task has
+a pending postcondition, the strip must say **Needs verification** and must not
+count that step as verified. Do not infer a successful visual result from CSS
+build output alone.
+
+The override affects only the launched process. It does not change stored Pixel
+settings. `npm run dev` still passes `--disable-gpu`; `npm run dev:gpu` omits it
+and is the separate GPU comparison. Do not add `--no-sandbox` or loosen the
+BrowserWindow security flags during either run.
+
 Capture a reproducible local evidence bundle from the repository root:
 
 ```powershell

@@ -4,13 +4,13 @@ Updated: 2026-11-17
 
 ## Current handoff — frosted glass, Workspace and P mark
 
-- Branch: `codex/ui-experience-2`; current local HEAD: `01213c233372dddd68a2e794b65f19bfbc717abc`. No commit or push was made; the worktree is for the user to review and commit.
-- The new dedicated Workspace and frosted-glass surfaces are implemented, and the supplied block P reference is now the shared mark for renderer, tray and generated app icon. The Workspace uses the same main-process agent, conversation, history, tasks, approvals, settings and emergency-stop state as the island.
-- Final local checks: typecheck passed; production build passed; native helper compiled and pinged; `ensure:electron-runtime` verified Electron 45.2.3; full suite **718 passed, 0 failed, 26 skipped (744 total; 37 files)**. JUnit is `artifacts/test-results/vitest-junit.xml`.
-- The skips are 17 Playwright browser cases because Chromium is unavailable, 7 NSIS cases because `makensis` is unavailable, and 2 opt-in native foreground integration cases. Installing Chromium was blocked by DNS (`cdn.playwright.dev`); isolated Windows packaging stopped at `github.com` DNS before producing an app. Do not report those as successful validations.
-- Sandboxed Electron preload smoke exited with `2147483651` (`0x80000003`) before the app entry point in this environment. The actual Electron GUI, Workspace sharing, Windows visual behavior and packaged application remain unverified here.
-- The previous GPU/renderer child-process failures are still a separate open diagnosis. Development `--disable-gpu` remains only a diagnostic option; production security and GPU settings are unchanged.
-- Read `docs/validation/PIXEL_RELEASE_READINESS.md` for status and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for ordered laptop validation. Earlier checkpoint counts below are historical.
+- Branch: `codex/ui-experience-2`; current HEAD: `c090ec0cfe3d485fb234257e9ec2ccbaeffd72f3`. Changes are uncommitted for the user to review and commit; no push was made.
+- The companion now pairs the Windows DWM Acrylic backdrop with lighter shared surface tints, modest edges and shadows; the opaque fallback can be selected with `PIXEL_GLASS_MODE=fallback`. `npm run dev:gpu` launches the GPU-enabled development path for comparison while the normal `npm run dev` retains `--disable-gpu`.
+- A completed task with unresolved postcondition checks is displayed as **Needs verification**; task storage and action permissions are not changed.
+- Local checks: `npm run typecheck` and `npm run build` passed. Full suite: **722 passed, 0 failed, 26 skipped (748 total; 38 files)**. Skips: 17 Playwright browser tests (Chromium missing), 7 NSIS tests (`makensis` missing), 2 opt-in foreground integration tests. The suite ran with a temporary test profile because the sandbox cannot write under the real home folder. JUnit: `artifacts/test-results/glass-repair-vitest.xml`.
+- GitHub Windows CI run 7 (`44159366265`, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`, containing the prior HEAD) failed before native build/package: 10 document tests depended on a developer-only Python path, and one worker cancellation test raced on a fixed sleep. The workflow and tests now provision Python 3.12 and use bounded worker-start polling. CI still needs a user push to rerun.
+- DWM readback before the CSS correction showed Pixel Acrylic and Workspace Mica on Windows build `26300.9974`; the supplied image is the old opaque UI. This edited build was not launched for a new screenshot, and GPU-enabled/package/installer acceptance remains open. Existing Crashpad child-process evidence does not establish a laptop GPU root cause.
+- Read `docs/validation/PIXEL_RELEASE_READINESS.md` for exact evidence and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for the next laptop steps. Earlier counts below are historical.
 
 ## Previous UI Experience 2.0 wave notes (historical)
 
