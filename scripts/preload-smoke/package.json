@@ -1,0 +1,6 @@
+{
+  "name": "pixel-preload-sandbox-smoke",
+  "private": true,
+  "type": "commonjs",
+  "main": "main.cjs"
+}

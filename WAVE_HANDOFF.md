@@ -1,6 +1,6 @@
 # Pixel implementation handoff
 
-Updated: 2026-11-16
+Updated: 2026-11-17
 
 ## Delivered in this tree
 
@@ -11,7 +11,9 @@ Updated: 2026-11-16
 - Compiled and connected C# UI Automation helper for foreground-window information, bounded semantic element search, exact unique enabled `InvokePattern` invocation, and exact present/absent postcondition checks. Timed-out/cancelled helpers are boundedly terminated; unconfirmed exit quarantines future calls and retains the desktop-input lease.
 - Optional cursor-follow presentation using spring motion and work-area clamping; it is independent of intelligence mode and pauses while expanded.
 - Project memory inspection, correction, deletion and JSON export; versioned skill drafts/review/activation/run history; durable daily routines with missed-run skip, serialization, cancellation, failure pause and one-time manual retry.
-- Windows CI for type checks, Chromium/NSIS tests, native-helper compilation and non-publishing distributions. Build logs, JUnit test results and package artifacts are uploaded by the workflow.
+- Windows CI for type checks, Chromium/NSIS tests, sandboxed preload IPC smoke, native-helper compilation and non-publishing distributions. Build logs, smoke/JUnit results and package artifacts are uploaded by the workflow.
+- The Electron preload is bundled with esbuild. Its complete local runtime graph includes the shared IPC registry, with only `electron` external. Dev, build, pack and dist all pass through `build:main`; the existing `window.cyps`/`window.cypsShell` contracts and sandbox settings remain unchanged.
+- Bundle tests cover external imports, shared-channel inclusion, both bridge names and security flags. A separate real-Electron sandbox IPC smoke command is available as `npm run test:preload-sandbox`.
 - A harmless Windows Forms UIA fixture and deterministic AgentExecutor/PermissionBroker/SQLite harness are available for a real Windows desktop.
 - Refreshed current-state report, Grok Bot mapping, Clicky mapping, runtime/security/skills documentation, Windows acceptance procedure, README and PROGRESS.
 
@@ -24,15 +26,16 @@ Updated: 2026-11-16
 - Packaging: `electron-builder.yml` copies `native/bin/PixelNative.exe` to `resources/native/PixelNative.exe`; `pack` and `dist` build the helper first.
 - Tests: `tests/tasks.test.ts`, `agent-executor.test.ts`, `native-agent-tools.test.ts`, `skills-routines.test.ts`, `memory.test.ts`, `safety.test.ts` and the existing browser, file, document and provider suites.
 
-## Validation performed
+## Validation performed on 2026-11-17
 
-- `npm run typecheck` passed. `npm run build` and `npm run build:native` passed.
-- Final full suite: **651 passed, 0 failed, 0 skipped across 25 files**. All 22 Chromium browser tests and 9 NSIS tests ran. The sandboxed test attempt could not reach its loopback fixture; the final run was authorized outside the sandbox.
-- `npm run pack` and `npm run dist` passed with publishing disabled. Outputs: unpacked app, NSIS installer, portable executable and ZIP. Package inspection confirmed the helper is present and Playwright's test-browser cache is excluded.
-- The Electron dev process exited before main startup logs or window creation (`2147483651`, signed `-2147483645`). No renderer/preload GUI behavior was observed.
+- `npm run typecheck`, `npm run build`, `npm run build:native` and `npm run pack` passed.
+- Full suite: **655 passed, 0 failed, 0 skipped across 26 files**. All 22 Chromium browser tests and all 9 NSIS tests ran.
+- The unpacked `app.asar` contains the current `dist/main/preload/index.js` byte-for-byte; it has no local CommonJS import and keeps only Electron external.
+- The hidden Electron sandbox smoke process exited with `2147483651` before app or preload logging. A desktop launch attempt exposed no Pixel window in this Codex session. The user reports their laptop's main process, window and React renderer now start, but final bridge injection/IPC acceptance has not yet been confirmed there.
+- The previous GPU/renderer child-process issue remains separate. Existing environment diagnostics identify Chromium startup/Crashpad failures before a window, but do not prove a root cause. The preload bundle change does not claim to fix GPU behavior.
 - The native helper and timeout/lease unit tests passed. The real fixture was not foregrounded in this desktop session, so `test-native-uia-e2e` did not invoke a control. Pixel approval-card/UIA action acceptance remains unverified.
 - Voice test capability output differed by execution context. No fixed local STT/TTS availability is claimed.
-- Windows CI was added but not run from this uncommitted tree. It runs only after CI is triggered; it uploads artifacts and never publishes a release.
+- Windows CI was not run from this local tree. It runs after CI is triggered; it uploads artifacts and never publishes a release.
 
 ## Remaining work and limits
 
@@ -48,4 +51,4 @@ Updated: 2026-11-16
 
 ## Git
 
-Branch: `main`. The implementation and documentation changes remain uncommitted, as requested. The user will commit and push.
+Branch: `main`. The focused bridge repair is committed locally at the user's request. No push or release was made; the commit SHA is included in the final report.

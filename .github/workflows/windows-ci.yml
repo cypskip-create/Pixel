@@ -63,6 +63,12 @@ jobs:
           npm run typecheck 2>&1 | Tee-Object artifacts/logs/typecheck.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Exercise the sandboxed preload bridge
+        shell: pwsh
+        run: |
+          npm run test:preload-sandbox 2>&1 | Tee-Object artifacts/logs/preload-sandbox.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run full automated test suite
         shell: pwsh
         run: |
@@ -92,5 +98,7 @@ jobs:
             artifacts/logs/**/*.log
             artifacts/logs/*.log
             artifacts/test-results/*.xml
+            artifacts/windows-acceptance/*.json
+            artifacts/windows-acceptance/*.log
             release/**
             native/bin/PixelNative.exe

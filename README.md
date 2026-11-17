@@ -18,6 +18,13 @@ durably; work interrupted by restart is restored as paused and is never resumed
 automatically. State-changing actions that lack postcondition evidence finish as
 **Needs verification**.
 
+The sandboxed preload is bundled from `src/preload/index.ts` into one
+`dist/main/preload/index.js` file. It inlines the shared IPC channel registry and
+leaves only Electron external, preserving the narrow `window.cyps` and
+`window.cypsShell` surfaces. Run `npm run test:preload-sandbox` to exercise those
+surfaces inside an Electron sandboxed window; see the Windows acceptance guide
+for live settings and packaged-app checks.
+
 Use [`docs/research/PIXEL_CURRENT_STATE.md`](docs/research/PIXEL_CURRENT_STATE.md)
 for the source-backed feature inventory. The latest command results, exact test
 totals, release blockers and laptop-side commands are in
@@ -192,6 +199,7 @@ That is what keeps a later migration to Tauri a shell-only change.
 
 ```powershell
 npm test          # Full Vitest suite; see the release-readiness report for current totals
+npm run test:preload-sandbox  # Electron sandbox bridge and IPC integration smoke test
 npm run verify    # typecheck + tests + both builds
 ```
 
@@ -202,10 +210,10 @@ tool may run, and the invariants that keep the processes separated.
 ## Continuous integration
 
 `.github/workflows/windows-ci.yml` checks types, installs Playwright Chromium,
-runs the full test suite, compiles `PixelNative.exe`, and builds the unpacked app,
-portable executable and NSIS installer on Windows. It uploads logs, JUnit test
-results and build artifacts for 14 days. The workflow builds artifacts only and
-does not publish releases.
+runs the full test suite and sandboxed preload smoke, compiles `PixelNative.exe`,
+and builds the unpacked app, portable executable and NSIS installer on Windows.
+It uploads logs, smoke/JUnit test results and build artifacts for 14 days. The
+workflow builds artifacts only and does not publish releases.
 
 ## What Pixel can do
 

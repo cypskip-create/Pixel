@@ -1,6 +1,6 @@
 # Pixel Windows acceptance procedure
 
-This is the manual gate for behavior that type checks and headless tests cannot prove. On 2026-11-16, Electron's Chromium GUI failed before creating a window (`-2147483645`). No orb, conversation UI, task strip, approval card, cursor-follow behavior or installer lifecycle passed acceptance here. Treat every GUI and distribution step below as unverified until run on an interactive Windows desktop. See [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for exact local evidence, test totals and the current commit.
+This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that a later Windows run successfully created Pixel's window and painted React, then exposed a preload module-resolution error. The focused repair bundles the preload, but this Codex desktop could not independently run Electron's GUI smoke app (`2147483651` before app startup logs). Verify the bridge and full UI on an interactive Windows desktop; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local evidence and test totals.
 
 ## Automated checks before opening Pixel
 
@@ -11,9 +11,19 @@ npm ci
 npx playwright install chromium
 npm run typecheck
 npm test
+npm run test:preload-sandbox
 npm run build
 npm run build:native
 ```
+
+`test:preload-sandbox` launches a hidden Electron window with `sandbox`,
+`contextIsolation`, `nodeIntegration: false` and `webSecurity` enabled. It checks
+`window.cyps` and `window.cypsShell`, Settings IPC, task and permission events,
+permission responses, shell events, and the absence of raw Node/IPC globals. It
+uses harmless stub IPC handlers and a test-only API-key placeholder. It writes
+`artifacts\windows-acceptance\preload-sandbox-smoke.json` and
+`preload-sandbox-smoke.log` on success. A failure before the Electron app starts
+is an environment failure, not a pass.
 
 Capture a reproducible local evidence bundle from the repository root:
 
@@ -29,6 +39,8 @@ npm run typecheck 2>&1 | Tee-Object (Join-Path $artifactDir 'typecheck.log')
 if ($LASTEXITCODE -ne 0) { throw 'Type check failed' }
 npm test -- --reporter=default --reporter=junit --outputFile.junit="$artifactDir/vitest-junit.xml" 2>&1 | Tee-Object (Join-Path $artifactDir 'tests.log')
 if ($LASTEXITCODE -ne 0) { throw 'Test suite failed' }
+npm run test:preload-sandbox 2>&1 | Tee-Object (Join-Path $artifactDir 'preload-sandbox.log')
+if ($LASTEXITCODE -ne 0) { throw 'Electron sandbox preload smoke test failed' }
 npm run build 2>&1 | Tee-Object (Join-Path $artifactDir 'build.log')
 if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
 npm run build:native 2>&1 | Tee-Object (Join-Path $artifactDir 'native-build.log')
@@ -70,6 +82,45 @@ If the build host sets `ELECTRON_RUN_AS_NODE`, remove it in that shell before te
 6. In Settings, select **Follow cursor**. Confirm the compact orb follows without covering the pointer, stays within each display's work area, pauses while expanded, and returns to its remembered position when stationary mode is restored. Repeat with reduced motion and mixed DPI.
 
 The repository's previous environment report explains why a sandboxed Electron/Chromium process may fail before Pixel code runs: [Electron constraints](../ELECTRON-CONSTRAINTS.md). Treat that report as environment-specific; verify on the target laptop.
+
+## Preload bridge acceptance
+
+The compiled preload must be a single bundled file at
+`dist\main\preload\index.js`. The build and pack steps verify that its local
+runtime dependency graph is bundled and that the unpacked `app.asar` contains
+the same preload. On the target laptop, also run `npm run test:preload-sandbox`
+and require a JSON report with `"ok": true`. This uses a real Electron
+sandboxed `BrowserWindow` and harmless stub IPC handlers; it does not modify app
+settings or contact DeepSeek.
+
+Then run `npm run dev` and inspect the Electron startup log and renderer console.
+There must be no preload error or missing-native-bridge warning. In the renderer
+console, run:
+
+```javascript
+({
+  cyps: typeof window.cyps,
+  settingsGet: typeof window.cyps?.settings?.get,
+  tasks: typeof window.cyps?.tasks?.onUpdate,
+  permissions: typeof window.cyps?.permissions?.respond,
+  shell: typeof window.cypsShell?.voiceCapability,
+  settings: await window.cyps?.settings?.get(),
+  hasApiKey: await window.cyps?.settings?.hasApiKey(),
+})
+```
+
+Expect `cyps` to be `"object"`, each listed method to be `"function"`, Settings
+to return its configuration without a key value, and `hasApiKey` to be boolean.
+Open Settings and confirm it loads. Do not replace an existing key for this
+check. If no test key is configured, use a disposable DeepSeek test key in
+Settings and verify the configured indicator survives restart; never paste the
+key into DevTools, logs or task text. With a configured key, send the harmless
+prompt `Reply exactly: PIXEL BRIDGE TEST OK` and verify the response appears.
+Check permission cards and the emergency stop with a harmless test task. Repeat
+the preload/Settings smoke on `release\win-unpacked\Pixel.exe`; confirm the
+startup log has no `preload-error` and the bridge methods are available there.
+Keep `--disable-gpu` as a development diagnostic; this bridge check does not
+verify packaged GPU behavior.
 
 ## Ordered first-release validation
 

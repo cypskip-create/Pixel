@@ -1,6 +1,6 @@
 # Pixel progress
 
-Updated: 2026-11-16. Version: 0.2.1.
+Updated: 2026-11-17. Version: 0.2.1.
 
 ## Current implementation
 
@@ -24,17 +24,19 @@ The existing Electron + React + TypeScript product is retained. The local change
 
 ## Validation for this tree
 
-Checkpoint run on 2026-11-16:
+Preload bridge checkpoint run on 2026-11-17:
 
 - `npm run typecheck`: passed for renderer and main TypeScript projects.
-- `npm test`: **651 passed, 0 failed, 0 skipped across 25 files**. All 22 Chromium browser tests and all 9 NSIS tests ran. Chromium needed package-local installation; the complete run needed loopback access for its local browser fixture.
-- `npm run build` and `npm run build:native`: passed. `PixelNative.exe` compiled with the Windows .NET Framework compiler.
-- `npm run pack`: passed after excluding Playwright's local test-browser cache. The unpacked package contains `Pixel.exe` and `resources/native/PixelNative.exe` and does not ship the test cache.
-- `npm run dist`: passed with `--publish never`; it produced the NSIS installer, portable executable and unpacked ZIP.
-- `npm run dev`: Vite started; Electron exited before main-process logs or a window appeared (`2147483651`, signed `-2147483645`). Renderer/preload initialization and visible app behavior remain unverified.
-- The harmless UIA fixture and AgentExecutor harness are prepared. The fixture did not enter the foreground desktop session here, so the harness stopped before invoking any control. Actual Pixel approval cards and a real UIA postcondition remain unverified.
-- Voice availability is probed at runtime. Test output varied by execution context, so no fixed STT/TTS availability is claimed.
-- Windows CI is configured but was not run from this uncommitted tree. It uploads logs, JUnit results and distributions and does not publish releases.
+- `npm test`: **655 passed, 0 failed, 0 skipped across 26 files**. All 22 Chromium browser tests and all 9 NSIS tests ran. The browser fixture used local loopback access.
+- `npm run build`: passed. `npm run build:native`: passed and compiled `PixelNative.exe`.
+- `npm run pack`: passed and produced `release/win-unpacked/Pixel.exe` plus the packaged application.
+- The esbuild preload graph contains `src/preload/index.ts` and `src/shared/channels.ts`; Electron is the only external runtime import. The unpacked `app.asar` preload is byte-for-byte identical to `dist/main/preload/index.js` and has no local CommonJS imports.
+- `npm run test:preload-sandbox`: **not verified** in this Codex desktop environment. Electron exited with `2147483651` before the smoke app emitted startup or preload logs. A CUA launch attempt exposed no Pixel window. The user separately reports that the Electron main process, window and React renderer now start on the target laptop; the new preload bridge still requires laptop-side runtime confirmation.
+- The Windows Forms UIA fixture and AgentExecutor harness are prepared. Real Pixel approval cards, settings, encrypted key use, DeepSeek conversation and the real-control UIA flow remain laptop acceptance items.
+- Voice availability is probed at runtime and varies by machine and execution context; no fixed STT/TTS availability is claimed.
+- Windows CI is configured but was not run from this local tree. It runs the sandbox preload IPC smoke alongside the type checks, full suite, native compilation and distributions; logs, smoke/JUnit results and packages are uploaded and no release is published.
+
+The earlier packaged GPU/renderer child-process failure remains a separate unverified issue. Existing diagnostics record Chromium/Crashpad startup failures before a window appears; those results do not identify the preload as the cause and the preload repair is not evidence of GPU recovery. Keep `--disable-gpu` as a development diagnostic while the packaged GPU path is tested on the target laptop.
 
 See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), [the current-state report](docs/research/PIXEL_CURRENT_STATE.md) and [Windows acceptance procedure](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md) for exact evidence and laptop-side steps.
 
@@ -55,8 +57,8 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
 
 ### Unverified
 
-- Electron GUI, renderer/preload runtime, floating orb, expanded conversation, task/approval UI, cursor-follow, and the live Pixel UIA approval/action flow.
-- Launch of unpacked and portable packages; clean install, upgrade, uninstall and user-data preservation.
+- Final `window.cyps`/`window.cypsShell` injection and IPC behavior in a running Electron sandbox, Settings and encrypted-key UI, DeepSeek conversation, floating orb, task/approval UI, cursor-follow and the live Pixel UIA approval/action flow. The user reports that the main process, window and React renderer now start on the target laptop.
+- Runtime launch of the unpacked and portable packages; clean install, upgrade, uninstall and user-data preservation. The unpacked archive contains the verified bundled preload, but this environment could not launch its Electron window.
 - The GitHub Actions workflow itself; it becomes runnable after the user pushes this branch.
 
 ### Missing
