@@ -64,6 +64,7 @@ import {
 } from './agent/runtime';
 import { BUILTIN_TOOLS, ToolRegistry } from './agent/tools';
 import { HistoryStore } from './history/store';
+import { SURFACE_SIZES } from '../shared/surfaces';
 import { TaskStore } from './tasks/store';
 import { SkillStore } from './skills/store';
 import { LocalRoutineScheduler, RoutineStore } from './routines';
@@ -500,7 +501,18 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   /* ------------------------------ window ----------------------------- */
 
   ipcMain.handle(CHANNELS.windowSetSurface, (_event, surface: Surface): void => {
-    windows.setSurface(surface);
+    if (typeof surface === 'string' && Object.prototype.hasOwnProperty.call(SURFACE_SIZES, surface)) {
+      windows.setSurface(surface);
+    }
+  });
+
+  ipcMain.handle(CHANNELS.windowSetLayout, (event, surface: Surface, size: unknown): void => {
+    if (event.sender !== windows.getMainWindow()?.webContents) return;
+    if (typeof surface !== 'string' || !Object.prototype.hasOwnProperty.call(SURFACE_SIZES, surface)) return;
+    if (typeof size !== 'object' || size === null) return;
+    const candidate = size as { width?: unknown; height?: unknown };
+    if (typeof candidate.width !== 'number' || typeof candidate.height !== 'number') return;
+    windows.setLayout(surface, { width: candidate.width, height: candidate.height });
   });
 
   ipcMain.handle(CHANNELS.windowSetExpanded, (_event, expanded: boolean): void => {

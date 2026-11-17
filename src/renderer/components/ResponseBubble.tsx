@@ -89,6 +89,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
   return (
     <section
       aria-label="Pixel response"
+      data-layout-panel
       className="glass animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
       style={{ maxHeight: 'min(46vh, 320px)' }}
     >

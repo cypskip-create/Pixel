@@ -7,15 +7,17 @@
  *  - It starts near the top-centre of the primary display's work area.
  *  - Its position is remembered, and always clamped so it cannot be dragged or
  *    restored off-screen (including when a monitor is unplugged).
- *  - Sizes are driven by the current surface; the window is small by design.
+ *  - Sizes follow renderer-measured panels, clamped to compact native bounds.
  */
 
 import { BrowserWindow, screen } from 'electron';
 import type { Rectangle, Display } from 'electron';
 import { join } from 'node:path';
 import type { Surface, VisualMode } from '../shared/types';
+import { CHANNELS } from '../shared/channels';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
+import { fitPresentationSize, resizePresentationBounds } from '../shared/presentationLayout';
 import {
   companionTarget,
   createFollower,
@@ -118,6 +120,10 @@ export class WindowManager {
       this.deps.onPositionChange({ x, y });
     });
 
+    win.on('blur', () => {
+      if (!win.isDestroyed()) win.webContents.send(CHANNELS.windowFocusLost);
+    });
+
     win.on('closed', () => {
       this.main = null;
     });
@@ -202,6 +208,15 @@ export class WindowManager {
    * the orb does not jump when it expands into the input bar.
    */
   setSurface(surface: Surface): void {
+    this.setLayout(surface, SURFACE_SIZES[surface]);
+  }
+
+  /**
+   * Apply one renderer-measured panel layout. The measured request is clamped
+   * to a compact width and the current display's work area before it reaches
+   * native window bounds.
+   */
+  setLayout(surface: Surface, requestedSize: { width: number; height: number }): void {
     this.surface = surface;
     const win = this.main;
     if (!win || win.isDestroyed()) {
@@ -217,22 +232,11 @@ export class WindowManager {
     }
 
     const current = win.getBounds();
-    const size = SURFACE_SIZES[surface];
     const display = screen.getDisplayMatching(current);
-    const centredX = Math.round(current.x + (current.width - size.width) / 2);
-    const target = clampToWorkArea(
-      { x: centredX, y: current.y },
-      size,
-      display,
-      false,
-    );
+    const size = fitPresentationSize(requestedSize, display.workArea);
+    const target = resizePresentationBounds(current, size, display.workArea);
 
-    win.setBounds({
-      x: target.x,
-      y: target.y,
-      width: size.width,
-      height: size.height,
-    });
+    win.setBounds(target);
 
     if (!win.isVisible()) win.showInactive();
     this.deps.onPositionChange({ x: target.x, y: target.y });

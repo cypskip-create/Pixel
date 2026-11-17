@@ -2,6 +2,38 @@
 
 Updated: 2026-11-17. Version: 0.2.1.
 
+## UI Experience 2.0 — Checkpoint 1
+
+Branch: `codex/ui-experience-2` (branched from `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`).
+
+- Removed the duplicate mode picker. `InputBar` is now its only mount point.
+- Mode choices now have menu-radio semantics, keyboard arrow/Home/End navigation,
+  Escape dismissal, focus return and outside dismissal both within Pixel and
+  when the native window loses focus.
+- Added one measured panel-layout path from renderer `ResizeObserver` through a
+  typed preload method to a main-process bounds clamp. The native window grows
+  to the visible stack, keeps its horizontal center, and stays inside the
+  active work area; renderer scrolling handles content taller than that area.
+- The layout reports are coalesced and ignore tiny changes to limit native
+  resizes during streamed responses. The width is bounded at 520 logical pixels.
+- Added geometry and menu interaction tests. Unit tests cannot verify real
+  Electron clipping, mixed-DPI layout or multi-monitor behavior; those remain
+  laptop acceptance checks.
+
+Validation for this checkpoint is recorded below after the full suite/build.
+Do not infer completion of pinned-bar or separate-cursor work from this
+checkpoint; those are subsequent checkpoints.
+
+### Checkpoint 1 validation
+
+- `npm run typecheck`: passed.
+- `npm test -- --reporter=dot`: **669 passed, 0 failed, 26 skipped across 30 files (695 total)**. The Playwright browser is not installed in this runner and NSIS is unavailable; the opt-in native foreground integration checks also remain skipped.
+- `npm run build`: passed (main TypeScript, bundled sandbox preload, and Vite renderer).
+- `git diff --check`: passed.
+- The test suite used a temporary `USERPROFILE` inside the writable project because existing tests create fixture directories under `os.homedir()`; this avoids the runner's protected user-profile path.
+- Native Electron screenshots at the requested display sizes/scales are not available from this rebuilt branch yet. The visible Pixel window found during inspection belongs to a separate checkout (`C:\dev\Pixel`) and was left untouched. Native clipping, DPI, and multi-monitor checks remain unverified.
+- A branch-local Electron launch using the separate Vite port 5200 and `--disable-gpu` exited with code 0 before creating a targetable window or startup log. No GUI behavior is claimed from that attempt; the existing single-instance Pixel process belongs to `C:\dev\Pixel`.
+
 ## Current implementation
 
 The existing Electron + React + TypeScript product is retained. The local changes extend its modular main process and settings UI.
@@ -25,7 +57,7 @@ The existing Electron + React + TypeScript product is retained. The local change
 - The task strip shows verified steps distinctly and can display the persisted final response after restart.
 - Settings now manages the DeepSeek API key through existing encrypted main-process IPC: masked draft input with optional reveal, save/change, confirmed removal, configured status and a user-triggered connection test with backend-category feedback. The stored key is never returned to the renderer or written to AppSettings, localStorage, task history or logs.
 
-## Validation for this tree
+## Prior checkpoint validation (branch base)
 
 Context-aware Windows foreground tracking checkpoint:
 

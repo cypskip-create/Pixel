@@ -6,14 +6,12 @@ import type {
   Mode,
   PermissionDecision,
   PermissionRequest,
-  Surface,
   TaskRecord,
 } from '@shared/types';
 import { deriveAssistantState } from '@shared/companion-state';
 import { getModeDescriptor } from '@shared/types';
 import { Avatar } from '@/components/Avatar';
 import { InputBar } from '@/components/InputBar';
-import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { PermissionCard } from '@/components/PermissionCard';
 import { ResponseBubble } from '@/components/ResponseBubble';
 import { SettingsPanel } from '@/components/SettingsPanel';
@@ -22,6 +20,7 @@ import { BridgeContext } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useDrag } from '@/hooks/useDrag';
 import { useMotionPolicy } from '@/hooks/useMotion';
+import { usePresentationLayout } from '@/hooks/usePresentationLayout';
 import { useSettings } from '@/hooks/useSettings';
 import { readBridge, safeSubscribe } from '@/lib/bridge';
 import { resolveSurface } from '@/lib/surface';
@@ -92,7 +91,6 @@ function Companion(): React.JSX.Element {
   const drag = useDrag();
   const reducedMotion = useMotionPolicy(settings.companion.reducedMotion);
 
-  const [surface, setSurface] = useState<Surface>('idle');
   const [inputOpen, setInputOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
@@ -105,6 +103,7 @@ function Companion(): React.JSX.Element {
   const [stopped, setStopped] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
 
   const mode = settings.companion.mode;
   const modeDescriptor = getModeDescriptor(mode);
@@ -142,17 +141,16 @@ function Companion(): React.JSX.Element {
     [permission, hasActiveTask, bubbleVisible, inputOpen],
   );
 
-  // Tell the shell to resize for the current surface.
-  useEffect(() => {
-    if (bridge.kind !== 'ready') return;
-    const api = bridge.bridge.window;
-    if (typeof api.setSurface !== 'function') return;
-    void api.setSurface(nextSurface).catch(() => undefined);
-  }, [bridge, nextSurface]);
+  usePresentationLayout(layoutRef, nextSurface);
 
   useEffect(() => {
-    setSurface(nextSurface);
-  }, [nextSurface]);
+    if (bridge.kind !== 'ready') return;
+    try {
+      return bridge.bridge.window.onFocusLost(() => setModeMenuOpen(false));
+    } catch {
+      return undefined;
+    }
+  }, [bridge]);
 
   /* --------------------------- subscriptions ------------------------ */
 
@@ -447,6 +445,19 @@ function Companion(): React.JSX.Element {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (modeMenuOpen) {
+          setModeMenuOpen(false);
+          return;
+        }
+        if (pendingMode !== null) {
+          setPendingMode(null);
+          return;
+        }
+        if (notice !== null) {
+          setNotice(null);
+          return;
+        }
+        if (permission !== null) return;
         collapseRef.current();
         return;
       }
@@ -457,7 +468,7 @@ function Companion(): React.JSX.Element {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [modeMenuOpen, pendingMode, notice, permission]);
 
   /* ------------------------------ render ---------------------------- */
 
@@ -477,8 +488,9 @@ function Companion(): React.JSX.Element {
 
   return (
     <div
-      className={`${rootClass} flex h-screen w-screen flex-col items-center justify-start overflow-hidden bg-transparent pt-2`}
-      data-surface={surface}
+      ref={layoutRef}
+      className={`${rootClass} flex h-screen w-screen flex-col items-center justify-start overflow-x-hidden overflow-y-auto bg-transparent pt-2`}
+      data-surface={nextSurface}
     >
       {/* Screen readers hear the answer as it arrives. */}
       <p aria-live="polite" aria-atomic="false" className="sr-only">
@@ -497,7 +509,7 @@ function Companion(): React.JSX.Element {
         </div>
       ) : null}
 
-      {surface === 'idle' ? (
+      {nextSurface === 'idle' ? (
         <button
           type="button"
           onPointerDown={settings.companion.visualMode === 'stationary' ? drag.onPointerDown : undefined}
@@ -516,13 +528,15 @@ function Companion(): React.JSX.Element {
         </button>
       ) : (
         <div
+          data-layout-panel
           className="animate-slide-down flex w-full flex-col items-center gap-2 px-2"
           data-no-drag
         >
           {stopped ? (
             <div
               role="alert"
-              className="flex w-full max-w-[500px] items-center justify-between gap-2 rounded-xl border border-rose-400/35 bg-rose-500/15 px-3 py-2 text-[12px] text-rose-100"
+              data-layout-panel
+              className="flex w-full max-w-[460px] items-center justify-between gap-2 rounded-xl border border-rose-400/35 bg-rose-500/15 px-3 py-2 text-[12px] text-rose-100"
             >
               <span className="flex items-center gap-1.5">
                 <ShieldAlert aria-hidden="true" className="size-4" />
@@ -541,7 +555,8 @@ function Companion(): React.JSX.Element {
           {notice !== null ? (
             <div
               role="status"
-              className="w-full max-w-[500px] rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-[12px] text-[var(--color-ink-soft)]"
+              data-layout-panel
+              className="w-full max-w-[460px] rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-[12px] text-[var(--color-ink-soft)]"
             >
               {notice}
             </div>
@@ -570,7 +585,8 @@ function Companion(): React.JSX.Element {
             <div
               role="alertdialog"
               aria-label="Confirm mode change"
-              className="w-full max-w-[500px] rounded-2xl border border-amber-400/35 bg-[var(--color-glass-raised)] p-3 text-[12px] text-[var(--color-ink)]"
+              data-layout-panel
+              className="w-full max-w-[460px] rounded-2xl border border-amber-400/35 bg-[var(--color-glass-raised)] p-3 text-[12px] text-[var(--color-ink)]"
             >
               <p className="mb-1 font-semibold">
                 Switch to {getModeDescriptor(pendingMode).label}?
@@ -610,7 +626,7 @@ function Companion(): React.JSX.Element {
             />
           ) : null}
 
-          <div className="relative">
+          <div className="relative" data-layout-panel>
             <InputBar
               mode={mode}
               state={assistantState}
@@ -634,16 +650,6 @@ function Companion(): React.JSX.Element {
               busy={busy}
               disabled={bridge.kind !== 'ready'}
             />
-
-            {modeMenuOpen ? (
-              <ModeSwitcher
-                current={mode}
-                onRequestMode={requestMode}
-                disabled={busy}
-                variant="popover"
-                onDismiss={() => setModeMenuOpen(false)}
-              />
-            ) : null}
 
             <div className="mt-1.5 flex items-center justify-center gap-1">
               <button

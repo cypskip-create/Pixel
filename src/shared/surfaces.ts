@@ -1,13 +1,13 @@
 /**
  * Geometry of the floating companion surfaces.
  *
- * Shared because both processes care: the main process sizes the window and the
- * renderer lays content out to match. Keeping one table prevents the two from
- * drifting, which would show up as clipped or floating text.
+ * Shared because both processes care: the main process supplies safe fallback
+ * sizes while the renderer reports the measured visible panel stack. Keeping
+ * one table prevents the native shell and renderer from drifting apart.
  *
  * These numbers are deliberately small. Pixel is a companion that floats at the
- * top of the screen, not a dashboard and not a chat application: the largest
- * surface is 480px wide.
+ * top of the screen, not a dashboard and not a chat application. The measured
+ * layout controller keeps the interactive width at or below 520 logical px.
  */
 
 import type { Surface } from './types';

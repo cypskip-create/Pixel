@@ -125,3 +125,23 @@ describe('window surface sizes', () => {
     expect(SURFACE_SIZES.idle.width).toBeLessThanOrEqual(128);
   });
 });
+
+describe('central companion panel presentation', () => {
+  it('mounts the operating mode popover only from InputBar', () => {
+    const app = readFileSync(join(SRC, 'renderer', 'App.tsx'), 'utf8');
+    const inputBar = readFileSync(join(SRC, 'renderer', 'components', 'InputBar.tsx'), 'utf8');
+    expect(app).not.toMatch(/<ModeSwitcher\b/);
+    expect(inputBar.match(/<ModeSwitcher\b/g)).toHaveLength(1);
+  });
+
+  it('measures renderer panels and routes a bounded layout through the bridge', () => {
+    const hook = readFileSync(join(SRC, 'renderer', 'hooks', 'usePresentationLayout.ts'), 'utf8');
+    const windowSource = readFileSync(join(SRC, 'main', 'window.ts'), 'utf8');
+    const ipcSource = readFileSync(join(SRC, 'main', 'ipc.ts'), 'utf8');
+    expect(hook).toContain('ResizeObserver');
+    expect(hook).toContain('setLayout(surface');
+    expect(windowSource).toContain('fitPresentationSize(requestedSize');
+    expect(windowSource).toContain('CHANNELS.windowFocusLost');
+    expect(ipcSource).toContain('CHANNELS.windowSetLayout');
+  });
+});

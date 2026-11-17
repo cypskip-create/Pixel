@@ -78,6 +78,8 @@ const bridge: CypsBridge = {
   window: {
     setSurface: (surface: Surface) =>
       ipcRenderer.invoke(CH.windowSetSurface, surface) as Promise<void>,
+    setLayout: (surface: Surface, size: { width: number; height: number }) =>
+      ipcRenderer.invoke(CH.windowSetLayout, surface, size) as Promise<void>,
     setExpanded: (expanded: boolean) =>
       ipcRenderer.invoke(CH.windowSetExpanded, expanded) as Promise<void>,
     setPosition: (x: number, y: number) =>
@@ -98,6 +100,7 @@ const bridge: CypsBridge = {
     closeSettings: () => ipcRenderer.invoke(CH.windowCloseSettings) as Promise<void>,
     setIgnoreMouseEvents: (ignore: boolean) =>
       ipcRenderer.invoke(CH.windowSetIgnoreMouseEvents, ignore) as Promise<void>,
+    onFocusLost: (handler: () => void) => subscribe(CH.windowFocusLost, handler),
   },
 
   chat: {

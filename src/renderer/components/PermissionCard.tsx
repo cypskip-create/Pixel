@@ -43,6 +43,7 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
   return (
     <section
       role="alertdialog"
+      data-layout-panel
       aria-modal="false"
       aria-labelledby={`perm-title-${request.id}`}
       aria-describedby={`perm-body-${request.id}`}

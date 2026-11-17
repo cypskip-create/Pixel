@@ -765,6 +765,8 @@ export interface CypsBridge {
   };
   window: {
     setSurface(surface: Surface): Promise<void>;
+    /** Report measured companion content; the shell clamps it to the active work area. */
+    setLayout(surface: Surface, size: { width: number; height: number }): Promise<void>;
     setExpanded(expanded: boolean): Promise<void>;
     setPosition(x: number, y: number): Promise<void>;
     getPosition(): Promise<{ x: number; y: number }>;
@@ -774,6 +776,7 @@ export interface CypsBridge {
     openSettings(): Promise<void>;
     closeSettings(): Promise<void>;
     setIgnoreMouseEvents(ignore: boolean): Promise<void>;
+    onFocusLost(handler: () => void): () => void;
   };
   chat: {
     send(request: ChatRequest): Promise<{ requestId: string }>;

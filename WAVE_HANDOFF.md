@@ -2,6 +2,29 @@
 
 Updated: 2026-11-17
 
+## Active work: UI Experience 2.0
+
+- Dedicated local branch: `codex/ui-experience-2`, starting at
+  `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`.
+- Checkpoint 1 implements the single measured companion panel stack and one
+  accessible mode selector. It has not yet been visually accepted on the
+  target laptop.
+- Current branch validation and commit identity will be recorded in the latest
+  checkpoint section below. Historical validation counts below describe the
+  tree before this branch and are not the current totals.
+- Checkpoint 1 local validation: typecheck/build/diff-check passed; full tests
+  **669 passed, 0 failed, 26 skipped (695 total; 30 files)**. Browser tests
+  need Playwright Chromium, NSIS tests need `makensis`, and the target-window
+  integration suite is opt-in. The test run redirected `USERPROFILE` into the
+  workspace for fixture writes. No target-branch native screenshot was taken.
+- The running Pixel UI observed during this work is from `C:\dev\Pixel`, a
+  different checkout; it was not modified or counted as acceptance evidence.
+- A separate Vite server on port 5200 and a branch-local Electron launch with
+  `--disable-gpu` did not produce a targetable branch window (Electron exited
+  0 before startup logging). This is an unverified GUI attempt, not a pass.
+- Do not begin unrelated computer-control, drawing, cloud-computer or Pixel
+  Code work during this UI/history/search wave.
+
 ## Delivered in this tree
 
 - Durable SQLite task snapshots/events, Zod contracts, conservative restart recovery, pause/resume/cancel, task budgets, verification evidence and a compact execution timeline.
@@ -26,7 +49,7 @@ Updated: 2026-11-17
 - Packaging: `electron-builder.yml` copies `native/bin/PixelNative.exe` to `resources/native/PixelNative.exe`; `pack` and `dist` build the helper first.
 - Tests: `tests/tasks.test.ts`, `agent-executor.test.ts`, `native-agent-tools.test.ts`, `skills-routines.test.ts`, `memory.test.ts`, `safety.test.ts` and the existing browser, file, document and provider suites.
 
-## Validation performed on 2026-11-17
+## Validation performed for the preceding checkpoint on 2026-11-17
 
 - `npm run typecheck`, `npm run build`, `npm run build:native` and `npm run pack` passed.
 - Full suite: **655 passed, 0 failed, 0 skipped across 26 files**. All 22 Chromium browser tests and all 9 NSIS tests ran.
@@ -49,6 +72,6 @@ Updated: 2026-11-17
 - Browser private-network checks detect some unsafe connections after the connection begins; preventing the network request itself requires a controlled egress proxy.
 - The current release readiness decision and exact artifact sizes are in [docs/validation/PIXEL_RELEASE_READINESS.md](docs/validation/PIXEL_RELEASE_READINESS.md).
 
-## Git
+## Current branch Git status
 
-Branch: `main`. The focused bridge repair is committed locally at the user's request. No push or release was made; the commit SHA is included in the final report.
+Branch: `codex/ui-experience-2`. Checkpoint commits are local only; no push or release is requested.

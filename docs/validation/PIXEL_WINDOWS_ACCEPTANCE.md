@@ -274,6 +274,36 @@ that owns its visible top-level window.
 
 On a test profile, validate unpacked launch, portable launch, clean install, upgrade over the previous Pixel identity, uninstall and user-data preservation. Do not use the account's only data copy. Preserve the existing appId, NSIS GUID and legacy `%APPDATA%\cyps` migration behavior. Attach `scripts/diagnose-installer.ps1` output and startup logs when a case fails. SmartScreen reputation and signing status must be reported as observed; never promise them from a build artifact.
 
+## UI Experience 2.0 — Checkpoint 1 panel-layout acceptance
+
+Run these steps in an interactive Windows session after building the current
+branch. The geometry unit tests are not a substitute for this visual check.
+
+1. Start Pixel from the checked-out project with `npm run dev`; confirm there
+   is one companion window and no renderer/preload error.
+2. Expand the input and open the mode selector. Confirm exactly one selector
+   appears, all three modes and descriptions are visible, and the panel is not
+   clipped by the native window.
+3. Use arrow keys and Home/End to move selection, then Escape. Confirm the menu
+   closes and focus returns to the mode trigger. Reopen it and click elsewhere
+   in Pixel; confirm it closes. Reopen it and switch focus to another app;
+   confirm native focus loss closes it without refocusing Pixel.
+4. Display a long response and open a running task or approval card alongside
+   the other visible panels. Confirm they stack without overlap. If the stack
+   exceeds available work-area height, confirm the Pixel panel scrolls and
+   clicks outside the actual native bounds reach the underlying application.
+5. Repeat at 1366×768 and the available 1920×1080/2560×1440 display sizes, at
+   100%, 125% and 150% scaling, including a secondary monitor with negative
+   coordinates where available. Record the monitor arrangement and scaling.
+6. Save a screenshot of the expanded mode selector and the combined response/
+   task or approval layout. Record any clipping, overlap, click interception,
+   scrollbar placement or focus-return failures.
+
+The 2026-11-17 branch run passed the geometry and DOM interaction tests, but
+has not yet produced a screenshot from this rebuilt branch. Treat all listed
+native visual/DPI/monitor steps as **unverified** until they are completed on
+the laptop.
+
 ## Report template
 
 ```text

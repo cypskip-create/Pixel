@@ -15,6 +15,8 @@ export const CHANNELS = {
   settingsTestConnection: 'settings:testConnection',
 
   windowSetSurface: 'window:setSurface',
+  windowSetLayout: 'window:setLayout',
+  windowFocusLost: 'window:focusLost',
   windowSetExpanded: 'window:setExpanded',
   windowSetPosition: 'window:setPosition',
   windowGetPosition: 'window:getPosition',
