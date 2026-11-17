@@ -53,16 +53,23 @@ async function main() {
 
   const before = await helper.call('foreground_window', {});
   assert(before?.title === fixtureTitle, 'The harmless fixture must be the foreground window; no task action was run.');
+  const selectedWindow = {
+    targetWindowId: before.windowId,
+    expectedWindowTitle: before.title,
+    expectedProcessId: before.pid,
+    expectedProcessName: before.processName,
+  };
   const buttonSearch = await helper.call('find_elements', {
     text: buttonName,
     roles: ['Button'],
     maxResults: 5,
+    ...selectedWindow,
   });
   assert(buttonSearch.window.title === fixtureTitle, 'The fixture lost foreground before the button search.');
   assert(buttonSearch.elements.length === 1 && buttonSearch.elements[0]?.name === buttonName, 'The fixture button was not uniquely identifiable.');
   const initialState = await helper.call('verify_element_state', {
     selector: resultName,
-    expectedWindowTitle: fixtureTitle,
+    ...selectedWindow,
     state: 'present',
     role: 'Text',
   });
@@ -88,18 +95,18 @@ async function main() {
 
   const outcomes = [
     toolOutcome('get_foreground_window', {}, 1),
-    toolOutcome('find_ui_elements', { text: buttonName, roles: ['Button'], maxResults: 5 }, 2),
-    toolOutcome('find_ui_elements', { text: resultName, roles: ['Text'], maxResults: 5 }, 3),
+    toolOutcome('find_ui_elements', { text: buttonName, roles: ['Button'], maxResults: 5, ...selectedWindow }, 2),
+    toolOutcome('find_ui_elements', { text: resultName, roles: ['Text'], maxResults: 5, ...selectedWindow }, 3),
     toolOutcome('invoke_ui_element', {
       selector: buttonName,
       role: 'Button',
-      expectedWindowTitle: fixtureTitle,
+      ...selectedWindow,
       expectedResult: { selector: resultName, role: 'Text', state: 'present' },
     }, 4),
     toolOutcome('verify_ui_state', {
       selector: resultName,
       role: 'Text',
-      expectedWindowTitle: fixtureTitle,
+      ...selectedWindow,
       state: 'present',
     }, 5),
     answerOutcome('The harmless UIA action completed and its postcondition was verified.'),

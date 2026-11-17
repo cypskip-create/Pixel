@@ -214,7 +214,7 @@ export async function start(): Promise<void> {
 
   const provider = new RuntimeProvider(() => store.getApiKey());
 
-  const controller = registerIpcHandlers({
+  const controller = await registerIpcHandlers({
     settings: store,
     windows,
     provider,

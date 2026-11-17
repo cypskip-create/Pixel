@@ -11,9 +11,11 @@ import { BUILTIN_TOOLS, ToolRegistry } from '../src/main/agent/tools';
 import { buildPermissionRequest } from '../src/main/agent/executor';
 
 const windowInfo = {
+  windowId: 'window-test-opaque-ref',
   title: 'Settings',
   processName: 'SystemSettings',
   pid: 1234,
+  observedAt: 1_760_000_000_000,
   rect: { x: -1920, y: 0, width: 1920, height: 1080 },
   isMinimized: false,
 };
@@ -29,9 +31,14 @@ describe('Windows UI Automation tools', () => {
   it('keeps native observation behind the screen approval gate and excludes it in Guide Mode when it would act', () => {
     const registry = new ToolRegistry(BUILTIN_TOOLS);
     const inspect = registry.get('find_ui_elements');
+    const lastExternal = registry.get('get_last_external_foreground_window');
+    const listExternal = registry.get('list_external_windows');
     const invoke = registry.get('invoke_ui_element');
     expect(inspect?.requiresApproval).toBe(true);
     expect(inspect?.changesState).toBe(false);
+    expect(lastExternal).toMatchObject({ requiresApproval: true, changesState: false, risk: 'high' });
+    expect(listExternal).toMatchObject({ requiresApproval: true, changesState: false, risk: 'high' });
+    expect(registry.availableFor('guide')).toContainEqual(lastExternal);
     expect(invoke?.requiresApproval).toBe(true);
     expect(invoke?.changesState).toBe(true);
     expect(registry.evaluate('invoke_ui_element', 'guide').allowed).toBe(false);
@@ -39,10 +46,85 @@ describe('Windows UI Automation tools', () => {
     const permission = buildPermissionRequest(invoke!, {
       selector: 'NetworkCategory',
       role: 'Button',
+      targetWindowId: windowInfo.windowId,
       expectedWindowTitle: 'Settings — Network',
+      expectedProcessId: 1234,
+      expectedProcessName: 'SystemSettings',
     });
-    expect(permission.target).toBe('foreground window titled "Settings — Network"');
+    expect(permission.target).toBe('SystemSettings (PID 1234), window titled "Settings — Network"; ref window-test-opaque-ref');
     expect(permission.args.expectedWindowTitle).toBe('Settings — Network');
+  });
+
+  it('returns the last external window and never requests a screenshot', async () => {
+    const lastExternalForegroundWindow = vi.fn(async () => ({ status: 'available' as const, window: windowInfo }));
+    const captureDisplay = vi.fn();
+    const executors = new ToolExecutors({
+      nativeHelper: { lastExternalForegroundWindow } as unknown as NativeHelperType,
+      captureDisplay,
+      toDipRect: (rect) => ({ x: rect.x / 2, y: rect.y / 2, width: rect.width / 2, height: rect.height / 2 }),
+    });
+
+    const result = await executors.run('get_last_external_foreground_window', {});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain('Settings (SystemSettings, PID 1234)');
+    expect(result.content).toContain(windowInfo.windowId);
+    expect(result.detail?.status).toBe('available');
+    expect(lastExternalForegroundWindow).toHaveBeenCalledTimes(1);
+    expect(captureDisplay).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable when no trustworthy external window has been observed', async () => {
+    const lastExternalForegroundWindow = vi.fn(async () => ({
+      status: 'unavailable' as const,
+      reason: 'No trustworthy external window has been observed.',
+    }));
+    const executors = new ToolExecutors({
+      nativeHelper: { lastExternalForegroundWindow } as unknown as NativeHelperType,
+    });
+
+    const result = await executors.run('get_last_external_foreground_window', {});
+
+    expect(result).toMatchObject({ ok: true, detail: { status: 'unavailable' } });
+    expect(result.content).toContain('No trustworthy external window has been observed.');
+  });
+
+  it('reports unavailable when the native bridge is absent', async () => {
+    const result = await new ToolExecutors({}).run('get_last_external_foreground_window', {});
+    expect(result).toMatchObject({ ok: false, errorCode: 'UNAVAILABLE' });
+  });
+
+  it('reports a closed external target as stale and withholds its target ref', async () => {
+    const lastExternalForegroundWindow = vi.fn(async () => ({
+      status: 'stale' as const,
+      window: windowInfo,
+      reason: 'The window has closed.',
+    }));
+    const executors = new ToolExecutors({
+      nativeHelper: { lastExternalForegroundWindow } as unknown as NativeHelperType,
+    });
+
+    const result = await executors.run('get_last_external_foreground_window', {});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain('is stale');
+    expect(result.content).toContain('The window has closed.');
+    expect((result.detail?.window as Record<string, unknown>)?.windowId).toBeUndefined();
+  });
+
+  it('lists external windows with opaque references so the user can choose an ambiguous target', async () => {
+    const listExternalWindows = vi.fn(async () => ({ windows: [windowInfo], truncated: false }));
+    const executors = new ToolExecutors({
+      nativeHelper: { listExternalWindows } as unknown as NativeHelperType,
+    });
+
+    const result = await executors.run('list_external_windows', {});
+
+    expect(result.content).toContain('Ask the user to choose');
+    expect(result.content).toContain(`ref=${windowInfo.windowId}`);
+    expect((result.detail?.windows as Array<Record<string, unknown>>)[0]).toMatchObject({
+      processName: 'SystemSettings', pid: 1234, windowId: windowInfo.windowId,
+    });
   });
 
   it('searches semantic UI elements and converts bounds while preserving physical bounds', async () => {
@@ -67,19 +149,57 @@ describe('Windows UI Automation tools', () => {
     const executors = new ToolExecutors({ nativeHelper: { call } as unknown as NativeHelperType });
     const result = await executors.run('invoke_ui_element', {
       selector: 'NetworkCategory',
+      targetWindowId: windowInfo.windowId,
       role: 'Button',
       expectedWindowTitle: 'Settings',
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
       expectedResult: { selector: 'Wi-Fi', state: 'present', role: 'TabItem' },
     });
     expect(result.ok).toBe(true);
     expect(call).toHaveBeenCalledWith('invoke_element', {
       selector: 'NetworkCategory',
+      targetWindowId: windowInfo.windowId,
       expectedWindowTitle: 'Settings',
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
       role: 'Button',
       expectedResult: { selector: 'Wi-Fi', state: 'present', role: 'TabItem' },
     }, undefined);
     expect(result.content).toMatch(/verify that the control is present/);
     expect(result.verification).toBeUndefined();
+  });
+
+  it('can search a selected background window without activating it', async () => {
+    const call = vi.fn().mockResolvedValue({ window: windowInfo, elements: [element], truncated: false });
+    const executors = new ToolExecutors({ nativeHelper: { call } as unknown as NativeHelperType });
+    const selection = {
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+    };
+
+    const result = await executors.run('find_ui_elements', { text: 'Network', ...selection });
+
+    expect(result.ok).toBe(true);
+    expect(call).toHaveBeenCalledWith('find_elements', { text: 'Network', ...selection }, undefined);
+    expect(result.content).toContain(`ref ${windowInfo.windowId}`);
+  });
+
+  it('fails closed when only part of a target window identity is supplied', async () => {
+    const call = vi.fn();
+    const executors = new ToolExecutors({ nativeHelper: { call } as unknown as NativeHelperType });
+
+    const result = await executors.run('find_ui_elements', {
+      text: 'Network',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+    });
+
+    expect(result).toMatchObject({ ok: false, errorCode: 'FAILED' });
+    expect(result.content).toContain('identity is incomplete');
+    expect(call).not.toHaveBeenCalled();
   });
 
   it('reports helper cancellation and timeout distinctly', async () => {
@@ -124,7 +244,10 @@ describe('Windows UI Automation tools', () => {
     const executors = new ToolExecutors({ nativeHelper, inputLease });
     const run = executors.run('invoke_ui_element', {
       selector: 'File',
+      targetWindowId: windowInfo.windowId,
       expectedWindowTitle: 'Calculator',
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
       expectedResult: { selector: 'Save', state: 'present', role: 'MenuItem' },
     });
 
@@ -172,7 +295,10 @@ describe('Windows UI Automation tools', () => {
     let settled = false;
     const run = executors.run('invoke_ui_element', {
       selector: 'Run harmless UIA action',
+      targetWindowId: windowInfo.windowId,
       expectedWindowTitle: 'Pixel UIA Harmless Fixture',
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
       expectedResult: { selector: 'Pixel harmless action: completed', state: 'present', role: 'Text' },
     }).finally(() => { settled = true; });
 
@@ -195,7 +321,10 @@ describe('Windows UI Automation tools', () => {
     expect(registry.validateArgs('find_ui_elements', { text: 'Open', maxResults: 200 }).ok).toBe(false);
     expect(registry.validateArgs('invoke_ui_element', {
       selector: 'Open',
+      targetWindowId: windowInfo.windowId,
       expectedWindowTitle: 'Settings',
+      expectedProcessId: 1234,
+      expectedProcessName: 'SystemSettings',
       expectedResult: { selector: 'Options', state: 'present' },
     })).toEqual({ ok: true });
     expect(registry.validateArgs('invoke_ui_element', { selector: 'Open' }).ok).toBe(false);

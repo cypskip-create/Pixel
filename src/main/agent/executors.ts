@@ -26,7 +26,7 @@ import type { DocumentTools } from '../documents/toolset';
 import type { FileTools } from '../files/toolset';
 import { terminateProcessTree } from '../services/process';
 import { NativeHelperError } from '../services/nativeHelper';
-import type { NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
+import type { FindElementsQuery, LastExternalWindowResult, NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
 
 const sharedDesktopInputLease = new DesktopInputLease();
 
@@ -233,6 +233,10 @@ export class ToolExecutors {
           return await this.analyzeScreen(args, signal);
         case 'get_foreground_window':
           return await this.getForegroundWindow(signal);
+        case 'get_last_external_foreground_window':
+          return await this.getLastExternalForegroundWindow(signal);
+        case 'list_external_windows':
+          return await this.listExternalWindows(signal);
         case 'find_ui_elements':
           return await this.findUiElements(args, signal);
         case 'verify_ui_state':
@@ -366,8 +370,55 @@ export class ToolExecutors {
     const detail = { ...window, physicalRect: window.rect, rect, coordinateSpace: 'electron_dip' };
     return {
       ok: true,
-      content: `Foreground window: ${window.title || '(untitled)'} (${window.processName || 'unknown process'}). Bounds in desktop DIP: x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}${window.isMinimized ? '; minimized' : ''}.`,
+      content: `Foreground window: ${window.title || '(untitled)'} (${window.processName || 'unknown process'}, PID ${window.pid}). Window ref ${window.windowId}. Last observed ${new Date(window.observedAt).toISOString()}. Bounds in desktop DIP: x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}${window.isMinimized ? '; minimized' : ''}.`,
       detail,
+    };
+  }
+
+  private async getLastExternalForegroundWindow(signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows foreground tracking is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const result: LastExternalWindowResult = await this.deps.nativeHelper.lastExternalForegroundWindow(signal);
+    if (result.status === 'unavailable') {
+      return { ok: true, content: `No external foreground window is available: ${result.reason}`, detail: { status: result.status } };
+    }
+    const physicalRect = result.window.rect;
+    const rect = this.deps.toDipRect?.(physicalRect) ?? physicalRect;
+    const window = { ...result.window, physicalRect, rect, coordinateSpace: 'electron_dip' };
+    if (result.status === 'stale') {
+      return {
+        ok: true,
+        content: `The last external window was ${result.window.title || '(untitled)'} (${result.window.processName}, PID ${result.window.pid}), observed ${new Date(result.window.observedAt).toISOString()}, but it is stale: ${result.reason} Do not target its expired window ref.`,
+        detail: { status: result.status, window: { ...window, windowId: undefined }, reason: result.reason },
+      };
+    }
+    return {
+      ok: true,
+      content: `Last external foreground window: ${result.window.title || '(untitled)'} (${result.window.processName}, PID ${result.window.pid}). Window ref ${result.window.windowId}. Last observed ${new Date(result.window.observedAt).toISOString()}. Bounds in desktop DIP: x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}${result.window.isMinimized ? '; minimized' : ''}.`,
+      detail: { status: result.status, window },
+    };
+  }
+
+  private async listExternalWindows(signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows foreground tracking is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const result = await this.deps.nativeHelper.listExternalWindows(signal);
+    if (result.windows.length === 0) {
+      return { ok: true, content: 'No visible external application windows are available to select.', detail: { windows: [], truncated: result.truncated } };
+    }
+    const windows = result.windows.map((window) => {
+      const physicalRect = window.rect;
+      return { ...window, physicalRect, rect: this.deps.toDipRect?.(physicalRect) ?? physicalRect, coordinateSpace: 'electron_dip' };
+    });
+    const lines = windows.map((window, index) =>
+      `${index + 1}. ${window.processName} (PID ${window.pid}), "${window.title || '(untitled)'}"; ref=${window.windowId}; observed=${new Date(window.observedAt).toISOString()}${window.isMinimized ? '; minimized' : ''}`,
+    );
+    return {
+      ok: true,
+      content: `Visible external windows${result.truncated ? ' (list truncated at the safety limit)' : ''}. Ask the user to choose one if the requested target is ambiguous; never activate a window automatically.\n${lines.join('\n')}`,
+      detail: { windows, truncated: result.truncated, coordinateSpace: 'electron_dip' },
     };
   }
 
@@ -377,10 +428,28 @@ export class ToolExecutors {
     }
     const text = typeof args.text === 'string' ? args.text.trim() : '';
     if (!text) return { ok: false, content: 'Provide the accessible name or AutomationId to search for.', errorCode: 'FAILED' };
-    const query = {
+    const hasTargetSelection = ['targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName']
+      .some((key) => args[key] !== undefined);
+    const hasCompleteTargetSelection = typeof args.targetWindowId === 'string' &&
+      typeof args.expectedWindowTitle === 'string' && typeof args.expectedProcessId === 'number' &&
+      typeof args.expectedProcessName === 'string';
+    if (hasTargetSelection && !hasCompleteTargetSelection) {
+      return { ok: false, content: 'The selected window identity is incomplete. Re-list windows and ask the user to select one exact target.', errorCode: 'FAILED' };
+    }
+    const targetSelection: Pick<FindElementsQuery, 'targetWindowId' | 'expectedWindowTitle' | 'expectedProcessId' | 'expectedProcessName'> =
+      hasCompleteTargetSelection
+        ? {
+          targetWindowId: args.targetWindowId as string,
+          expectedWindowTitle: args.expectedWindowTitle as string,
+          expectedProcessId: args.expectedProcessId as number,
+          expectedProcessName: args.expectedProcessName as string,
+        }
+        : {};
+    const query: FindElementsQuery = {
       text,
       ...(Array.isArray(args.roles) ? { roles: args.roles.filter((role): role is string => typeof role === 'string').slice(0, 20) } : {}),
       ...(typeof args.maxResults === 'number' ? { maxResults: Math.max(1, Math.min(25, Math.trunc(args.maxResults))) } : {}),
+      ...targetSelection,
     };
     const result = await this.deps.nativeHelper.call('find_elements', query, signal);
     const convert = (element: UiElement): UiElement & { physicalRect: UiElement['rect'] } => ({
@@ -401,7 +470,7 @@ export class ToolExecutors {
     );
     return {
       ok: true,
-      content: `Found ${elements.length} matching UI element${elements.length === 1 ? '' : 's'} in ${result.window.title || 'the foreground window'}.${result.truncated ? ' Search was truncated at its safety limit.' : ''}${lines.length ? `\n${lines.join('\n')}` : ' No matching elements were found.'}`,
+      content: `Found ${elements.length} matching UI element${elements.length === 1 ? '' : 's'} in ${result.window.title || 'the foreground window'} (${result.window.processName}, PID ${result.window.pid}; ref ${result.window.windowId}).${result.truncated ? ' Search was truncated at its safety limit.' : ''}${lines.length ? `\n${lines.join('\n')}` : ' No matching elements were found.'}`,
       detail,
     };
   }
@@ -412,12 +481,19 @@ export class ToolExecutors {
     }
     const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
     if (!selector) return { ok: false, content: 'Provide the exact accessible name or AutomationId of the control.', errorCode: 'FAILED' };
+    if (typeof args.targetWindowId !== 'string' || typeof args.expectedWindowTitle !== 'string' ||
+      typeof args.expectedProcessId !== 'number' || typeof args.expectedProcessName !== 'string') {
+      return { ok: false, content: 'Select a recently observed window and provide its exact title and process identity before requesting an action.', errorCode: 'FAILED' };
+    }
     const expectedResult = args.expectedResult && typeof args.expectedResult === 'object'
       ? args.expectedResult as Record<string, unknown>
       : {};
     const result = await this.deps.nativeHelper.call('invoke_element', {
       selector,
-      expectedWindowTitle: typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '',
+      expectedWindowTitle: args.expectedWindowTitle,
+      targetWindowId: args.targetWindowId,
+      expectedProcessId: args.expectedProcessId,
+      expectedProcessName: args.expectedProcessName,
       ...(typeof args.role === 'string' ? { role: args.role } : {}),
       expectedResult: {
         selector: typeof expectedResult.selector === 'string' ? expectedResult.selector : '',
@@ -434,7 +510,7 @@ export class ToolExecutors {
     };
     return {
       ok: true,
-      content: `Invoked ${result.element.role} "${result.element.name || result.element.automationId}" in the approved foreground window "${result.window.title}". Now verify that ${expectedResult.state === 'absent' ? 'the control is absent' : 'the control is present'}: "${String(expectedResult.selector ?? '')}".`,
+      content: `Invoked ${result.element.role} "${result.element.name || result.element.automationId}" in the approved selected window "${result.window.title}" (${result.window.processName}, PID ${result.window.pid}; ref ${result.window.windowId}). Now verify that ${expectedResult.state === 'absent' ? 'the control is absent' : 'the control is present'}: "${String(expectedResult.selector ?? '')}".`,
       detail,
     };
   }
@@ -446,12 +522,16 @@ export class ToolExecutors {
     const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
     const expectedWindowTitle = typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '';
     const state = args.state === 'absent' ? 'absent' : 'present';
-    if (!selector || !expectedWindowTitle) {
-      return { ok: false, content: 'Provide an exact UI selector and foreground window title.', errorCode: 'FAILED' };
+    if (!selector || !expectedWindowTitle || typeof args.targetWindowId !== 'string' ||
+      typeof args.expectedProcessId !== 'number' || typeof args.expectedProcessName !== 'string') {
+      return { ok: false, content: 'Provide an exact UI selector and a selected window identity.', errorCode: 'FAILED' };
     }
     const result = await this.deps.nativeHelper.call('verify_element_state', {
       selector,
+      targetWindowId: typeof args.targetWindowId === 'string' ? args.targetWindowId : '',
       expectedWindowTitle,
+      expectedProcessId: typeof args.expectedProcessId === 'number' ? args.expectedProcessId : 0,
+      expectedProcessName: typeof args.expectedProcessName === 'string' ? args.expectedProcessName : '',
       state,
       ...(typeof args.role === 'string' ? { role: args.role } : {}),
     }, signal);
@@ -476,7 +556,7 @@ export class ToolExecutors {
       detail,
       ...(result.matches ? {
         verification: {
-          summary: `UI Automation confirmed that ${selector} is ${expected} in the expected foreground window.`,
+          summary: `UI Automation confirmed that ${selector} is ${expected} in the selected window.`,
           source: 'UI Automation postcondition check',
         },
       } : {}),
@@ -532,11 +612,14 @@ export class ToolExecutors {
   private async typeText(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const text = typeof args.text === 'string' ? args.text : '';
     const expectedWindowTitle = typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '';
+    const targetWindowId = typeof args.targetWindowId === 'string' ? args.targetWindowId : '';
+    const expectedProcessId = typeof args.expectedProcessId === 'number' ? args.expectedProcessId : 0;
+    const expectedProcessName = typeof args.expectedProcessName === 'string' ? args.expectedProcessName : '';
     if (text.length === 0) {
       return { ok: false, content: 'No text was provided to type.', errorCode: 'FAILED' };
     }
-    if (expectedWindowTitle.length === 0 || expectedWindowTitle.length > 500) {
-      return { ok: false, content: 'Observe the foreground window and include its exact title before requesting text input.', errorCode: 'FAILED' };
+    if (expectedWindowTitle.length === 0 || expectedWindowTitle.length > 500 || !targetWindowId || expectedProcessId <= 0 || !expectedProcessName) {
+      return { ok: false, content: 'Select a recently observed window and include its exact title and process identity before requesting text input.', errorCode: 'FAILED' };
     }
     if (text.length > 2_000) {
       return {
@@ -553,6 +636,16 @@ export class ToolExecutors {
       };
     }
 
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Window identity validation is unavailable; no text was sent.', errorCode: 'UNAVAILABLE' };
+    }
+    const target = await this.deps.nativeHelper.resolveWindowTarget({
+      targetWindowId,
+      expectedWindowTitle,
+      expectedProcessId,
+      expectedProcessName,
+    }, signal);
+
     // Both the requested title and text travel through the environment, never
     // inside the PowerShell script. A Win32 recheck immediately before SendKeys
     // narrows the focus-change race between the approval card and input.
@@ -562,6 +655,7 @@ export class ToolExecutors {
       'using System.Text;',
       'public static class PixelForegroundWindowCheck {',
       '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
+      '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);',
       '  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);',
       '}',
     ].join('\n');
@@ -572,9 +666,15 @@ export class ToolExecutors {
       "'@",
       'Add-Type -TypeDefinition $native;',
       '$handle = [PixelForegroundWindowCheck]::GetForegroundWindow();',
+      '$expectedHandle = [IntPtr]([Convert]::ToInt64($env:CYPS_EXPECTED_WINDOW_HANDLE, 16));',
+      'if ($handle -ne $expectedHandle) { Write-Error "Foreground window changed; no text was sent"; exit 3 }',
+      '$foregroundPid = [uint32]0; [void][PixelForegroundWindowCheck]::GetWindowThreadProcessId($handle, [ref]$foregroundPid);',
+      'if ($foregroundPid -ne [uint32]$env:CYPS_EXPECTED_PROCESS_ID) { Write-Error "Foreground process changed; no text was sent"; exit 3 }',
       '$title = New-Object System.Text.StringBuilder 1024;',
       '[void][PixelForegroundWindowCheck]::GetWindowText($handle, $title, $title.Capacity);',
       'if ($title.ToString() -cne $env:CYPS_EXPECTED_WINDOW_TITLE) { Write-Error "Foreground window changed; no text was sent"; exit 3 }',
+      '$process = Get-Process -Id $foregroundPid -ErrorAction Stop;',
+      'if ($process.ProcessName -ine $env:CYPS_EXPECTED_PROCESS_NAME -or $process.StartTime.ToUniversalTime().Ticks -ne [long]$env:CYPS_EXPECTED_START_TICKS) { Write-Error "Foreground process identity changed; no text was sent"; exit 3 }',
       '$value = $env:CYPS_TYPE_TEXT;',
       'if ([string]::IsNullOrEmpty($value)) { Write-Error "empty"; exit 2 }',
       '$shell = New-Object -ComObject WScript.Shell;',
@@ -585,7 +685,15 @@ export class ToolExecutors {
     const result = await this.runChild(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { ...process.env, CYPS_TYPE_TEXT: escapeSendKeys(text), CYPS_EXPECTED_WINDOW_TITLE: expectedWindowTitle },
+      {
+        ...process.env,
+        CYPS_TYPE_TEXT: escapeSendKeys(text),
+        CYPS_EXPECTED_WINDOW_TITLE: expectedWindowTitle,
+        CYPS_EXPECTED_WINDOW_HANDLE: target.handle,
+        CYPS_EXPECTED_PROCESS_ID: String(expectedProcessId),
+        CYPS_EXPECTED_PROCESS_NAME: expectedProcessName,
+        CYPS_EXPECTED_START_TICKS: target.processStartTicks,
+      },
       signal,
     );
 
@@ -599,8 +707,8 @@ export class ToolExecutors {
 
     return {
       ok: true,
-      content: `Typed ${text.length} character${text.length === 1 ? '' : 's'} into the foreground window titled "${expectedWindowTitle}" after rechecking its title.`,
-      detail: { characters: text.length, expectedWindowTitle },
+      content: `Typed ${text.length} character${text.length === 1 ? '' : 's'} into the selected foreground window titled "${expectedWindowTitle}" (${expectedProcessName}, PID ${expectedProcessId}) after rechecking its window and process identity.`,
+      detail: { characters: text.length, expectedWindowTitle, expectedProcessName, expectedProcessId, targetWindowId },
     };
   }
 

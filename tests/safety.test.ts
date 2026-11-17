@@ -591,6 +591,43 @@ describe('NativeHelper', () => {
     helper.dispose();
   });
 
+  it('keeps the metadata-only foreground observer alive until shutdown and queries tracked targets', async () => {
+    const commands: string[] = [];
+    const window = {
+      windowId: 'opaque-window-ref', title: 'Notepad', processName: 'notepad', pid: 42,
+      observedAt: 1_760_000_000_000,
+      rect: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false,
+    };
+    const helper = new NativeHelper({
+      ...base,
+      idleStopMs: 20,
+      spawnFn: () => fakeProcess((req, reply) => {
+        commands.push(req.cmd);
+        const result = req.cmd === 'ping'
+          ? { version: '1.0', trackingMode: 'win-event' }
+          : req.cmd === 'last_external_foreground_window'
+            ? { status: 'available', window }
+            : req.cmd === 'list_external_windows'
+              ? { windows: [window], truncated: false }
+              : null;
+        reply({ id: req.id, ok: true, result });
+      }),
+    });
+
+    await helper.startForegroundTracking();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(helper.running).toBe(true);
+    await expect(helper.lastExternalForegroundWindow()).resolves.toMatchObject({
+      status: 'available', window: { processName: 'notepad', pid: 42, windowId: 'opaque-window-ref' },
+    });
+    await expect(helper.listExternalWindows()).resolves.toMatchObject({ windows: [window], truncated: false });
+    expect(commands).toContain('last_external_foreground_window');
+    expect(commands).toContain('list_external_windows');
+
+    helper.dispose();
+    await helper.whenStopped();
+  });
+
   it('surfaces a helper error as FAILED', async () => {
     const helper = new NativeHelper({
       ...base,

@@ -51,7 +51,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'find_ui_elements', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_read', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_read', 'documents_search', 'documents_list']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {
@@ -105,6 +105,8 @@ export interface AgentRunResult {
 
 export class AgentExecutor {
   private readonly deps: AgentDeps;
+  /** Volatile window identity is kept only while this task run is active. */
+  private readonly uiActionTargets = new Map<string, { windowId: string; processId: number; processName: string }>();
   private controller: AbortController | null = null;
   private active = false;
   private cancelReason: 'user' | 'stop' | 'timeout' | null = null;
@@ -347,6 +349,7 @@ export class AgentExecutor {
       );
     } finally {
       clearTimeout(deadlineTimer);
+      this.uiActionTargets.clear();
       tasks.unregisterControl(task.id);
       this.active = false;
       if (this.controller === controller) this.controller = null;
@@ -573,6 +576,14 @@ export class AgentExecutor {
             } : {}),
           },
         ];
+        if (call.name === 'invoke_ui_element' && typeof args.targetWindowId === 'string' &&
+          typeof args.expectedProcessId === 'number' && typeof args.expectedProcessName === 'string') {
+          this.uiActionTargets.set(step.id, {
+            windowId: args.targetWindowId,
+            processId: args.expectedProcessId,
+            processName: args.expectedProcessName,
+          });
+        }
       }
     }
 
@@ -606,8 +617,13 @@ export class AgentExecutor {
       let matchingIndex = -1;
       for (let index = pending.length - 1; index >= 0; index -= 1) {
         const item = pending[index];
+        const target = item ? this.uiActionTargets.get(item.stepId) : undefined;
         if (item?.toolName === 'invoke_ui_element' &&
+          target !== undefined &&
           item.expectedWindowTitle === expectedWindowTitle &&
+          target?.windowId === args.targetWindowId &&
+          target.processId === args.expectedProcessId &&
+          target.processName === args.expectedProcessName &&
           item.verificationSelector?.toLowerCase() === selector.toLowerCase() &&
           item.verificationState === state &&
           item.verificationRole?.toLowerCase() === role?.toLowerCase()) {
@@ -620,6 +636,7 @@ export class AgentExecutor {
         if (verifiedAction) {
           const verifiedStep = task.steps.find((item) => item.id === verifiedAction.stepId);
           if (verifiedStep) verifiedStep.status = 'verified';
+          this.uiActionTargets.delete(verifiedAction.stepId);
           addTaskEvidence(task, 'verification', result.verification.summary, result.verification.source);
           task.pendingVerifications = pending;
         }
@@ -756,6 +773,10 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return 'Looked at the screen';
     case 'get_foreground_window':
       return 'Read the foreground window title and bounds';
+    case 'get_last_external_foreground_window':
+      return 'Read the last non-Pixel foreground window';
+    case 'list_external_windows':
+      return 'List visible non-Pixel windows for target selection';
     case 'find_ui_elements':
       return `Find UI elements matching ${typeof args.text === 'string' ? args.text : 'the requested text'}`;
     case 'verify_ui_state':
@@ -809,16 +830,23 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'browser_navigate' && typeof args.url === 'string') return args.url;
   if (name === 'documents_index' && typeof args.directory === 'string') return args.directory;
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
-  if (name === 'type_text') return typeof args.expectedWindowTitle === 'string'
-    ? `foreground window titled "${args.expectedWindowTitle}"`
-    : 'the specified foreground window';
-  if (name === 'get_foreground_window' || name === 'find_ui_elements') return 'the foreground window';
-  if (name === 'invoke_ui_element' || name === 'verify_ui_state') return typeof args.expectedWindowTitle === 'string'
-    ? `foreground window titled "${args.expectedWindowTitle}"`
-    : 'the specified foreground window';
+  if (name === 'get_last_external_foreground_window') return 'the last observed non-Pixel foreground window';
+  if (name === 'list_external_windows') return 'visible non-Pixel windows on this desktop';
+  if (name === 'type_text') return describeWindowTarget(args);
+  if (name === 'get_foreground_window') return 'the foreground window';
+  if (name === 'find_ui_elements') return typeof args.targetWindowId === 'string' ? describeWindowTarget(args) : 'the foreground window';
+  if (name === 'invoke_ui_element' || name === 'verify_ui_state') return describeWindowTarget(args);
   if (name === 'file_list' && typeof args.directory === 'string') return args.directory;
   if ((name === 'file_read' || name === 'file_write') && typeof args.path === 'string') return args.path;
   return 'this computer';
+}
+
+function describeWindowTarget(args: Record<string, unknown>): string {
+  const processName = typeof args.expectedProcessName === 'string' ? args.expectedProcessName : 'application';
+  const pid = Number.isInteger(args.expectedProcessId) ? ` (PID ${String(args.expectedProcessId)})` : '';
+  const title = typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '(untitled)';
+  const windowId = typeof args.targetWindowId === 'string' ? `; ref ${args.targetWindowId}` : '';
+  return `${processName}${pid}, window titled "${title}"${windowId}`;
 }
 
 function summariseResult(result: ToolResult): string {
@@ -842,7 +870,9 @@ function estimateMessageTokens(messages: ChatMessage[]): number {
 function safeTaskArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
   const sensitiveKey = /(password|passwd|passphrase|secret|token|api[_-]?key|authorization|cookie|credential|cvv|otp)/i;
+  const volatileWindowIdentity = new Set(['targetWindowId', 'expectedProcessId', 'expectedProcessName']);
   for (const [key, value] of Object.entries(args)) {
+    if (volatileWindowIdentity.has(key)) continue;
     if (sensitiveKey.test(key)) {
       safe[key] = '[redacted]';
       continue;

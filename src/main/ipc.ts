@@ -116,12 +116,12 @@ class FileStorage {
   }
 }
 
-export function registerIpcHandlers(context: IpcContext): {
+export async function registerIpcHandlers(context: IpcContext): Promise<{
   emergency: EmergencyController;
   tasks: TaskManager;
   routines: LocalRoutineScheduler;
   shutdown: () => void;
-} {
+}> {
   const { settings, windows, provider, captures } = context;
 
   const audit = new AuditLog(
@@ -146,6 +146,11 @@ export function registerIpcHandlers(context: IpcContext): {
     ? join(process.resourcesPath, 'native', 'PixelNative.exe')
     : join(app.getAppPath(), 'native', 'bin', 'PixelNative.exe');
   const nativeHelper = new NativeHelper({ executablePath: nativeExecutable, exists: existsSync });
+  try {
+    await nativeHelper.startForegroundTracking();
+  } catch (error) {
+    boot.warn(`Foreground-window tracking is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,

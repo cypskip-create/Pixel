@@ -13,24 +13,33 @@ import { hasProcessExited, terminateProcessTreeAndWait } from './process';
  * rectangles, which are far more reliable than estimating positions from a
  * screenshot.
  *
- * The helper observes windows and elements, and has one bounded InvokePattern
- * action for an exact unique foreground control with an explicit UIA postcondition.
- * Pixel's permission gateway must approve it, and the helper rechecks the approved
- * window title immediately before invoking. It has no coordinate click, typing,
- * or arbitrary script API.
+ * The helper observes window metadata and elements, and has one bounded
+ * InvokePattern action for an exact unique control in a selected window with an
+ * explicit UIA postcondition. Pixel's permission gateway must approve it, and the
+ * helper rechecks the selected window and process identity before invoking. It
+ * has no coordinate click, typing, or arbitrary script API.
  *
- * Lifecycle: it is started on first use and stopped after a short idle period,
- * so an idle Pixel runs no extra process.
+ * Lifecycle: the metadata-only foreground observer starts before Pixel's
+ * windows. Other native operations share its process and the executor stops it
+ * during shutdown/emergency handling.
  */
 
 export interface WindowInfo {
+  /** Opaque per-helper-session target identifier; never contains the HWND. */
+  windowId: string;
   title: string;
   processName: string;
   pid: number;
+  observedAt: number;
   /** Physical screen pixels. Convert with the display's scale before drawing. */
   rect: Rect;
   isMinimized: boolean;
 }
+
+export type LastExternalWindowResult =
+  | { status: 'available'; window: WindowInfo }
+  | { status: 'stale'; window: WindowInfo; reason: string }
+  | { status: 'unavailable'; reason: string };
 
 export interface UiElement {
   name: string;
@@ -48,22 +57,37 @@ export interface FindElementsQuery {
   /** Optionally restrict to certain control types. */
   roles?: string[];
   maxResults?: number;
+  /** Optional explicit target from a recent foreground/list observation. */
+  targetWindowId?: string;
+  expectedWindowTitle?: string;
+  expectedProcessId?: number;
+  expectedProcessName?: string;
 }
 
 export interface VerifyElementStateQuery {
   selector: string;
+  targetWindowId: string;
   expectedWindowTitle: string;
+  expectedProcessId: number;
+  expectedProcessName: string;
   state: 'present' | 'absent';
   role?: string;
 }
 
 export interface NativeCommands {
-  ping: { args: Record<string, never>; result: { version: string } };
+  ping: { args: Record<string, never>; result: { version: string; trackingMode?: string } };
   foreground_window: { args: Record<string, never>; result: WindowInfo | null };
+  last_external_foreground_window: { args: Record<string, never>; result: LastExternalWindowResult };
+  list_external_windows: { args: Record<string, never>; result: { windows: WindowInfo[]; truncated: boolean } };
+  resolve_window_target: {
+    args: { targetWindowId: string; expectedWindowTitle: string; expectedProcessId: number; expectedProcessName: string };
+    /** HWND stays inside the main process and is never returned to React or the model. */
+    result: { handle: string; processStartTicks: string; window: WindowInfo };
+  };
   find_elements: { args: FindElementsQuery; result: { window: WindowInfo; elements: UiElement[]; truncated: boolean } };
   verify_element_state: { args: VerifyElementStateQuery; result: { window: WindowInfo; matches: boolean; matchedCount: number; element?: UiElement } };
   invoke_element: {
-    args: { selector: string; expectedWindowTitle: string; role?: string; expectedResult: { selector: string; state: 'present' | 'absent'; role?: string } };
+    args: { selector: string; targetWindowId: string; expectedWindowTitle: string; expectedProcessId: number; expectedProcessName: string; role?: string; expectedResult: { selector: string; state: 'present' | 'absent'; role?: string } };
     result: { window: WindowInfo; element: UiElement; invoked: true };
   };
 }
@@ -89,6 +113,8 @@ export interface NativeHelperOptions {
   terminationGraceMs?: number;
   /** Stop the helper after this long without a request. */
   idleStopMs?: number;
+  /** Pixel-owned process IDs whose windows the observer must ignore. */
+  hostProcessIds?: number[];
   spawnFn?: SpawnFn;
   /** Does the executable exist? Injected so tests need no filesystem. */
   exists?: (path: string) => boolean;
@@ -108,20 +134,28 @@ export class NativeHelper {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private stopping: Promise<boolean> | null = null;
   private quarantined = false;
+  private trackingRequested = false;
   private readonly stoppedWaiters = new Set<() => void>();
   private readonly options: Required<Omit<NativeHelperOptions, 'spawnFn' | 'exists'>> & {
     spawnFn: SpawnFn;
     exists: (path: string) => boolean;
+    hostProcessIds: number[];
   };
 
   constructor(options: NativeHelperOptions) {
+    const hostProcessIds = [...new Set((options.hostProcessIds ?? [process.pid]).filter((pid) => Number.isInteger(pid) && pid > 0))];
     this.options = {
       executablePath: options.executablePath,
       platform: options.platform ?? process.platform,
       requestTimeoutMs: options.requestTimeoutMs ?? 5000,
       terminationGraceMs: options.terminationGraceMs ?? 1500,
       idleStopMs: options.idleStopMs ?? 60_000,
-      spawnFn: options.spawnFn ?? ((file) => spawn(file, [], { windowsHide: true, stdio: 'pipe' })),
+      hostProcessIds,
+      spawnFn: options.spawnFn ?? ((file) => spawn(file, [], {
+        windowsHide: true,
+        stdio: 'pipe',
+        env: { ...process.env, PIXEL_HOST_PIDS: hostProcessIds.join(',') },
+      })),
       exists: options.exists ?? (() => true),
     };
   }
@@ -197,6 +231,30 @@ export class NativeHelper {
         );
       }
     });
+  }
+
+  /** Start the in-memory observer before Pixel's own windows are created. */
+  async startForegroundTracking(): Promise<void> {
+    this.trackingRequested = true;
+    await this.call('ping', {});
+  }
+
+  async lastExternalForegroundWindow(signal?: AbortSignal): Promise<LastExternalWindowResult> {
+    await this.ensureForegroundTracking(signal);
+    return this.call('last_external_foreground_window', {}, signal);
+  }
+
+  async listExternalWindows(signal?: AbortSignal): Promise<{ windows: WindowInfo[]; truncated: boolean }> {
+    await this.ensureForegroundTracking(signal);
+    return this.call('list_external_windows', {}, signal);
+  }
+
+  async resolveWindowTarget(
+    args: NativeCommands['resolve_window_target']['args'],
+    signal?: AbortSignal,
+  ): Promise<NativeCommands['resolve_window_target']['result']> {
+    await this.ensureForegroundTracking(signal);
+    return this.call('resolve_window_target', args, signal);
   }
 
   /** Stop the helper. Pending calls settle only after termination is confirmed or bounded killing fails. */
@@ -377,9 +435,20 @@ export class NativeHelper {
 
   private touchIdle(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    // Keep only the small native event observer alive while Pixel is running.
+    if (this.trackingRequested) return;
     this.idleTimer = setTimeout(() => this.dispose(), this.options.idleStopMs);
     // Never keep the app alive just to stop an idle helper.
     this.idleTimer.unref?.();
+  }
+
+  private async ensureForegroundTracking(signal?: AbortSignal): Promise<void> {
+    this.trackingRequested = true;
+    if (signal?.aborted) throw new NativeHelperError('The request was cancelled.', 'CANCELLED');
+    // The helper installs the event hook and snapshots the current foreground
+    // before reading commands. Ping is a bounded readiness/restart handshake.
+    await this.call('ping', {}, signal);
   }
 }
 

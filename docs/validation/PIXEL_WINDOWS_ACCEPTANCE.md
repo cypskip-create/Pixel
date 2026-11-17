@@ -1,6 +1,6 @@
 # Pixel Windows acceptance procedure
 
-This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that a later Windows run successfully created Pixel's window and painted React, then exposed a preload module-resolution error. The focused repair bundles the preload, but this Codex desktop could not independently run Electron's GUI smoke app (`2147483651` before app startup logs). Verify the bridge and full UI on an interactive Windows desktop; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local evidence and test totals.
+This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that Pixel now starts on the target Windows laptop and its sandbox preload smoke test passes. This procedure includes the focused foreground-context integration. Record only behavior observed directly on the tested machine; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local build and test evidence.
 
 ## Automated checks before opening Pixel
 
@@ -188,6 +188,77 @@ This invokes the real helper and AgentExecutor against the fixture, has the test
 9. Trigger human takeover for an authentication/verification step. Confirm Pixel releases its input lease, waits for explicit Continue, does not treat acknowledgement as proof, and observes before continuing.
 
 These steps exercise the actual Pixel approval card and durable task UI. A direct helper call or unit test does not substitute for them.
+
+## External foreground context acceptance
+
+The foreground observer captures only window metadata (HWND stays inside the
+native helper/main process); it does not take screenshots or persist an
+observer history. The active task holds the opaque target identity in memory
+only while matching an approved action to its postcondition. `get_foreground_window` continues to describe the
+current foreground window. `get_last_external_foreground_window` reports the
+last non-Pixel foreground window held in memory. The read tools still go
+through Pixel's explicit permission flow. If multiple windows could match a
+requested target, use `list_external_windows` and ask the user to select the
+exact window before searching or acting. Pixel never switches applications on
+its own.
+
+On the target laptop, use a harmless Notepad document, a VS Code editor window
+with no unsaved changes, and a browser tab without a form or sensitive content:
+
+1. Start Pixel. Open Notepad, focus its document, then switch to Pixel's orb and
+   open the conversation. Ask, “Which application was active immediately before
+   Pixel?” Approve the metadata read and require the exact Notepad process/title.
+2. Repeat with VS Code and the browser. Open Pixel Settings as a second Pixel
+   window, focus each Pixel window in turn, and verify both remain excluded
+   while the same external app is reported.
+3. With an external app recorded as last active, close that app without
+   focusing another external app first. Ask Pixel again. It must report the
+   target as stale/closed and must not offer it as a valid action target.
+4. Record an external app, minimize it, and inspect the returned metadata. It
+   must show `isMinimized`; UIA search, verification and invocation must refuse
+   to treat hidden controls as available. Restore the window and re-observe.
+5. Start a read-only observation and deny its permission. Confirm no tool call
+   runs. Start another and cancel it while approval is pending; confirm it does
+   not execute afterward.
+6. For a state-changing UIA check, select one exact window/control, approve the
+   named action, and verify the expected postcondition in that same window
+   identity. Change focus or close/reopen the target before approval and confirm
+   Pixel refuses the stale target without switching applications.
+7. Keep screenshots/capture permission unused during these checks. Confirm the
+   app's capture log/event is absent; foreground tracking should continue using
+   title, process, bounds and timestamps only.
+
+For a helper-level interactive check, build first and run in a Windows Terminal
+PowerShell tab while Pixel is open. The terminal PID is excluded because
+returning to the prompt changes foreground context. The manual script verifies
+metadata, configured Pixel/terminal process exclusion and stale detection; it
+does not exercise Pixel's visible permission card:
+
+```powershell
+$repoPath = [regex]::Escape((Resolve-Path .).Path)
+$pixel = Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -in @('Pixel.exe', 'electron.exe') -and
+  $_.CommandLine -match $repoPath -and $_.CommandLine -notmatch '--type='
+} | Select-Object -First 1
+if (-not $pixel) { throw 'Could not identify the running Pixel main process.' }
+$terminal = Get-Process WindowsTerminal -ErrorAction Stop | Select-Object -First 1
+$env:PIXEL_HOST_PIDS = "$($pixel.ProcessId),$($terminal.Id)"
+npm run build:native
+npm run build:main
+node scripts/test-native-foreground-manual.mjs notepad
+node scripts/test-native-foreground-manual.mjs Code
+node scripts/test-native-foreground-manual.mjs brave
+```
+
+Replace `brave` with the process name for the browser installed on the test laptop (for example, `msedge`, `chrome` or `firefox`) when needed.
+
+For each run, focus the named application, switch to Pixel, then return to the
+terminal. The helper should still identify the application because both Pixel
+and Windows Terminal process IDs are excluded. When prompted, close the
+target, return to the terminal and require `closed-target-marked-stale`. Save
+terminal output with the other Windows acceptance artifacts. If using a
+different terminal, replace its process ID in `PIXEL_HOST_PIDS` with the PID
+that owns its visible top-level window.
 
 ## Security and voice checks
 

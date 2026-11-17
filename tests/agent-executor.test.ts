@@ -202,10 +202,46 @@ describe('agent loop - tool execution', () => {
  * ------------------------------------------------------------------ */
 
 describe('agent loop - approval', () => {
+  it('does not read the last external window when permission is denied', async () => {
+    const tools = fakeTools();
+    const h = harness({
+      outcomes: [toolStep('get_last_external_foreground_window', {}), plainAnswer('I could not inspect it.')],
+      tools,
+      approve: false,
+    });
+
+    await run(h.agent);
+
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0].toolName).toBe('get_last_external_foreground_window');
+    expect(tools.calls).toEqual([]);
+  });
+
+  it('cancels a pending external-window observation approval without executing it', async () => {
+    const tools = fakeTools();
+    const h = harness({
+      outcomes: [toolStep('get_last_external_foreground_window', {}), plainAnswer('should not run')],
+      tools,
+      deferApproval: true,
+    });
+    const running = run(h.agent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const taskId = h.tasks.list()[0]?.id;
+    expect(taskId).toBeDefined();
+    expect(h.broker.isPending()).toBe(true);
+    h.tasks.cancel(taskId!);
+
+    const result = await running;
+
+    expect(result.task.status).toBe('cancelled');
+    expect(h.broker.isPending()).toBe(false);
+    expect(tools.calls).toEqual([]);
+  });
+
   it('suspends, asks, and executes once approved', async () => {
     const tools = fakeTools({ type_text: { ok: true, content: 'typed 5 characters' } });
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('Typed it.')],
+      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Typed it.')],
       tools,
       approve: true,
     });
@@ -221,10 +257,55 @@ describe('agent loop - approval', () => {
     expect(result.finalContent).toMatch(/could not verify the result/i);
   });
 
+  it('does not verify a UIA action against a different window identity', async () => {
+    const target = {
+      targetWindowId: 'window-one',
+      expectedWindowTitle: 'Harmless fixture',
+      expectedProcessId: 1234,
+      expectedProcessName: 'fixture',
+    };
+    const tools = fakeTools({
+      invoke_ui_element: { ok: true, content: 'Invoked.' },
+      verify_ui_state: {
+        ok: true,
+        content: 'Postcondition found.',
+        verification: { summary: 'Postcondition found.', source: 'UI Automation' },
+      },
+    });
+    const h = harness({
+      outcomes: [
+        toolStep('invoke_ui_element', {
+          selector: 'Run harmless action',
+          ...target,
+          expectedResult: { selector: 'Action completed', state: 'present', role: 'Text' },
+        }),
+        toolStep('verify_ui_state', {
+          selector: 'Action completed',
+          ...target,
+          targetWindowId: 'window-two',
+          role: 'Text',
+          state: 'present',
+        }),
+        plainAnswer('The action is done.'),
+      ],
+      tools,
+      approve: true,
+    });
+
+    const result = await run(h.agent);
+
+    expect(result.task.pendingVerifications).toHaveLength(1);
+    expect(result.task.steps.find((step) => step.toolName === 'invoke_ui_element')?.status).toBe('done');
+    const storedArgs = result.task.steps.find((step) => step.toolName === 'invoke_ui_element')?.args;
+    expect(storedArgs).not.toHaveProperty('targetWindowId');
+    expect(storedArgs).not.toHaveProperty('expectedProcessId');
+    expect(storedArgs).not.toHaveProperty('expectedProcessName');
+  });
+
   it('does not execute when the user denies, and tells the model so', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('Understood.')],
+      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Understood.')],
       tools,
       approve: false,
     });
@@ -242,7 +323,7 @@ describe('agent loop - approval', () => {
 
   it('records a denied tool call in the audit trail', async () => {
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('ok')],
+      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('ok')],
       approve: false,
     });
     await run(h.agent);
@@ -251,7 +332,7 @@ describe('agent loop - approval', () => {
 
   it('sends the risk level so the UI can show an honest warning', async () => {
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'x', expectedWindowTitle: 'Test window' }), plainAnswer('ok')],
+      outcomes: [toolStep('type_text', { text: 'x', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('ok')],
       approve: false,
     });
     await run(h.agent);
@@ -261,7 +342,7 @@ describe('agent loop - approval', () => {
   it('honors a pause requested while approval is open', async () => {
     const tools = fakeTools({ type_text: { ok: true, content: 'typed 5 characters' } });
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('Typed it.')],
+      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Typed it.')],
       tools,
       deferApproval: true,
     });
@@ -285,7 +366,7 @@ describe('agent loop - approval', () => {
   it('cancels promptly when the user stops a task with an approval open', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', expectedWindowTitle: 'Test window' }), plainAnswer('should not run')],
+      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('should not run')],
       tools,
       deferApproval: true,
     });
@@ -397,7 +478,7 @@ describe('agent loop - failures', () => {
   it('blocks a state-changing tool in Guide mode without asking', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hi', expectedWindowTitle: 'Test window' }), plainAnswer('Guide mode cannot type.')],
+      outcomes: [toolStep('type_text', { text: 'hi', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Guide mode cannot type.')],
       tools,
     });
     const result = await h.agent.run({
