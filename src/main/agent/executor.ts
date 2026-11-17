@@ -789,6 +789,8 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       }
     case 'open_application':
       return `Open ${typeof args.name === 'string' ? args.name : 'an application'}`;
+    case 'browser_open_search':
+      return `Open browser search for “${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : 'the requested query'}”`;
     case 'type_text': {
       return `Type ${typeof args.text === 'string' ? args.text.length : 0} approved characters into the specified foreground window`;
     }
@@ -828,6 +830,7 @@ export function buildPermissionRequest(
 function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'analyze_screen') return 'this screen';
   if (name === 'browser_navigate' && typeof args.url === 'string') return args.url;
+  if (name === 'browser_open_search' && typeof args.query === 'string') return `Search: ${args.query.trim().slice(0, 120)}`;
   if (name === 'documents_index' && typeof args.directory === 'string') return args.directory;
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
   if (name === 'get_last_external_foreground_window') return 'the last observed non-Pixel foreground window';

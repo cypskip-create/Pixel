@@ -9,6 +9,8 @@ interface ResponseBubbleProps {
   reasoning: string;
   streaming: boolean;
   error: string | null;
+  /** True only after the native text-to-speech call has completed successfully. */
+  spoken?: boolean;
   onCollapse: () => void;
   onStop: () => void;
   /** 0 disables the auto-dismiss countdown entirely. */
@@ -30,6 +32,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
     reasoning,
     streaming,
     error,
+    spoken = false,
     onCollapse,
     onStop,
     autoDismissMs = 0,
@@ -89,6 +92,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
   return (
     <section
       aria-label="Pixel response"
+      data-layout-panel
       className="glass animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
       style={{ maxHeight: 'min(46vh, 320px)' }}
     >
@@ -160,10 +164,12 @@ export function ResponseBubble(props: ResponseBubbleProps) {
               <Copy size={14} strokeWidth={2.2} aria-hidden="true" />
             )}
           </IconButton>
-          <span className="flex items-center gap-1 px-1 text-[10px] text-[var(--color-ink-dim)]">
-            <Volume2 size={11} strokeWidth={2.2} aria-hidden="true" />
-            Spoken aloud
-          </span>
+          {spoken ? (
+            <span className="flex items-center gap-1 px-1 text-[10px] text-[var(--color-ink-dim)]">
+              <Volume2 size={11} strokeWidth={2.2} aria-hidden="true" />
+              Spoken aloud
+            </span>
+          ) : null}
         </div>
 
         {streaming ? (

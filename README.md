@@ -1,22 +1,28 @@
 # Pixel
 
-A personal AI companion that lives at the top of your Windows screen. It is a
-small orb that stays out of the way, expands into a compact input bar when you
-need it, and talks to DeepSeek.
-
-Pixel is **not** a dashboard, not a chat application, and not a sidebar. The
-largest surface it ever draws is 480 logical pixels wide.
+A personal AI companion for Windows. Pixel keeps a compact top-center bar
+available for conversation, with an optional independent cursor companion.
+The bar expands downward for responses, approvals, settings and recent chats;
+long content scrolls inside the available display work area.
 
 ## Status
 
 Pixel has a bounded DeepSeek tool loop, a main-process permission gateway,
 project-scoped SQLite memory, browser/file/document capabilities, a compact task
-timeline, reviewed skills and local routines. The Windows UI Automation helper
-can inspect accessible controls and invoke a uniquely matched control after
-approval. Cursor-follow is an optional presentation setting. Tasks are stored
-durably; work interrupted by restart is restored as paused and is never resumed
-automatically. State-changing actions that lack postcondition evidence finish as
-**Needs verification**.
+timeline, reviewed skills, local routines and multi-conversation chat history.
+The Windows UI Automation helper can inspect accessible controls and invoke a
+uniquely matched control after approval. The primary bar stays pinned to a
+selected display; an optional cursor companion follows independently. Tasks
+are stored durably; work interrupted by restart is restored as paused and is
+never resumed automatically. State-changing actions that lack postcondition
+evidence finish as **Needs verification**.
+
+Recent Chats restores conversations saved while `privacy.persistHistory` is
+enabled. Stored transcripts contain sanitized user-facing messages; disabling
+history keeps new conversation data in the current session only. Explicit web
+search requests open the selected Google, Bing or DuckDuckGo results page in
+the system's default browser. Pixel reports that the page was opened and does
+not claim to have read its results.
 
 The sandboxed preload is bundled from `src/preload/index.ts` into one
 `dist/main/preload/index.js` file. It inlines the shared IPC channel registry and
@@ -131,8 +137,24 @@ store the key** rather than falling back to plaintext.
 | Open settings | `Ctrl+,` |
 | Collapse to the orb | `Esc` |
 
-Drag the orb anywhere. The position is remembered and clamped to a visible
-display, so unplugging a monitor cannot strand it off-screen.
+The primary bar stays horizontally centered near the top of its selected
+display. Open **Settings → Move to display** to choose the display; the top
+offset is available alongside the pinned-bar controls.
+The optional cursor companion is controlled independently and never moves the
+primary bar.
+
+## Conversations and browser search
+
+Use the History control on the bar to search and restore recent conversations,
+create a new conversation, rename one, or delete a conversation after
+confirmation. Pixel keeps the active transcript and model context in the main
+process; renderer-supplied transcript history is not trusted. When history
+persistence is disabled, new messages remain session-only.
+
+Say or type an explicit request such as “Search the web for electric cars.”
+Pixel opens a search results page in the Windows default browser using the
+provider selected in Settings. Ordinary questions do not trigger browser
+search. Opening the page does not mean Pixel read or verified the results.
 
 ## Modes
 
@@ -218,10 +240,11 @@ workflow builds artifacts only and does not publish releases.
 
 ## What Pixel can do
 
-Pixel can answer questions, look at your screen (with approval), open a small
-allowlist of applications, type into the focused window, and drive a web page in
-a controlled browser: navigate, read it, click, type, scroll, screenshot, and
-verify that an action actually worked.
+Pixel can answer questions, restore earlier conversations, open a browser
+search, inspect the screen with approval, track foreground-window metadata,
+open an allowlist of applications, type into a revalidated target, and drive a
+web page in a controlled browser: navigate, read it, click, type, scroll,
+screenshot, and verify supported actions.
 
 Every action that changes something goes through a permission prompt first, and
 Guide mode cannot run such actions at all.
@@ -243,13 +266,13 @@ is the current ordered acceptance checklist.
 
 ## Known gaps
 
-- Browser tools need `npx playwright install chromium` once per machine; until
-  then they return a capability error naming that command.
+- Browser automation needs `npx playwright install chromium` once per machine;
+  simple web search uses the default browser and does not require Playwright.
 - Typing into elevated (administrator) windows is blocked by Windows integrity
   levels.
 - `open_application` only launches an allowlist of applications by design.
-- Browser Chromium and the full app UI require a normal desktop runtime; the
-  current Codex environment cannot start Electron's Chromium window.
+- Browser automation and the full app UI require a normal desktop runtime;
+  unit tests and production builds do not verify native window behavior.
 - Skills are model-mediated and have no interaction recorder or deterministic
   live replay runner. Specialist roles are not backed by an independent model
   delegation loop.

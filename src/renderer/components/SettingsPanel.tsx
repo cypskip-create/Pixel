@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Brain, Eye, EyeOff, Gauge, Keyboard, ListChecks, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
-import type { AppSettings, ConnectionTestResult, CypsErrorCode, Mode } from '@shared/types';
+import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
+import type { AppSettings, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
@@ -9,6 +9,7 @@ import { MemoryPanel } from '@/components/MemoryPanel';
 
 interface SettingsPanelProps {
   settings: AppSettings;
+  displays: DiagnosticsSnapshot['displays'];
   /** Persist a partial patch. Never throws: failures surface via error. */
   onPatch: (patch: DeepPartial<AppSettings>) => void;
   onRequestMode: (mode: Mode) => void;
@@ -37,6 +38,7 @@ export type DeepPartial<T> = {
 export function SettingsPanel(props: SettingsPanelProps) {
   const {
     settings,
+    displays,
     onPatch,
     onRequestMode,
     onClose,
@@ -74,7 +76,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     <section
       aria-label="Pixel settings"
       className="glass-raised animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
-      style={{ maxHeight: 'min(62vh, 440px)' }}
+      style={{ maxHeight: 'min(calc(100vh - 24px), 520px)' }}
     >
       <header className="flex items-center gap-2 border-b border-[var(--color-glass-border)] px-3 py-2">
         <Sparkles size={14} strokeWidth={2.3} aria-hidden="true" className="text-sky-300" />
@@ -116,21 +118,94 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </p>
           </div>
 
-          <Row label="Presentation">
+          <Row label="Pinned top bar">
+            <span className="text-[10.5px] font-medium text-emerald-200">Always on</span>
+          </Row>
+          <Row label="Move to display">
             <select
-              aria-label="Companion presentation"
-              value={settings.companion.visualMode}
-              onChange={(event) => onPatch({ companion: { visualMode: event.target.value as 'stationary' | 'cursor' } })}
-              className="no-drag rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+              aria-label="Move Pixel to display"
+              value={settings.companion.monitorId ?? ''}
+              onChange={(event) => {
+                if (event.target.value) onPatch({ companion: { monitorId: event.target.value } });
+              }}
+              disabled={displays.length === 0}
+              className="no-drag max-w-[230px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)] disabled:opacity-60"
             >
-              <option value="stationary">Stationary orb</option>
-              <option value="cursor">Follow cursor</option>
+              {displays.length === 0 ? <option value="">Displays unavailable</option> : null}
+              {displays.map((display, index) => (
+                <option key={display.id} value={display.id}>
+                  {display.label}{index === 0 ? '' : ` · ${display.width}×${display.height}`}
+                </option>
+              ))}
             </select>
           </Row>
-          {settings.companion.visualMode === 'cursor' ? (
-            <p className="px-1 pb-1 text-[9.5px] leading-snug text-[var(--color-ink-dim)]">
-              The orb follows the pointer while collapsed, stays beside it, and pauses while Pixel is open.
-            </p>
+          <Row label="Top offset">
+            <label className="flex items-center gap-2 text-[10px] text-[var(--color-ink-dim)]">
+              <input
+                aria-label="Top offset"
+                type="range"
+                min={10}
+                max={14}
+                step={1}
+                value={settings.companion.topOffset}
+                onChange={(event) => onPatch({ companion: { topOffset: Number(event.target.value) } })}
+                className="no-drag w-24 accent-sky-300"
+              />
+              {settings.companion.topOffset}px
+            </label>
+          </Row>
+          <Toggle
+            label="Show cursor companion"
+            hint="A separate click-through orb follows the pointer. It pauses while the bar is open."
+            checked={settings.companion.cursorCompanionEnabled}
+            onChange={(value) => onPatch({ companion: { cursorCompanionEnabled: value } })}
+          />
+          {settings.companion.cursorCompanionEnabled ? (
+            <>
+              <Row label="Follow speed">
+                <label className="flex items-center gap-2 text-[10px] text-[var(--color-ink-dim)]">
+                  <input
+                    aria-label="Cursor companion follow speed"
+                    type="range"
+                    min={0.25}
+                    max={3}
+                    step={0.25}
+                    value={settings.companion.followSpeed}
+                    onChange={(event) => onPatch({ companion: { followSpeed: Number(event.target.value) } })}
+                    className="no-drag w-24 accent-sky-300"
+                  />
+                  {settings.companion.followSpeed.toFixed(2)}×
+                </label>
+              </Row>
+              <Row label="Cursor offset">
+                <div className="flex items-center gap-1 text-[10px] text-[var(--color-ink-dim)]">
+                  <label className="flex items-center gap-1">
+                    X
+                    <input
+                      aria-label="Cursor companion horizontal offset"
+                      type="number"
+                      min={-200}
+                      max={200}
+                      value={settings.companion.cursorOffset.x}
+                      onChange={(event) => onPatch({ companion: { cursorOffset: { ...settings.companion.cursorOffset, x: Number(event.target.value) } } })}
+                      className="no-drag w-12 rounded-md border border-white/10 bg-black/20 px-1 py-0.5"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1">
+                    Y
+                    <input
+                      aria-label="Cursor companion vertical offset"
+                      type="number"
+                      min={-200}
+                      max={200}
+                      value={settings.companion.cursorOffset.y}
+                      onChange={(event) => onPatch({ companion: { cursorOffset: { ...settings.companion.cursorOffset, x: settings.companion.cursorOffset.x, y: Number(event.target.value) } } })}
+                      className="no-drag w-12 rounded-md border border-white/10 bg-black/20 px-1 py-0.5"
+                    />
+                  </label>
+                </div>
+              </Row>
+            </>
           ) : null}
 
           <Toggle
@@ -167,6 +242,22 @@ export function SettingsPanel(props: SettingsPanelProps) {
             Change these in your system settings file. The emergency stop always works, even
             while Pixel is mid-task.
           </p>
+        </Group>
+
+        <Group icon={Globe2} title="Browser search">
+          <Row label="Default search engine">
+            <select
+              aria-label="Default search engine"
+              value={settings.browserSearchProvider}
+              onChange={(event) => onPatch({ browserSearchProvider: event.target.value as AppSettings['browserSearchProvider'] })}
+              className="no-drag max-w-[190px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="google">Google</option>
+              <option value="bing">Bing</option>
+              <option value="duckduckgo">DuckDuckGo</option>
+            </select>
+          </Row>
+          <p className="px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">Explicit search requests open in your default browser.</p>
         </Group>
 
         <Group icon={Mic} title="Voice">

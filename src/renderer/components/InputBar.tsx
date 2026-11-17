@@ -72,6 +72,7 @@ export function InputBar(props: InputBarProps) {
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const modeButtonRef = useRef<HTMLButtonElement | null>(null);
   const descriptor = getModeDescriptor(mode);
   const trimmed = draft.trim();
   const canSend = trimmed.length > 0 && !busy && !disabled;
@@ -116,10 +117,12 @@ export function InputBar(props: InputBarProps) {
   const modeChip = useMemo(
     () => (
       <button
+        ref={modeButtonRef}
         type="button"
         onClick={onToggleModeMenu}
         aria-haspopup="menu"
         aria-expanded={modeMenuOpen}
+        aria-controls={modeMenuOpen ? 'pixel-mode-menu' : undefined}
         aria-label={`Mode: ${descriptor.label}. ${descriptor.summary} Change mode.`}
         className="no-drag flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-glass-border)] bg-white/7 px-2 py-1 text-[11px] font-medium text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/14 hover:text-[var(--color-ink)]"
       >
@@ -199,14 +202,14 @@ export function InputBar(props: InputBarProps) {
           </IconButton>
 
           <IconButton
-            label="Attach screenshot of active window"
+            label="Attach screenshot of an app window"
             onClick={onAttachScreenshot}
             disabled={disabled}
           >
             <Camera size={15} strokeWidth={2.2} aria-hidden="true" />
           </IconButton>
 
-          <IconButton label="Attach a file" onClick={onAttachFile} disabled={disabled}>
+          <IconButton label="Attach an image" onClick={onAttachFile} disabled={disabled}>
             <Paperclip size={15} strokeWidth={2.2} aria-hidden="true" />
           </IconButton>
 
@@ -229,7 +232,7 @@ export function InputBar(props: InputBarProps) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 px-1">
+      <div className="flex items-center justify-between gap-2 px-1" data-layout-panel>
         <div className="relative flex items-center gap-1.5">
           {modeChip}
           <span className="text-[10px] text-[var(--color-ink-dim)]">
@@ -259,6 +262,7 @@ export function InputBar(props: InputBarProps) {
           onRequestMode={onRequestMode}
           onDismiss={onCloseModeMenu}
           variant="popover"
+          returnFocusRef={modeButtonRef}
         />
       ) : null}
     </section>

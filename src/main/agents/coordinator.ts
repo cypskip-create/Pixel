@@ -43,7 +43,7 @@ export const SPECIALISTS: Record<SpecialistId, SpecialistDefinition> = {
     id: 'research',
     label: 'Research',
     purpose: 'Finds and compares information on the web and reports with sources.',
-    allowedTools: ['browser_navigate', 'browser_inspect', 'browser_click', 'browser_scroll', 'browser_verify', 'browser_screenshot', 'get_current_time'],
+    allowedTools: ['browser_open_search', 'browser_navigate', 'browser_inspect', 'browser_click', 'browser_scroll', 'browser_verify', 'browser_screenshot', 'get_current_time'],
     limits: { maxSteps: 12, maxTokens: 24_000, timeoutMs: 180_000 },
   },
   browser: {

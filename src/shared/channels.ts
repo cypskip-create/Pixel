@@ -15,10 +15,11 @@ export const CHANNELS = {
   settingsTestConnection: 'settings:testConnection',
 
   windowSetSurface: 'window:setSurface',
+  windowSetLayout: 'window:setLayout',
+  windowFocusLost: 'window:focusLost',
+  windowSummon: 'window:summon',
+  windowCursorMotion: 'window:cursorMotion',
   windowSetExpanded: 'window:setExpanded',
-  windowSetPosition: 'window:setPosition',
-  windowGetPosition: 'window:getPosition',
-  windowGetWorkArea: 'window:getWorkArea',
   windowHide: 'window:hide',
   windowShow: 'window:show',
   windowOpenSettings: 'window:openSettings',
@@ -28,8 +29,13 @@ export const CHANNELS = {
   chatSend: 'chat:send',
   chatCancel: 'chat:cancel',
   chatStream: 'chat:stream',
+  browserOpenSearch: 'browser:openSearch',
 
   historyList: 'history:list',
+  historyOpen: 'history:open',
+  historyCreate: 'history:create',
+  historyRename: 'history:rename',
+  historyDelete: 'history:delete',
   historyClear: 'history:clear',
 
   screenListDisplays: 'screen:listDisplays',

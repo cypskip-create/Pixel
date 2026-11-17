@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const { join, resolve } = require('node:path');
 const { writeFileSync } = require('node:fs');
 
+process.stdout.write('[preload-smoke] Electron main entry loaded\n');
 const projectRoot = resolve(__dirname, '../..');
 const { CHANNELS } = require(join(projectRoot, 'dist/main/shared/channels.js'));
 const resultPath = process.env.CYPS_PRELOAD_SMOKE_RESULT;
@@ -41,6 +42,7 @@ for (const channel of Object.values(CHANNELS)) {
 }
 
 app.whenReady().then(async () => {
+  process.stdout.write('[preload-smoke] app ready; creating sandboxed BrowserWindow\n');
   const preload = join(projectRoot, 'dist/main/preload/index.js');
   const win = new BrowserWindow({
     width: 420,
@@ -58,7 +60,11 @@ app.whenReady().then(async () => {
   win.webContents.on('preload-error', (_event, failedPath, error) => {
     finish({ ok: false, stage: 'preload', failedPath, error: error.stack ?? error.message }, 1);
   });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    process.stderr.write(`[preload-smoke] renderer process gone: ${JSON.stringify(details)}\n`);
+  });
   win.webContents.once('did-finish-load', async () => {
+    process.stdout.write('[preload-smoke] renderer loaded; checking bridge and IPC\n');
     try {
       const report = await win.webContents.executeJavaScript(`(async () => {
         const assert = (condition, message) => {

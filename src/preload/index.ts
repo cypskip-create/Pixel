@@ -16,13 +16,15 @@ import type {
   Mode,
   AuditEntry,
   CaptureResult,
-  ChatMessage,
   ChatRequest,
+  ConversationRecordView,
+  ConversationSummary,
   ConnectionTestResult,
   CypsBridge,
   DeepSeekSettingsPatch,
   DiagnosticsSnapshot,
   EmergencyStopReport,
+  HistoryQuery,
   PermissionDecision,
   PermissionGrant,
   PermissionRequest,
@@ -78,40 +80,45 @@ const bridge: CypsBridge = {
   window: {
     setSurface: (surface: Surface) =>
       ipcRenderer.invoke(CH.windowSetSurface, surface) as Promise<void>,
+    setLayout: (surface: Surface, size: { width: number; height: number }) =>
+      ipcRenderer.invoke(CH.windowSetLayout, surface, size) as Promise<void>,
     setExpanded: (expanded: boolean) =>
       ipcRenderer.invoke(CH.windowSetExpanded, expanded) as Promise<void>,
-    setPosition: (x: number, y: number) =>
-      ipcRenderer.invoke(CH.windowSetPosition, x, y) as Promise<void>,
-    getPosition: () =>
-      ipcRenderer.invoke(CH.windowGetPosition) as Promise<{ x: number; y: number }>,
-    getWorkArea: () =>
-      ipcRenderer.invoke(CH.windowGetWorkArea) as Promise<{
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-        scaleFactor: number;
-      }>,
     hide: () => ipcRenderer.invoke(CH.windowHide) as Promise<void>,
     show: () => ipcRenderer.invoke(CH.windowShow) as Promise<void>,
     openSettings: () => ipcRenderer.invoke(CH.windowOpenSettings) as Promise<void>,
     closeSettings: () => ipcRenderer.invoke(CH.windowCloseSettings) as Promise<void>,
     setIgnoreMouseEvents: (ignore: boolean) =>
       ipcRenderer.invoke(CH.windowSetIgnoreMouseEvents, ignore) as Promise<void>,
+    onFocusLost: (handler: () => void) => subscribe(CH.windowFocusLost, handler),
+    onSummon: (handler: () => void) => subscribe(CH.windowSummon, handler),
+    onCursorMotion: (handler: (reducedMotion: boolean) => void) =>
+      subscribe(CH.windowCursorMotion, handler),
   },
 
   chat: {
     send: (request: ChatRequest) =>
-      ipcRenderer.invoke(CH.chatSend, request) as Promise<{ requestId: string }>,
+      ipcRenderer.invoke(CH.chatSend, request) as Promise<{ requestId: string; persistence?: 'persistent' | 'session' }>,
     cancel: (requestId: string) =>
       ipcRenderer.invoke(CH.chatCancel, requestId) as Promise<void>,
     onStream: (handler: (event: StreamEvent) => void) => subscribe(CH.chatStream, handler),
   },
 
   history: {
-    list: (limit?: number) =>
-      ipcRenderer.invoke(CH.historyList, limit) as Promise<ChatMessage[]>,
+    list: (query?: HistoryQuery) =>
+      ipcRenderer.invoke(CH.historyList, query) as Promise<ConversationSummary[]>,
+    open: (id: string) =>
+      ipcRenderer.invoke(CH.historyOpen, id) as Promise<ConversationRecordView | null>,
+    create: () => ipcRenderer.invoke(CH.historyCreate) as Promise<ConversationRecordView>,
+    rename: (id: string, title: string) =>
+      ipcRenderer.invoke(CH.historyRename, id, title) as Promise<ConversationSummary | null>,
+    delete: (id: string) => ipcRenderer.invoke(CH.historyDelete, id) as Promise<boolean>,
     clear: () => ipcRenderer.invoke(CH.historyClear) as Promise<void>,
+  },
+
+  browser: {
+    openSearch: (query: string, requestText: string, conversationId: string) =>
+      ipcRenderer.invoke(CH.browserOpenSearch, query, requestText, conversationId) as Promise<{ query: string; provider: import('../shared/types').SearchProvider }>,
   },
 
   screen: {

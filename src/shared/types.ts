@@ -196,10 +196,12 @@ export interface ProviderSettings {
 
 export interface CompanionSettings {
   mode: Mode;
-  /** Remembered position of the floating avatar, in screen coordinates. */
+  /** @deprecated Legacy position is used only to migrate the old monitor choice. */
   position: { x: number; y: number } | null;
-  /** Monitor id the avatar was last on. */
+  /** Selected display for the pinned top bar, persisted as Electron's display id. */
   monitorId: string | null;
+  /** Distance from the selected display work area's top edge, in logical pixels. */
+  topOffset: number;
   /** Collapse to avatar-only automatically after a response. */
   autoCollapse: boolean;
   /** Snap to screen edges while dragging. */
@@ -211,12 +213,12 @@ export interface CompanionSettings {
   /** Compact bar for smaller displays. */
   compact: boolean;
   /**
-   * How the companion is presented. This is independent of `mode` (Guide, Agent,
-   * Hybrid), which controls what Pixel may do.
-   *  - stationary: the orb rests near the top of the screen (default).
-   *  - cursor: a small companion follows the mouse pointer.
+   * @deprecated Prior mutually-exclusive presentation choice. Retained for
+   * settings migration; cursor follow now has its own independent window.
    */
   visualMode: VisualMode;
+  /** Show the passive, click-through cursor companion independently of the bar. */
+  cursorCompanionEnabled: boolean;
   /** Cursor-companion follow speed multiplier, 0.25 to 3. */
   followSpeed: number;
   /** Offset of the cursor companion from the pointer, in logical pixels. */
@@ -265,6 +267,7 @@ export interface PrivacySettings {
 
 export interface AppSettings {
   version: number;
+  browserSearchProvider: SearchProvider;
   provider: ProviderSettings;
   companion: CompanionSettings;
   voice: VoiceSettings;
@@ -277,10 +280,14 @@ export interface AppSettings {
   theme: 'system' | 'dark' | 'light';
 }
 
-export const SETTINGS_VERSION = 1;
+export const SEARCH_PROVIDERS = ['google', 'bing', 'duckduckgo'] as const;
+export type SearchProvider = (typeof SEARCH_PROVIDERS)[number];
+
+export const SETTINGS_VERSION = 2;
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
+  browserSearchProvider: 'google',
   provider: {
     provider: 'deepseek',
     primaryModel: 'deepseek-flash',
@@ -294,12 +301,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
     mode: DEFAULT_MODE,
     position: null,
     monitorId: null,
+    topOffset: 12,
     autoCollapse: false,
     edgeSnap: true,
     speakReplies: false,
     reducedMotion: false,
     compact: false,
     visualMode: 'stationary',
+    cursorCompanionEnabled: false,
     followSpeed: 1,
     cursorOffset: { x: 22, y: 20 },
     animations: 'full',
@@ -330,6 +339,11 @@ export function mergeSettings(partial: unknown): AppSettings {
   const base = structuredClone(DEFAULT_SETTINGS);
   if (!partial || typeof partial !== 'object') return base;
   const p = partial as Record<string, unknown>;
+  const storedCompanion = p.companion !== null && typeof p.companion === 'object'
+    ? p.companion as Record<string, unknown>
+    : null;
+  const migrateCursorPresentation =
+    storedCompanion?.visualMode === 'cursor' && storedCompanion.cursorCompanionEnabled === undefined;
 
   for (const key of Object.keys(base) as (keyof AppSettings)[]) {
     const incoming = p[key];
@@ -349,7 +363,9 @@ export function mergeSettings(partial: unknown): AppSettings {
 
   // Never allow the screenshot-approval invariant to be turned off.
   base.privacy.screenshotRequiresApproval = true;
+  if (!SEARCH_PROVIDERS.includes(base.browserSearchProvider)) base.browserSearchProvider = 'google';
   if (!MODES.includes(base.companion.mode)) base.companion.mode = DEFAULT_MODE;
+  if (migrateCursorPresentation) base.companion.cursorCompanionEnabled = true;
   sanitiseCompanion(base.companion);
 
   return base;
@@ -362,7 +378,16 @@ export function mergeSettings(partial: unknown): AppSettings {
  */
 export function sanitiseCompanion(c: CompanionSettings): void {
   const d = DEFAULT_SETTINGS.companion;
+  if (
+    c.position === null ||
+    typeof c.position !== 'object' ||
+    !Number.isFinite(c.position.x) ||
+    !Number.isFinite(c.position.y)
+  ) c.position = null;
+  c.monitorId = typeof c.monitorId === 'string' && c.monitorId.trim().length > 0 ? c.monitorId : null;
+  c.topOffset = finiteWithin(c.topOffset, 10, 14, d.topOffset);
   if (!VISUAL_MODES.includes(c.visualMode)) c.visualMode = d.visualMode;
+  c.cursorCompanionEnabled = c.cursorCompanionEnabled === true;
   if (!ANIMATION_LEVELS.includes(c.animations)) c.animations = d.animations;
   c.followSpeed = finiteWithin(c.followSpeed, 0.25, 3, d.followSpeed);
   c.transientIdleMs = finiteWithin(c.transientIdleMs, 1000, 30_000, d.transientIdleMs);
@@ -442,9 +467,9 @@ export type StreamEvent =
   | { type: 'text'; requestId: string; delta: string }
   | { type: 'tool_calls'; requestId: string; toolCalls: ToolCall[] }
   | { type: 'usage'; requestId: string; usage: TokenUsage }
-  | { type: 'done'; requestId: string; finishReason: string }
-  | { type: 'aborted'; requestId: string; hadContent: boolean }
-  | { type: 'error'; requestId: string; message: string; code: CypsErrorCode };
+  | { type: 'done'; requestId: string; finishReason: string; persistence?: 'persistent' | 'session' }
+  | { type: 'aborted'; requestId: string; hadContent: boolean; persistence?: 'persistent' | 'session' }
+  | { type: 'error'; requestId: string; message: string; code: CypsErrorCode; persistence?: 'persistent' | 'session' };
 
 export type CypsErrorCode =
   | 'NO_API_KEY'
@@ -765,24 +790,33 @@ export interface CypsBridge {
   };
   window: {
     setSurface(surface: Surface): Promise<void>;
+    /** Report measured companion content; the shell clamps it to the active work area. */
+    setLayout(surface: Surface, size: { width: number; height: number }): Promise<void>;
     setExpanded(expanded: boolean): Promise<void>;
-    setPosition(x: number, y: number): Promise<void>;
-    getPosition(): Promise<{ x: number; y: number }>;
-    getWorkArea(): Promise<{ x: number; y: number; width: number; height: number; scaleFactor: number }>;
     hide(): Promise<void>;
     show(): Promise<void>;
     openSettings(): Promise<void>;
     closeSettings(): Promise<void>;
     setIgnoreMouseEvents(ignore: boolean): Promise<void>;
+    onFocusLost(handler: () => void): () => void;
+    onSummon(handler: () => void): () => void;
+    onCursorMotion(handler: (reducedMotion: boolean) => void): () => void;
   };
   chat: {
-    send(request: ChatRequest): Promise<{ requestId: string }>;
+    send(request: ChatRequest): Promise<{ requestId: string; persistence?: 'persistent' | 'session' }>;
     cancel(requestId: string): Promise<void>;
     onStream(handler: (event: StreamEvent) => void): () => void;
   };
   history: {
-    list(limit?: number): Promise<ChatMessage[]>;
+    list(query?: HistoryQuery): Promise<ConversationSummary[]>;
+    open(id: string): Promise<ConversationRecordView | null>;
+    create(): Promise<ConversationRecordView>;
+    rename(id: string, title: string): Promise<ConversationSummary | null>;
+    delete(id: string): Promise<boolean>;
     clear(): Promise<void>;
+  };
+  browser: {
+    openSearch(query: string, requestText: string, conversationId: string): Promise<{ query: string; provider: SearchProvider }>;
   };
   screen: {
     listDisplays(): Promise<DiagnosticsSnapshot['displays']>;
@@ -884,6 +918,8 @@ export interface GrantScope {
   app?: string;
   /** Exact folder scope for document indexing. */
   directory?: string;
+  /** Exact normalized query approved for a browser search. */
+  query?: string;
 }
 
 export interface PermissionGrant {
@@ -909,8 +945,30 @@ export interface ChatRequest {
   text: string;
   images?: ImageAttachment[];
   mode: Mode;
-  /** Continue the persisted conversation. */
+  /** Conversation id selected through main-owned history IPC. */
+  conversationId?: string;
+  /** Internal trusted history supplied only by the main process. */
   history?: ChatMessage[];
   /** Prefer the reasoning model for this turn. */
   useReasoningModel?: boolean;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  preview: string;
+  projectId?: string;
+  persistence: 'persistent' | 'session';
+}
+
+export interface ConversationRecordView extends ConversationSummary {
+  messages: ChatMessage[];
+}
+
+export interface HistoryQuery {
+  limit?: number;
+  offset?: number;
+  search?: string;
 }

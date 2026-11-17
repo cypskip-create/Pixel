@@ -14,6 +14,10 @@ export function deriveGrantScope(toolName: string, args: Record<string, unknown>
       const origin = originOf(args.url);
       return origin ? { origin } : {};
     }
+    case 'browser_open_search': {
+      const query = typeof args.query === 'string' ? args.query.trim().replace(/\s+/g, ' ').toLocaleLowerCase() : '';
+      return query ? { query } : {};
+    }
     case 'open_application': {
       const app = normaliseApp(args.name);
       return app ? { app } : {};
@@ -33,6 +37,7 @@ export function scopeCovers(granted: GrantScope | undefined, wanted: GrantScope)
   if (granted.origin !== undefined && granted.origin !== wanted.origin) return false;
   if (granted.app !== undefined && granted.app !== wanted.app) return false;
   if (granted.directory !== undefined && canonicalDirectory(granted.directory) !== canonicalDirectory(wanted.directory)) return false;
+  if (granted.query !== undefined && granted.query !== wanted.query) return false;
   return true;
 }
 
@@ -68,5 +73,6 @@ export function describeScope(scope: GrantScope): string {
   if (scope.origin) return `only ${scope.origin}`;
   if (scope.app) return `only ${scope.app}`;
   if (scope.directory) return `only ${scope.directory}`;
+  if (scope.query) return `only the search “${scope.query.slice(0, 72)}”`;
   return 'this action anywhere';
 }

@@ -4,18 +4,24 @@
  * Design rules this module enforces:
  *  - The window is frameless, transparent, and always on top of normal windows
  *    but *below* system dialogs, so it cannot cover an OS permission prompt.
- *  - It starts near the top-centre of the primary display's work area.
- *  - Its position is remembered, and always clamped so it cannot be dragged or
- *    restored off-screen (including when a monitor is unplugged).
- *  - Sizes are driven by the current surface; the window is small by design.
+ *  - The primary bar stays at the selected display's top center; only its
+ *    display id and small top offset persist, never arbitrary screen points.
+ *  - The optional cursor buddy has its own passive, click-through window.
+ *  - Renderer-measured panel sizes are clamped to compact native bounds.
  */
 
 import { BrowserWindow, screen } from 'electron';
-import type { Rectangle, Display } from 'electron';
+import type { Display } from 'electron';
 import { join } from 'node:path';
-import type { Surface, VisualMode } from '../shared/types';
+import type { CompanionSettings, Surface } from '../shared/types';
+import { CHANNELS } from '../shared/channels';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
+import {
+  anchoredTopCenterBounds,
+  fitPresentationSize,
+  resolveAnchorDisplayId,
+} from '../shared/presentationLayout';
 import {
   companionTarget,
   createFollower,
@@ -34,15 +40,25 @@ export interface WindowManagerDeps {
   devServerUrl: string | null;
   /** Loads the built renderer when no dev server is in use. */
   rendererIndexPath: string;
-  onPositionChange: (position: { x: number; y: number }) => void;
+  onAnchorChange: (anchor: { monitorId: string; position: null }) => void;
   onVisibilityChange: (visible: boolean) => void;
 }
+
+type PresentationSettings = Pick<
+  CompanionSettings,
+  'monitorId' | 'position' | 'topOffset' | 'cursorCompanionEnabled' | 'followSpeed' | 'cursorOffset' | 'reducedMotion'
+>;
+
+const CURSOR_WINDOW_SIZE = 64;
 
 export class WindowManager {
   private main: BrowserWindow | null = null;
   private settings: BrowserWindow | null = null;
+  private cursorWindow: BrowserWindow | null = null;
   private surface: Surface = 'idle';
-  private visualMode: VisualMode = 'stationary';
+  private anchorDisplayId: string | null = null;
+  private topOffset = DEFAULT_OFFSET_FROM_TOP;
+  private cursorCompanionEnabled = false;
   private followSpeed = 1;
   private cursorOffset = { x: 22, y: 20 };
   private reducedMotion = false;
@@ -51,14 +67,18 @@ export class WindowManager {
   private followTickAt = 0;
   /** True while the UI asked for click-through (guidance overlay). */
   private ignoringMouse = false;
+  private pendingSummon = false;
   private readonly deps: WindowManagerDeps;
-  private initialPosition: { x: number; y: number } | null;
+  private legacyPosition: { x: number; y: number } | null;
+  private readonly displayListeners: Array<(...args: any[]) => void> = [];
 
   constructor(
-    initialPosition: { x: number; y: number } | null,
+    initialSettings: Pick<PresentationSettings, 'monitorId' | 'position' | 'topOffset'>,
     deps: WindowManagerDeps,
   ) {
-    this.initialPosition = initialPosition;
+    this.anchorDisplayId = initialSettings.monitorId;
+    this.legacyPosition = initialSettings.position;
+    this.topOffset = initialSettings.topOffset;
     this.deps = deps;
     this.registerDisplayListeners();
   }
@@ -69,7 +89,7 @@ export class WindowManager {
     if (this.main && !this.main.isDestroyed()) return this.main;
 
     const size = SURFACE_SIZES[this.surface];
-    const target = this.resolveInitialPosition(size);
+    const target = this.anchorBounds(size);
 
     const win = new BrowserWindow({
       width: size.width,
@@ -80,7 +100,7 @@ export class WindowManager {
       transparent: true,
       backgroundColor: '#00000000',
       resizable: false,
-      movable: true,
+      movable: false,
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
@@ -107,15 +127,16 @@ export class WindowManager {
     win.once('ready-to-show', () => {
       win.showInactive();
       this.deps.onVisibilityChange(true);
-      this.startCursorFollow();
     });
 
-    win.on('moved', () => {
-      // Cursor-follow motion is transient and should not rewrite the user's
-      // remembered stationary position every frame.
-      if (this.visualMode === 'cursor') return;
-      const [x, y] = win.getPosition();
-      this.deps.onPositionChange({ x, y });
+    win.on('blur', () => {
+      if (!win.isDestroyed()) win.webContents.send(CHANNELS.windowFocusLost);
+    });
+
+    win.webContents.on('did-finish-load', () => {
+      if (!this.pendingSummon || win.isDestroyed()) return;
+      this.pendingSummon = false;
+      win.webContents.send(CHANNELS.windowSummon);
     });
 
     win.on('closed', () => {
@@ -134,8 +155,8 @@ export class WindowManager {
     }
 
     const win = new BrowserWindow({
-      width: 560,
-      height: 680,
+      width: 500,
+      height: 540,
       title: 'Pixel Settings',
       show: false,
       resizable: true,
@@ -174,24 +195,6 @@ export class WindowManager {
 
   /* ------------------------------ geometry ---------------------------- */
 
-  /**
-   * Restore the remembered position, or centre horizontally near the top.
-   * Always clamped to the work area of the monitor the point falls inside.
-   */
-  private resolveInitialPosition(size: { width: number; height: number }): { x: number; y: number } {
-    const saved = this.initialPosition;
-    if (saved) {
-      const display = screen.getDisplayNearestPoint({ x: saved.x, y: saved.y });
-      return clampToWorkArea(saved, size, display, true);
-    }
-    const display = screen.getPrimaryDisplay();
-    const area = display.workArea;
-    return {
-      x: Math.round(area.x + (area.width - size.width) / 2),
-      y: Math.round(area.y + DEFAULT_OFFSET_FROM_TOP),
-    };
-  }
-
   /** Current surface size in logical pixels. */
   sizeFor(surface: Surface): { width: number; height: number } {
     return SURFACE_SIZES[surface];
@@ -202,91 +205,64 @@ export class WindowManager {
    * the orb does not jump when it expands into the input bar.
    */
   setSurface(surface: Surface): void {
+    this.setLayout(surface, SURFACE_SIZES[surface]);
+  }
+
+  /**
+   * Apply one renderer-measured panel layout. The measured request is clamped
+   * to a compact width and the selected display's work area before it reaches
+   * native window bounds.
+   */
+  setLayout(surface: Surface, requestedSize: { width: number; height: number }): void {
     this.surface = surface;
     const win = this.main;
     if (!win || win.isDestroyed()) {
-      if (surface !== 'idle') this.stopCursorFollow();
+      this.syncCursorFollow();
       return;
     }
 
     if (surface === 'hidden') {
-      this.stopCursorFollow();
       win.hide();
       this.deps.onVisibilityChange(false);
+      this.syncCursorFollow();
       return;
     }
 
-    const current = win.getBounds();
-    const size = SURFACE_SIZES[surface];
-    const display = screen.getDisplayMatching(current);
-    const centredX = Math.round(current.x + (current.width - size.width) / 2);
-    const target = clampToWorkArea(
-      { x: centredX, y: current.y },
-      size,
-      display,
-      false,
-    );
+    const display = this.anchorDisplay();
+    const size = fitPresentationSize(requestedSize, display.workArea);
+    const target = anchoredTopCenterBounds(display.workArea, size, this.topOffset);
 
-    win.setBounds({
-      x: target.x,
-      y: target.y,
-      width: size.width,
-      height: size.height,
-    });
+    win.setBounds(target);
 
     if (!win.isVisible()) win.showInactive();
-    this.deps.onPositionChange({ x: target.x, y: target.y });
-    if (surface === 'idle') this.startCursorFollow();
-    else this.stopCursorFollow();
+    this.syncCursorFollow();
   }
 
-  /** Apply presentation preferences independently of Guide/Agent/Hybrid mode. */
-  setVisualMode(
-    mode: VisualMode,
-    followSpeed: number,
-    cursorOffset: { x: number; y: number },
-    reducedMotion: boolean,
-  ): void {
-    const wasFollowing = this.visualMode === 'cursor';
-    this.visualMode = mode;
-    this.followSpeed = followSpeed;
-    this.cursorOffset = cursorOffset;
-    this.reducedMotion = reducedMotion;
-    if (mode === 'cursor') {
-      this.startCursorFollow();
-    } else {
-      this.stopCursorFollow();
-      if (wasFollowing) this.deps.onPositionChange(this.currentPosition());
+  /** Apply pinned-bar and independent cursor-companion settings. */
+  setPresentationSettings(settings: PresentationSettings): void {
+    this.topOffset = settings.topOffset;
+    this.followSpeed = settings.followSpeed;
+    this.cursorOffset = settings.cursorOffset;
+    this.reducedMotion = settings.reducedMotion;
+    this.cursorCompanionEnabled = settings.cursorCompanionEnabled;
+    this.resolveAnchor(settings.monitorId, settings.position);
+
+    if (this.cursorWindow && !this.cursorWindow.isDestroyed() && !this.cursorWindow.webContents.isDestroyed()) {
+      try {
+        this.cursorWindow.webContents.send(CHANNELS.windowCursorMotion, this.reducedMotion);
+      } catch {
+        // A renderer notification must never make a valid Settings save fail.
+      }
     }
-  }
 
-  moveTo(x: number, y: number): void {
     const win = this.main;
-    if (!win || win.isDestroyed()) return;
-    const size = win.getBounds();
-    const display = screen.getDisplayNearestPoint({ x, y });
-    const target = clampToWorkArea({ x, y }, { width: size.width, height: size.height }, display, true);
-    win.setBounds({ x: target.x, y: target.y, width: size.width, height: size.height });
-    this.deps.onPositionChange(target);
-  }
-
-  currentPosition(): { x: number; y: number } {
-    const win = this.main;
-    if (!win || win.isDestroyed()) return this.initialPosition ?? { x: 0, y: 0 };
-    const [x, y] = win.getPosition();
-    return { x, y };
-  }
-
-  workAreaFor(position?: { x: number; y: number }): {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    scaleFactor: number;
-  } {
-    const point = position ?? this.currentPosition();
-    const display = screen.getDisplayNearestPoint(point);
-    return { ...display.workArea, scaleFactor: display.scaleFactor };
+    if (win && !win.isDestroyed()) {
+      const bounds = win.getBounds();
+      const display = this.anchorDisplay();
+      win.setBounds(anchoredTopCenterBounds(display.workArea, bounds, this.topOffset));
+    }
+    this.syncCursorWindow();
+    this.syncCursorFollow();
   }
 
   /* ---------------------------- visibility ---------------------------- */
@@ -296,13 +272,18 @@ export class WindowManager {
     if (win.isMinimized()) win.restore();
     win.showInactive();
     this.deps.onVisibilityChange(true);
-    this.startCursorFollow();
+    this.pendingSummon = true;
+    if (!win.webContents.isLoading()) {
+      this.pendingSummon = false;
+      win.webContents.send(CHANNELS.windowSummon);
+    }
+    this.syncCursorWindow();
+    this.syncCursorFollow();
   }
 
   hide(): void {
     const win = this.main;
     if (!win || win.isDestroyed()) return;
-    this.stopCursorFollow();
     win.hide();
     this.deps.onVisibilityChange(false);
   }
@@ -347,14 +328,77 @@ export class WindowManager {
     if (this.settings && !this.settings.isDestroyed()) this.settings.close();
   }
 
+  private syncCursorWindow(): void {
+    if (!this.cursorCompanionEnabled) {
+      this.stopCursorFollow();
+      if (this.cursorWindow && !this.cursorWindow.isDestroyed()) this.cursorWindow.close();
+      this.cursorWindow = null;
+      return;
+    }
+    if (this.cursorWindow && !this.cursorWindow.isDestroyed()) return;
+
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    const initial = companionTarget(cursor, display.workArea, {
+      offset: this.cursorOffset,
+      size: { width: CURSOR_WINDOW_SIZE, height: CURSOR_WINDOW_SIZE },
+      margin: 8,
+    });
+    const win = new BrowserWindow({
+      x: Math.round(initial.x),
+      y: Math.round(initial.y),
+      width: CURSOR_WINDOW_SIZE,
+      height: CURSOR_WINDOW_SIZE,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      resizable: false,
+      movable: false,
+      focusable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      show: false,
+      alwaysOnTop: true,
+      webPreferences: {
+        preload: this.deps.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        spellcheck: false,
+      },
+    });
+    win.setAlwaysOnTop(true, 'floating');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+    win.setIgnoreMouseEvents(true, { forward: true });
+    win.once('ready-to-show', () => {
+      if (!win.isDestroyed() && this.cursorCompanionEnabled) {
+        win.showInactive();
+        this.cursorWindow = win;
+        this.startCursorFollow();
+      }
+    });
+    win.on('closed', () => {
+      if (this.cursorWindow === win) {
+        this.cursorWindow = null;
+        this.stopCursorFollow();
+      }
+    });
+    this.loadRenderer(win, '?window=cursor');
+    this.cursorWindow = win;
+  }
+
   private startCursorFollow(): void {
-    if (this.visualMode !== 'cursor' || this.surface !== 'idle' || this.followTimer) return;
-    const win = this.main;
+    if (!this.cursorCompanionEnabled || this.surface !== 'idle' || this.followTimer) return;
+    const win = this.cursorWindow;
     if (!win || win.isDestroyed() || !win.isVisible()) return;
     const [x, y] = win.getPosition();
     this.follower = createFollower({ x, y });
     this.followTickAt = Date.now();
-    // Cursor mode is opt-in and polls only while its compact orb is visible.
+    // Poll only while the explicitly enabled click-through buddy is visible.
     this.followTimer = setInterval(() => this.tickCursorFollow(), 33);
     this.followTimer.unref?.();
   }
@@ -366,17 +410,16 @@ export class WindowManager {
   }
 
   private tickCursorFollow(): void {
-    const win = this.main;
-    if (this.visualMode !== 'cursor' || this.surface !== 'idle' || !win || win.isDestroyed() || !win.isVisible()) {
+    const win = this.cursorWindow;
+    if (!this.cursorCompanionEnabled || this.surface !== 'idle' || !win || win.isDestroyed() || !win.isVisible()) {
       this.stopCursorFollow();
       return;
     }
     const cursor = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(cursor);
-    const bounds = win.getBounds();
     const target = companionTarget(cursor, display.workArea, {
       offset: this.cursorOffset,
-      size: { width: bounds.width, height: bounds.height },
+      size: { width: CURSOR_WINDOW_SIZE, height: CURSOR_WINDOW_SIZE },
       margin: 8,
     });
     const now = Date.now();
@@ -394,7 +437,13 @@ export class WindowManager {
     this.followTickAt = now;
     const nextX = Math.round(this.follower.position.x);
     const nextY = Math.round(this.follower.position.y);
-    if (Math.abs(nextX - bounds.x) > 1 || Math.abs(nextY - bounds.y) > 1) win.setPosition(nextX, nextY);
+    const [currentX, currentY] = win.getPosition();
+    if (Math.abs(nextX - currentX) > 1 || Math.abs(nextY - currentY) > 1) win.setPosition(nextX, nextY);
+  }
+
+  private syncCursorFollow(): void {
+    if (this.cursorCompanionEnabled && this.surface === 'idle') this.startCursorFollow();
+    else this.stopCursorFollow();
   }
 
   /* ------------------------------ displays ---------------------------- */
@@ -402,50 +451,69 @@ export class WindowManager {
   private registerDisplayListeners(): void {
     const reclamp = () => {
       const win = this.main;
-      if (!win || win.isDestroyed()) return;
-      const bounds = win.getBounds();
-      const display = screen.getDisplayMatching(bounds);
-      const target = clampToWorkArea(
-        { x: bounds.x, y: bounds.y },
-        { width: bounds.width, height: bounds.height },
-        display,
-        true,
-      );
-      if (target.x !== bounds.x || target.y !== bounds.y) {
-        win.setPosition(target.x, target.y);
+      this.resolveAnchor(this.anchorDisplayId, this.legacyPosition);
+      if (win && !win.isDestroyed()) {
+        const bounds = win.getBounds();
+        win.setBounds(anchoredTopCenterBounds(this.anchorDisplay().workArea, bounds, this.topOffset));
       }
+      this.syncCursorFollow();
     };
 
-    // A monitor being unplugged must never strand the orb off-screen.
+    // Re-anchor to the selected display; if it was removed, safely fall back.
     screen.on('display-removed', reclamp);
     screen.on('display-added', reclamp);
     screen.on('display-metrics-changed', reclamp);
+    this.displayListeners.push(reclamp);
   }
-}
 
-/**
- * Keep a window fully inside a display's work area.
- *
- * `preferTop` clamps the top edge to the work area's top, which is what the
- * "floats at the top of the screen" behaviour requires; otherwise the existing
- * vertical position is preserved when it is already valid.
- */
-export function clampToWorkArea(
-  position: { x: number; y: number },
-  size: { width: number; height: number },
-  display: Display,
-  preferTop: boolean,
-): { x: number; y: number } {
-  const area: Rectangle = display.workArea;
-  const maxX = area.x + area.width - size.width;
-  const maxY = area.y + area.height - size.height;
+  private resolveAnchor(monitorId: string | null, legacyPosition: { x: number; y: number } | null): void {
+    const displays = screen.getAllDisplays();
+    const availableIds = displays.map((display) => String(display.id));
+    const primaryId = String(screen.getPrimaryDisplay().id);
+    const legacyDisplayId = legacyPosition
+      ? String(screen.getDisplayNearestPoint(legacyPosition).id)
+      : null;
+    const resolvedId = resolveAnchorDisplayId(monitorId, legacyDisplayId, availableIds, primaryId);
+    const migrated = monitorId !== resolvedId || legacyPosition !== null;
+    this.anchorDisplayId = resolvedId;
+    this.legacyPosition = null;
+    if (migrated) this.persistAnchor();
+  }
 
-  const x = Math.min(Math.max(position.x, area.x), Math.max(area.x, maxX));
-  const y = preferTop
-    ? Math.min(Math.max(position.y, area.y), Math.max(area.y, maxY))
-    : Math.min(Math.max(position.y, area.y), Math.max(area.y, maxY));
+  private anchorDisplay(): Display {
+    const displays = screen.getAllDisplays();
+    const resolvedId = resolveAnchorDisplayId(
+      this.anchorDisplayId,
+      null,
+      displays.map((display) => String(display.id)),
+      String(screen.getPrimaryDisplay().id),
+    );
+    this.anchorDisplayId = resolvedId;
+    return displays.find((display) => String(display.id) === resolvedId) ?? screen.getPrimaryDisplay();
+  }
 
-  return { x: Math.round(x), y: Math.round(y) };
+  private anchorBounds(size: { width: number; height: number }): ReturnType<typeof anchoredTopCenterBounds> {
+    this.resolveAnchor(this.anchorDisplayId, this.legacyPosition);
+    const display = this.anchorDisplay();
+    return anchoredTopCenterBounds(display.workArea, size, this.topOffset);
+  }
+
+  private persistAnchor(): void {
+    if (this.anchorDisplayId === null) return;
+    this.deps.onAnchorChange({ monitorId: this.anchorDisplayId, position: null });
+  }
+
+  dispose(): void {
+    this.stopCursorFollow();
+    this.cursorWindow?.close();
+    this.cursorWindow = null;
+    for (const listener of this.displayListeners) {
+      screen.removeListener('display-removed', listener);
+      screen.removeListener('display-added', listener);
+      screen.removeListener('display-metrics-changed', listener);
+    }
+    this.displayListeners.length = 0;
+  }
 }
 
 /**

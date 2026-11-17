@@ -52,13 +52,15 @@ describe('sandbox preload bundle', () => {
     expect(exposedGlobals).toEqual(['cyps', 'cypsShell']);
   });
 
-  it('writes the bundled file at the path used by both BrowserWindows', () => {
+  it('writes the bundled file at the path used by each secure companion window', () => {
     expect(appSource).toContain("join(mainDir(), '..', 'preload', 'index.js')");
     expect(windowSource).toContain("join(mainDir, '..', 'preload', 'index.js')");
-    expect([...windowSource.matchAll(/contextIsolation: true/g)]).toHaveLength(2);
-    expect([...windowSource.matchAll(/nodeIntegration: false/g)]).toHaveLength(2);
-    expect([...windowSource.matchAll(/sandbox: true/g)]).toHaveLength(2);
-    expect([...windowSource.matchAll(/webSecurity: true/g)]).toHaveLength(2);
+    expect([...windowSource.matchAll(/contextIsolation: true/g)]).toHaveLength(3);
+    expect([...windowSource.matchAll(/nodeIntegration: false/g)]).toHaveLength(3);
+    expect([...windowSource.matchAll(/sandbox: true/g)]).toHaveLength(3);
+    expect([...windowSource.matchAll(/webSecurity: true/g)]).toHaveLength(3);
+    expect(windowSource).toContain('focusable: false');
+    expect(windowSource).toContain('win.setIgnoreMouseEvents(true, { forward: true })');
   });
 
   it('runs the bundler for development, builds and Windows packaging', () => {

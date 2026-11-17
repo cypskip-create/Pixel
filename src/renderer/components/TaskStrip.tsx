@@ -71,6 +71,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue }: Tas
   return (
     <section
       aria-label={`Task: ${task.title}`}
+      data-layout-panel
       className="glass animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
     >
       <div
