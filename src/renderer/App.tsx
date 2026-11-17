@@ -31,6 +31,14 @@ import { readBridge, safeSubscribe } from '@/lib/bridge';
 import { resolveSurface } from '@/lib/surface';
 import { Workspace } from '@/Workspace';
 
+// The main process selects the native backdrop and passes the matching visual
+// token with the trusted window URL. Other Pixel windows keep their own solid
+// or Mica surfaces.
+const pixelGlassMode = new URLSearchParams(window.location.search).get('pixel-glass');
+if (pixelGlassMode === 'acrylic' || pixelGlassMode === 'fallback') {
+  document.documentElement.dataset.pixelGlass = pixelGlassMode;
+}
+
 /** True when the renderer was opened as the settings window by the shell. */
 function isSettingsWindow(): boolean {
   return new URLSearchParams(window.location.search).get('window') === 'settings';

@@ -68,6 +68,9 @@ describe('entry point ordering', () => {
     expect(appSource).not.toContain("appendSwitch('disable-gpu')");
     expect(appSource).toContain("hasSwitch('disable-gpu')");
     expect(appSource).not.toContain("appendSwitch('disable-software-rasterizer')");
+    expect(packageJson.scripts['dev:electron:gpu']).toContain('electron .');
+    expect(packageJson.scripts['dev:electron:gpu']).not.toContain('--disable-gpu');
+    expect(packageJson.scripts['dev:gpu']).toContain('npm:dev:electron:gpu');
   });
 
   it('runs the single-instance lock only after logging exists', () => {

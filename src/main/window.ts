@@ -17,7 +17,7 @@ import { release as osRelease } from 'node:os';
 import type { CompanionSettings, Surface } from '../shared/types';
 import type { WorkspaceWindowState } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
-import { isTrustedRendererUrl, supportsWindowsBackdrop } from './windowPolicy';
+import { isTrustedRendererUrl, resolveCompanionGlassMode, supportsWindowsBackdrop } from './windowPolicy';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
 import {
@@ -78,6 +78,7 @@ export class WindowManager {
   private ignoringMouse = false;
   private pendingSummon = false;
   private readonly deps: WindowManagerDeps;
+  private readonly glassMode: ReturnType<typeof resolveCompanionGlassMode>;
   private legacyPosition: { x: number; y: number } | null;
   private readonly displayListeners: Array<(...args: any[]) => void> = [];
 
@@ -89,6 +90,7 @@ export class WindowManager {
     this.legacyPosition = initialSettings.position;
     this.topOffset = initialSettings.topOffset;
     this.deps = deps;
+    this.glassMode = resolveCompanionGlassMode(process.platform, osRelease(), process.env.PIXEL_GLASS_MODE);
     this.registerDisplayListeners();
   }
 
@@ -108,7 +110,9 @@ export class WindowManager {
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
-      ...(process.platform === 'win32' && supportsWindowsBackdrop(osRelease()) ? { backgroundMaterial: 'acrylic' as const } : {}),
+      ...(process.platform === 'win32'
+        ? { backgroundMaterial: this.glassMode === 'acrylic' ? 'acrylic' as const : 'none' as const }
+        : {}),
       resizable: false,
       movable: false,
       minimizable: false,
@@ -157,7 +161,7 @@ export class WindowManager {
       this.mainReady = false;
     });
 
-    this.loadRenderer(win);
+    this.loadRenderer(win, `?pixel-glass=${this.glassMode}`);
     this.main = win;
     return win;
   }

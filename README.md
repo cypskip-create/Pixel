@@ -48,13 +48,21 @@ position are saved locally. The supplied cyan, aqua and white P mark is defined
 once in `src/shared/pixelMark.json` and reused by the renderer, tray and Windows
 app icon.
 
-The latest local check passed TypeScript validation, the production source
-build, native-helper compilation and **718 tests**. Another 26 tests were
-skipped because this environment lacks Playwright Chromium, NSIS and the opt-in
-foreground desktop fixture. Windows GUI and packaged application acceptance
-remain open; Chromium download and isolated packaging were blocked by DNS. See
-the [current release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md)
-before treating this tree as a release candidate.
+The latest local validation for the glass and task-status repair passed
+TypeScript validation, the production source build and **722 tests**. Another
+26 tests were skipped because this environment lacks Playwright Chromium and
+NSIS, and the native foreground fixture is opt-in. The actual post-change
+companion appearance, GPU-enabled packaged startup and installer acceptance
+still need laptop validation. See the [current release-readiness
+report](docs/validation/PIXEL_RELEASE_READINESS.md) before treating this tree
+as a release candidate.
+
+On supported Windows 11 builds, the floating companion uses the native DWM
+Acrylic backdrop. Its CSS surfaces are translucent tints; CSS
+`backdrop-filter` does not blur other desktop applications. Use
+`PIXEL_GLASS_MODE=fallback` for an opaque comparison, and `npm run dev:gpu` to
+launch the development build with GPU acceleration enabled. The existing
+`npm run dev` continues to pass `--disable-gpu` for diagnostics.
 
 The current architecture and security boundaries are in
 [`docs/architecture/PIXEL_AGENT_RUNTIME.md`](docs/architecture/PIXEL_AGENT_RUNTIME.md)

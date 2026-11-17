@@ -146,13 +146,22 @@ mark alone with transparent surroundings so Windows can blend it with the tray.
 The cursor buddy stays a separate pointer character and uses the same cyan/aqua
 palette.
 
-The island and compact toolbar use translucent layered fills, a thin edge, an
-inner highlight and backdrop blur, with a more solid surface fallback when the
-renderer lacks backdrop-filter support. Workspace uses a readable dark glass
-surface and Windows Mica when the OS supports it. The main island opts into
-Windows Acrylic on supported Windows 11 builds. GPU acceleration is not disabled
-in production; `npm run dev:electron` keeps `--disable-gpu` as a diagnostic
-launch option.
+The island surfaces use shared translucent fills, restrained edges and shadows.
+On supported Windows 11 builds, the native BrowserWindow selects DWM Acrylic;
+the renderer uses lighter tints so that material can show through. CSS
+`backdrop-filter` only samples other renderer content and cannot blur the
+desktop or other applications, so the companion's glass utilities do not use it
+to claim an external blur. The opaque fallback is selectable with
+`PIXEL_GLASS_MODE=fallback`. Workspace keeps its existing Windows Mica window
+backdrop and opaque reading surface; CSS filters there affect only content
+inside Workspace.
+
+The DWM attribute was read back as Acrylic for the pre-repair Pixel window and
+Mica for Workspace on Windows build `26300.9974`. The supplied pre-repair
+screenshot showed overly opaque, separate cards. The edited surface tints have
+not yet been visually checked in a new running build. GPU acceleration is not
+disabled in production; `npm run dev:electron` keeps `--disable-gpu`, while
+`npm run dev:gpu` provides a separate normal-GPU development comparison.
 
 ## Separate Pixel Workspace window
 

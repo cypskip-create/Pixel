@@ -25,6 +25,11 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Set up Python for document worker tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Create artifact folders
         shell: pwsh
         run: |
@@ -78,6 +83,8 @@ jobs:
       - name: Run full automated test suite
         shell: pwsh
         run: |
+          $env:PIXEL_PYTHON = (Get-Command python).Source
+          Write-Host "Document tests use Python at $env:PIXEL_PYTHON"
           npm test -- --reporter=default --reporter=junit --outputFile.junit=artifacts/test-results/vitest-junit.xml 2>&1 | Tee-Object artifacts/logs/tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
