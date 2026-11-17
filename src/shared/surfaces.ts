@@ -26,7 +26,7 @@ export const SURFACE_SIZES: Record<Surface, SurfaceSize> = {
 };
 
 /** Gap between the top of the work area and the idle orb. */
-export const DEFAULT_OFFSET_FROM_TOP = 16;
+export const DEFAULT_OFFSET_FROM_TOP = 12;
 
 /** The compact input bar width, referenced by the UI and by tests. */
 export const INPUT_BAR_WIDTH = 460;

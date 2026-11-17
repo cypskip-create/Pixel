@@ -79,14 +79,14 @@ function preloadPath(): string {
 }
 
 function createWindowManager(store: SettingsStore): WindowManager {
-  const manager = new WindowManager(store.get().companion.position, {
+  const manager = new WindowManager(store.get().companion, {
     preloadPath: preloadPath(),
     devServerUrl: DEV_SERVER_URL,
     rendererIndexPath: join(rendererDir(), 'index.html'),
-    onPositionChange: (position) => {
-      // Persist quietly; a failure here must not interrupt dragging.
+    onAnchorChange: (anchor) => {
+      // Persist only the selected display and clear the retired free-form point.
       try {
-        store.set({ companion: { position } });
+        store.set({ companion: anchor });
       } catch {
         // ignore
       }
@@ -197,12 +197,7 @@ export async function start(): Promise<void> {
   const store = settings;
 
   windows = createWindowManager(store);
-  windows.setVisualMode(
-    store.get().companion.visualMode,
-    store.get().companion.followSpeed,
-    store.get().companion.cursorOffset,
-    store.get().companion.reducedMotion,
-  );
+  windows.setPresentationSettings(store.get().companion);
 
   // Capture is authorized per explicit UI action only.
   let captureAuthorized = false;
@@ -341,7 +336,8 @@ export async function start(): Promise<void> {
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) windows?.show();
+  const main = windows?.getMainWindow();
+  if (!main || main.isDestroyed()) windows?.show();
   });
 }
 
@@ -365,6 +361,7 @@ app.on('before-quit', () => {
   shutdownAgentWorkers = null;
   shortcuts?.unregisterAll();
   tray?.destroy();
+  windows?.dispose();
 });
 
 app.on('will-quit', () => {

@@ -34,6 +34,54 @@ checkpoint; those are subsequent checkpoints.
 - Native Electron screenshots at the requested display sizes/scales are not available from this rebuilt branch yet. The visible Pixel window found during inspection belongs to a separate checkout (`C:\dev\Pixel`) and was left untouched. Native clipping, DPI, and multi-monitor checks remain unverified.
 - A branch-local Electron launch using the separate Vite port 5200 and `--disable-gpu` exited with code 0 before creating a targetable window or startup log. No GUI behavior is claimed from that attempt; the existing single-instance Pixel process belongs to `C:\dev\Pixel`.
 
+## UI Experience 2.0 — Checkpoint 2
+
+- Replaced the primary window's remembered X/Y behavior with a persistent selected-display anchor. The bar is centered in that display's work area, starts 12 logical pixels from its top by default, and stays centered through measured expansion and collapse. Its top offset can be adjusted from 10 to 14 px.
+- Legacy coordinates now only identify the old display once; startup clears the obsolete position and persists the selected display id. Missing displays fall back to the primary display. Display topology changes reapply the anchor.
+- Removed the renderer's arbitrary window position IPC methods and the orb drag hook. The native main bar is not movable.
+- Added an independent 64×64 transparent cursor BrowserWindow. It is non-focusable, non-movable, click-through, sandboxed, always-on-top at the ordinary floating level, and rendered as a small orb. It uses the existing spring/edge-clamp logic at 30 Hz while the main bar is idle. It freezes during active UI/approval surfaces and closes when disabled.
+- Settings now reports the pinned top bar, selects a display, adjusts top offset, independently toggles the cursor companion, and controls its speed, offset and reduced motion. A legacy cursor presentation preference migrates to the new toggle only if no explicit value exists.
+- Added tests for anchor geometry, monitor fallback, legacy preference migration, display selection and independent cursor enablement. Geometry and unit tests do not prove native window lifecycle, click-through or mixed-DPI rendering.
+- The target-laptop GUI acceptance sequence is in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`; no native visual pass is claimed for this checkpoint in this execution environment.
+
+Checkpoint 2 validation and its local commit identity are recorded below after
+the full suite and production build.
+
+### Checkpoint 2 validation
+
+- `npm run typecheck`: passed.
+- Focused presentation tests: **142 passed across 5 files**.
+- `npm test -- --reporter=dot`: **675 passed, 0 failed, 26 skipped across 31 files (701 tests total)**. Browser tests were skipped because Playwright Chromium is not installed; NSIS tests were skipped because `makensis` is unavailable; the opt-in native foreground integration suite remains skipped.
+- `npm run build`: passed (main TypeScript, sandbox preload bundle and Vite renderer).
+- `git diff --check`: passed.
+- Native Windows click-through, multi-monitor/DPI and restart acceptance: unverified; follow the checkpoint-specific procedure in the Windows acceptance document.
+
+## UI Experience 2.0 — checkpoints 3–5 and integration
+
+The remaining UI Experience 2.0 work is implemented in the current local tree.
+It remains uncommitted so the user can commit the complete task after review.
+
+- The duplicate mode selector was removed. One presentation-layout path measures the visible stack and resizes the native window within the selected display work area. This addresses the original clipping defect: renderer z-index cannot draw beyond BrowserWindow bounds.
+- The main bar is pinned to the selected display's top-center anchor. Arbitrary remembered main-window X/Y updates were removed; cursor following now belongs to a separate passive window and cannot reposition the bar.
+- Persistent chat lifecycle is connected through HistoryStore, main-owned IPC and Recent Chats. New/open/continue/rename/delete/clear/search are supported; context is retrieved in main, filtered to sanitized user-facing messages, and bounded before provider use. Persistence obeys `privacy.persistHistory`; session-only operation is used when persistence is disabled or disk writes fail. Retention is capped at 50 conversations and 200 messages each.
+- Explicit search phrases open a search URL for the configured Google, Bing or DuckDuckGo provider in the operating-system default browser. URLs are built in the main process with fixed HTTPS hosts and encoded query parameters. The renderer receives only a narrow search command; model-proposed searches use the existing permission policy. Pixel reports a successful launch, not read or verified results.
+- Response reasoning remains separate and collapsed. Speech status appears only after playback succeeds. Screenshot and image-attachment labels now describe the actual supported actions. Terminal task cards dismiss without deleting task evidence. Settings uses a compact window/panel height.
+- Main risks remain native UI layout, restart persistence and OS browser behavior, which need target-Windows acceptance. The isolated package attempt failed on restricted DNS before producing an unpacked artifact.
+
+### Current validation
+
+- `npm run typecheck`: passed.
+- Focused changed-area suite: **69 passed across 8 files**.
+- Full suite: **712 passed, 0 failed, 26 skipped across 36 files (738 tests total)**. Skips are for unavailable Playwright Chromium/NSIS prerequisites and the opt-in native foreground integration.
+- A later repeat was stopped before Vitest returned a result; no result was inferred from that interrupted run. The totals above are from the latest completed full-suite run.
+- `npm run build`: passed (main TypeScript, bundled preload, Vite renderer).
+- `git diff --check`: passed after the documentation edits.
+- Isolated unpacked packaging with `release/ui-experience-2-validation` as the destination failed before output because electron-builder could not resolve `github.com` (`ENOTFOUND`). Existing `release` artifacts were left untouched.
+- `npm run test:preload-sandbox`: **blocked before the smoke app starts**. Electron 45.2.3 exited with `2147483651` (`0x80000003`); the captured log contains no `[preload-smoke] Electron main entry loaded` marker and no report JSON was written. The harness now removes stale reports and records launcher details/logs so a future run cannot mistake an old report for a pass. This runner failure does not exercise the preload assertions.
+- Windows GUI acceptance was not completed. The Computer Use attempt stopped before application selection; no Windows UI behavior is claimed as passed.
+- CI investigation: the remote `main` HEAD is `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`. The GitHub connector returned no status checks for it and no workflow run for the current unpushed local branch, so the reported preload-smoke job failure had no accessible Actions log. The local workflow and smoke harness were inspected; the sandbox/security assertions remain enabled. This runner's matching pre-main Electron exit points to a runtime/runner launch failure before the smoke app or preload executes, but the remote job's root cause cannot be established without its Actions log. Reproduce with `npm run test:preload-sandbox` on the laptop or next GitHub run.
+- Current local `HEAD`: `f10084e6f11129e4c453ba546ed09e50e6b9d8de`. The user will create the commit; no commit or push was performed.
+
 ## Current implementation
 
 The existing Electron + React + TypeScript product is retained. The local changes extend its modular main process and settings UI.
@@ -53,7 +101,10 @@ The existing Electron + React + TypeScript product is retained. The local change
 - The Windows C# UI Automation helper is compiled and connected as an approved, bounded surface: foreground window/title reads, semantic element search in the foreground or an explicitly selected window, exact unique `InvokePattern` activation, and matching exact present/absent postcondition checks. Actions fail closed if the expected postcondition already held before activation or UIA enumeration is incomplete. Raw coordinate actions are not available through it.
 - A metadata-only foreground observer starts before Pixel creates its windows. It uses Windows foreground/window events, with a 250 ms metadata polling fallback if the event hook or message loop fails; it excludes Pixel's main process and retains the last external foreground window in memory. It reports opaque session window references, process identity, title, bounds, minimized state and observation time; raw HWNDs stay internal. Current external windows can be listed for explicit user selection. Closed/reused/stale targets are rejected, and actions never switch applications. No background screenshots or observer history are persisted; the active task keeps volatile window identity only in memory for exact postcondition matching.
 - UIA search, invocation and verification carry the selected opaque window reference plus exact title/process identity. Typing also resolves the selected target and rechecks HWND/PID/title/process identity immediately before input. Verification evidence is associated with the same window identity as the approved action.
-- Cursor presentation follows the pointer with the existing spring/edge geometry while the orb is collapsed; it is independent of Guide/Agent/Hybrid mode and pauses while the companion is expanded.
+- The optional cursor companion uses a separate passive window and existing spring/edge geometry; it never repositions the pinned top bar and pauses while the bar is active.
+- Recent Chats is connected to main-owned conversation history and bounded model context. Sanitized user-facing transcripts are saved through HistoryStore only when persistence is enabled, with session-only fallback otherwise. The panel supports transcript search, create, restore, rename and confirmed deletion.
+- Explicit web-search requests use a bounded query, configured fixed provider URL and main-process `shell.openExternal` call. Model-proposed searches remain permission-gated. Opening a results page is not recorded as reading the results.
+- Response, task and Settings feedback now reflects actual completion/playback state, and control labels match the screenshot and image-upload behavior.
 - The task strip shows verified steps distinctly and can display the persisted final response after restart.
 - Settings now manages the DeepSeek API key through existing encrypted main-process IPC: masked draft input with optional reveal, save/change, confirmed removal, configured status and a user-triggered connection test with backend-category feedback. The stored key is never returned to the renderer or written to AppSettings, localStorage, task history or logs.
 

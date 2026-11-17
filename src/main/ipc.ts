@@ -12,7 +12,7 @@
  *  - Emergency stop is enforced in the agent runtime, not in the UI.
  */
 
-import { app, ipcMain, screen } from 'electron';
+import { app, ipcMain, screen, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
@@ -21,9 +21,12 @@ import type {
   CaptureResult,
   ChatMessage,
   ChatRequest,
+  ConversationRecordView,
+  ConversationSummary,
   ConnectionTestResult,
   DeepSeekSettingsPatch,
   DiagnosticsSnapshot,
+  HistoryQuery,
   EmergencyStopReport,
   PermissionDecision,
   PermissionGrant,
@@ -36,6 +39,7 @@ import type {
   MemoryRecordView,
   MemoryExportView,
   PixelMemoryKind,
+  SearchProvider,
 } from '../shared/types';
 import { DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
@@ -63,7 +67,10 @@ import {
   TaskManager,
 } from './agent/runtime';
 import { BUILTIN_TOOLS, ToolRegistry } from './agent/tools';
-import { HistoryStore } from './history/store';
+import { HistoryStore, MAX_CONVERSATIONS, deriveTitle } from './history/store';
+import type { ConversationRecord } from './history/store';
+import { recordConversationStreamEvent } from './history/stream';
+import type { PendingConversationStream } from './history/stream';
 import { SURFACE_SIZES } from '../shared/surfaces';
 import { TaskStore } from './tasks/store';
 import { SkillStore } from './skills/store';
@@ -72,6 +79,8 @@ import type { ModelProvider } from './providers/deepseek';
 import { SettingsStore } from './settings';
 import { collectDiagnostics } from './system/diagnostics';
 import type { WindowManager } from './window';
+import { redactTaskText } from './tasks/schema';
+import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../shared/browserSearch';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -107,13 +116,9 @@ class FileStorage {
   }
 
   write(key: string, value: string): void {
-    try {
-      const path = join(this.dir, `${key}.json`);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, value, 'utf8');
-    } catch {
-      // History is a convenience; losing a write must not break a conversation.
-    }
+    const path = join(this.dir, `${key}.json`);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, value, 'utf8');
   }
 }
 
@@ -139,6 +144,123 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
   const documentIndex = new DocumentIndex(database, pythonWorker);
   const projectId = (): string => memoryStore.getActiveProject();
+  const history = new HistoryStore(new FileStorage(join(app.getPath('userData'), 'history')));
+  const sessionConversations = new Map<string, ConversationRecord>();
+  const streamConversations = new Map<string, PendingConversationStream>();
+  let activeConversationId: string | null = history.list({ limit: 1, projectId: projectId() })[0]?.id ?? null;
+
+  const trimSessionConversations = (): void => {
+    const oldestFirst = [...sessionConversations.values()].sort((a, b) => a.updatedAt - b.updatedAt);
+    for (const record of oldestFirst.slice(0, Math.max(0, oldestFirst.length - MAX_CONVERSATIONS))) {
+      sessionConversations.delete(record.id);
+    }
+  };
+
+  const safeTranscriptMessage = (message: ChatMessage): ChatMessage => ({
+    id: typeof message.id === 'string' && message.id.length <= 160 ? message.id : `msg_${Date.now().toString(36)}`,
+    role: message.role,
+    content: redactTaskText(String(message.content ?? '')).slice(0, 40_000),
+    createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
+    ...(message.aborted === true ? { aborted: true } : {}),
+    ...(typeof message.error === 'string' ? { error: redactTaskText(message.error).slice(0, 1_000) } : {}),
+  });
+
+  const toRecordView = (record: ConversationRecord): ConversationRecordView => {
+    const messages = record.messages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .map(safeTranscriptMessage);
+    const latest = messages[messages.length - 1];
+    return {
+      id: record.id,
+      title: record.title,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      preview: latest ? latest.content.replace(/\s+/g, ' ').slice(0, 160) : '',
+      ...(record.projectId ? { projectId: record.projectId } : {}),
+      persistence: record.persistence ?? 'persistent',
+      messages,
+    };
+  };
+
+  const toSessionSummary = (record: ConversationRecord): ConversationSummary => {
+    const view = toRecordView(record);
+    return {
+      id: view.id,
+      title: view.title,
+      createdAt: view.createdAt,
+      updatedAt: view.updatedAt,
+      preview: view.preview,
+      ...(view.projectId ? { projectId: view.projectId } : {}),
+      persistence: view.persistence,
+    };
+  };
+
+  const getConversation = (id: string): ConversationRecord | null => {
+    const session = sessionConversations.get(id);
+    if (session) return session;
+    const stored = history.load(id);
+    if (!stored) return null;
+    stored.persistence = 'persistent';
+    return stored;
+  };
+
+  const saveConversation = (record: ConversationRecord): void => {
+    record.updatedAt = Date.now();
+    if (record.persistence === 'session') {
+      sessionConversations.set(record.id, record);
+      trimSessionConversations();
+      return;
+    }
+    try {
+      history.save(record);
+      record.persistence = 'persistent';
+      sessionConversations.delete(record.id);
+    } catch {
+      record.persistence = 'session';
+      sessionConversations.set(record.id, record);
+      trimSessionConversations();
+    }
+  };
+
+  const addTranscriptMessage = (
+    record: ConversationRecord,
+    message: ChatMessage,
+  ): void => {
+    const safe = safeTranscriptMessage(message);
+    record.messages.push(safe);
+    if (safe.role === 'user' && record.title === 'New conversation') {
+      record.title = deriveTitle(safe.content);
+    }
+    saveConversation(record);
+  };
+
+  const newConversation = (): ConversationRecord => {
+    const current = settings.get();
+    const record: ConversationRecord = {
+      ...HistoryStore.newConversation(''),
+      projectId: projectId(),
+      persistence: current.privacy.persistHistory ? 'persistent' : 'session',
+    };
+    sessionConversations.set(record.id, record);
+    if (record.persistence === 'persistent') saveConversation(record);
+    activeConversationId = record.id;
+    return record;
+  };
+
+  const emitChatEvent = (event: StreamEvent): void => {
+    const conversationId = streamConversations.get(event.requestId)?.conversationId;
+    recordConversationStreamEvent(streamConversations, event, getConversation, addTranscriptMessage);
+    if ((event.type === 'done' || event.type === 'aborted' || event.type === 'error') && conversationId) {
+      const record = getConversation(conversationId);
+      context.sendToRenderer(CHANNELS.chatStream, {
+        ...event,
+        ...(record ? { persistence: record.persistence ?? 'persistent' } : {}),
+      });
+      return;
+    }
+    context.sendToRenderer(CHANNELS.chatStream, event);
+  };
+
   const memoryTools = new MemoryTools(memoryStore, projectId);
   const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
   const fileTools = new FileTools();
@@ -183,7 +305,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     provider,
     getApiKey: () => settings.getApiKey(),
     isStopped: (): boolean => emergency.isStopped(),
-    emit: (event: StreamEvent) => context.sendToRenderer(CHANNELS.chatStream, event),
+    emit: emitChatEvent,
     toolsFor: (mode) => toolRegistry.schemasFor(mode),
     memoryContextFor: (request) =>
       selectMemoryContext(memoryStore, {
@@ -212,8 +334,6 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     completedActions: () => [...completedActions],
     notify: (report) => context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report),
   });
-
-  const history = new HistoryStore(new FileStorage(join(app.getPath('userData'), 'history')));
 
   /**
    * Vision analysis for the analyze_screen tool. Uses the vision-capable model
@@ -254,6 +374,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const executors = new ToolExecutors({
     browser,
+    openExternal: (url) => shell.openExternal(url),
+    searchProvider: () => settings.get().browserSearchProvider,
     memory: memoryTools,
     documents: documentTools,
     files: fileTools,
@@ -278,7 +400,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     tasks,
     audit,
     executors,
-    emit: (event: StreamEvent) => context.sendToRenderer(CHANNELS.chatStream, event),
+    emit: emitChatEvent,
     isStopped: () => emergency.isStopped(),
     getProjectId: () => memoryStore.getActiveProject(),
   });
@@ -444,12 +566,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   ipcMain.handle(CHANNELS.settingsSet, (_event, patch: DeepSeekSettingsPatch): AppSettings => {
     const next = settings.set(patch ?? {});
-    windows.setVisualMode(
-      next.companion.visualMode,
-      next.companion.followSpeed,
-      next.companion.cursorOffset,
-      next.companion.reducedMotion,
-    );
+    windows.setPresentationSettings(next.companion);
     audit.record('system', 'Settings updated', 'ok', Object.keys(patch ?? {}).join(', '));
     return next;
   });
@@ -519,12 +636,6 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     windows.setSurface(expanded ? 'active' : 'idle');
   });
 
-  ipcMain.handle(CHANNELS.windowSetPosition, (_event, x: number, y: number): void => {
-    if (Number.isFinite(x) && Number.isFinite(y)) windows.moveTo(x, y);
-  });
-
-  ipcMain.handle(CHANNELS.windowGetPosition, () => windows.currentPosition());
-  ipcMain.handle(CHANNELS.windowGetWorkArea, () => windows.workAreaFor());
   ipcMain.handle(CHANNELS.windowHide, (): void => windows.hide());
   ipcMain.handle(CHANNELS.windowShow, (): void => windows.show());
 
@@ -543,12 +654,50 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   ipcMain.handle(CHANNELS.chatSend, async (_event, request: ChatRequest) => {
     const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const current = settings.get();
+    if (!request || typeof request !== 'object' || typeof request.text !== 'string' || request.text.length > 20_000) {
+      throw new Error('The message is empty or too long.');
+    }
+    if (agent.isRunning) throw new Error('Pixel is busy. Finish or cancel the current task before starting another chat.');
+
+    let conversationId = typeof request.conversationId === 'string' ? request.conversationId : activeConversationId;
+    if (conversationId === null) conversationId = newConversation().id;
+    if (activeConversationId !== conversationId) {
+      throw new Error('That conversation is no longer active. Reopen it before sending a message.');
+    }
+    const record = getConversation(conversationId);
+    if (!record) throw new Error('That conversation could not be restored.');
+    if (record.projectId && record.projectId !== projectId()) {
+      throw new Error('That conversation belongs to a different project.');
+    }
+    if (!current.privacy.persistHistory && record.persistence !== 'session') {
+      record.persistence = 'session';
+      sessionConversations.set(record.id, record);
+    }
+    const priorHistory = record.messages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .map(safeTranscriptMessage);
+    const userContent = request.text.trim() || (request.images?.length ? '[Image attached; image data is not retained in chat history.]' : '');
+    addTranscriptMessage(record, {
+      id: `${requestId}_user`,
+      role: 'user',
+      content: userContent,
+      createdAt: Date.now(),
+    });
+    streamConversations.set(requestId, { conversationId: record.id, content: '' });
 
     // Fire and forget: progress arrives via chat:stream. The handler returns
     // the id immediately so the UI can pair events with this request.
     // The operating mode is owned by the main process. The renderer's copy is
     // advisory: trusting it would let a compromised renderer claim Agent mode.
-    const trustedRequest: ChatRequest = { ...request, mode: current.companion.mode };
+    const { history: _rendererHistory, conversationId: _rendererConversationId, ...turn } = request;
+    void _rendererHistory;
+    void _rendererConversationId;
+    const trustedRequest: ChatRequest = {
+      ...turn,
+      mode: current.companion.mode,
+      conversationId: record.id,
+      history: priorHistory,
+    };
     if (request.mode !== current.companion.mode) {
       audit.record('system', 'Ignored renderer-supplied mode', 'denied', `${String(request.mode)} -> ${current.companion.mode}`);
     }
@@ -562,7 +711,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       maxTokens: current.provider.maxTokens,
     });
 
-    return { requestId };
+    return { requestId, persistence: record.persistence ?? 'persistent' };
   });
 
   ipcMain.handle(CHANNELS.chatCancel, (_event, requestId: string): void => {
@@ -574,17 +723,108 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ----------------------------- history ----------------------------- */
 
-  ipcMain.handle(CHANNELS.historyList, (_event, limit?: number): ChatMessage[] => {
-    const record = history.loadMostRecent();
-    if (!record) return [];
-    const count = typeof limit === 'number' && limit > 0 ? limit : record.messages.length;
-    return record.messages.slice(-count);
+  ipcMain.handle(CHANNELS.historyList, (_event, query?: HistoryQuery): ConversationSummary[] => {
+    const safeQuery = query && typeof query === 'object' ? query : {};
+    const limit = typeof safeQuery.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(safeQuery.limit))) : 30;
+    const offset = typeof safeQuery.offset === 'number' ? Math.max(0, Math.min(50, Math.floor(safeQuery.offset))) : 0;
+    const search = typeof safeQuery.search === 'string' ? safeQuery.search.slice(0, 120) : '';
+    const persisted = history.list({ limit: 50, search, projectId: projectId() });
+    const session = [...sessionConversations.values()]
+      .filter((record) => !record.projectId || record.projectId === projectId())
+      .map(toSessionSummary)
+      .filter((summary) => !search || `${summary.title} ${summary.preview}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    const merged = new Map<string, ConversationSummary>();
+    for (const summary of persisted) merged.set(summary.id, summary);
+    for (const summary of session) merged.set(summary.id, summary);
+    return [...merged.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(offset, offset + limit);
+  });
+
+  ipcMain.handle(CHANNELS.historyOpen, (_event, id: string): ConversationRecordView | null => {
+    if (agent.isRunning) throw new Error('Cancel or finish the active task before switching conversations.');
+    if (typeof id !== 'string') return null;
+    const record = getConversation(id);
+    if (!record || (record.projectId && record.projectId !== projectId())) return null;
+    activeConversationId = record.id;
+    return toRecordView(record);
+  });
+
+  ipcMain.handle(CHANNELS.historyCreate, (): ConversationRecordView => {
+    if (agent.isRunning) throw new Error('Cancel or finish the active task before starting a new conversation.');
+    return toRecordView(newConversation());
+  });
+
+  ipcMain.handle(CHANNELS.historyRename, (_event, id: string, title: string): ConversationSummary | null => {
+    if (typeof id !== 'string' || typeof title !== 'string') return null;
+    const record = getConversation(id);
+    if (!record || (record.projectId && record.projectId !== projectId())) return null;
+    const safeTitle = redactTaskText(title.replace(/\s+/g, ' ').trim()).slice(0, 80);
+    if (!safeTitle) return null;
+    record.title = safeTitle;
+    saveConversation(record);
+    return toSessionSummary(record);
+  });
+
+  ipcMain.handle(CHANNELS.historyDelete, (_event, id: string): boolean => {
+    if (agent.isRunning) throw new Error('Cancel or finish the active task before deleting a conversation.');
+    if (typeof id !== 'string') return false;
+    const record = getConversation(id);
+    if (!record || (record.projectId && record.projectId !== projectId())) return false;
+    sessionConversations.delete(id);
+    history.delete(id);
+    if (activeConversationId === id) activeConversationId = null;
+    return true;
   });
 
   ipcMain.handle(CHANNELS.historyClear, (): void => {
-    const record = history.loadMostRecent();
-    if (record) history.save({ ...record, messages: [] });
+    if (agent.isRunning) throw new Error('Cancel or finish the active task before clearing chat history.');
+    history.clear();
+    sessionConversations.clear();
+    activeConversationId = null;
     audit.record('system', 'History cleared', 'ok');
+  });
+
+  ipcMain.handle(CHANNELS.browserOpenSearch, async (_event, queryValue: unknown, requestTextValue: unknown, conversationIdValue: unknown) => {
+    if (agent.isRunning) throw new Error('Finish or cancel the active task before opening a browser search.');
+    if (typeof queryValue !== 'string' || queryValue.trim().length === 0 || queryValue.length > MAX_SEARCH_QUERY_LENGTH) {
+      throw new Error('Enter a search query with 1–500 characters.');
+    }
+    if (typeof requestTextValue !== 'string' || requestTextValue.length > 20_000 || typeof conversationIdValue !== 'string') {
+      throw new Error('The search request is invalid.');
+    }
+    if (conversationIdValue !== activeConversationId) throw new Error('Reopen the selected conversation before searching.');
+    const record = getConversation(conversationIdValue);
+    if (!record || (record.projectId && record.projectId !== projectId())) throw new Error('The selected conversation is unavailable.');
+
+    const provider = settings.get().browserSearchProvider as SearchProvider;
+    const url = createSearchUrl(queryValue, provider);
+    const userText = redactTaskText(requestTextValue.trim()).slice(0, 20_000);
+    addTranscriptMessage(record, {
+      id: `search_${Date.now().toString(36)}_user`,
+      role: 'user',
+      content: userText || `Search for ${queryValue.trim()}`,
+      createdAt: Date.now(),
+    });
+    try {
+      await shell.openExternal(url);
+      addTranscriptMessage(record, {
+        id: `search_${Date.now().toString(36)}_assistant`,
+        role: 'assistant',
+        content: `Opened search results for ${queryValue.trim()} in your default browser.`,
+        createdAt: Date.now(),
+      });
+      return { query: queryValue.trim(), provider };
+    } catch {
+      addTranscriptMessage(record, {
+        id: `search_${Date.now().toString(36)}_assistant`,
+        role: 'assistant',
+        content: 'Pixel could not open search results in your default browser.',
+        createdAt: Date.now(),
+        error: 'Default browser launch failed.',
+      });
+      throw new Error('Pixel could not open search results in your default browser.');
+    }
   });
 
   /* ------------------------------ screen ----------------------------- */
@@ -603,17 +843,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   /* ------------------------------ system ----------------------------- */
 
   ipcMain.handle(CHANNELS.systemDiagnostics, (): DiagnosticsSnapshot => {
-    const primary = windows.workAreaFor();
     const displays = captures.listDisplays();
     return collectDiagnostics(
       {
         now: () => Date.now(),
         getDisplays: () => displays,
       },
-      displays.length > 0
-        ? (displays.find((d) => d.bounds.x === primary.x && d.bounds.y === primary.y)?.id ??
-            displays[0].id)
-        : undefined,
+      settings.get().companion.monitorId ?? displays[0]?.id,
     );
   });
 

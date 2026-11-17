@@ -8,13 +8,19 @@ The companion is one transparent Electron window containing one renderer panel
 stack. The renderer does not create a full-screen overlay, and panel components
 do not resize the native window independently.
 
+The earlier clipping had two direct causes: `ModeSwitcher` was mounted by both
+`App` and `InputBar`, and the native active window stayed at a fixed compact
+height. A React z-index cannot escape the native BrowserWindow bounds. The
+selector now has one mount point, and all visible surfaces participate in the
+same measured stack before the main process changes native bounds.
+
 ```mermaid
 flowchart TD
-  R[Input bar, response, task, approval, notice, mode menu] --> M[Debounced renderer measurement]
+  R[Input bar, Recent Chats, response, task, approval, notice, mode menu] --> M[Debounced renderer measurement]
   M --> P[Typed window.setLayout preload method]
   P --> I[Main IPC sender check]
   I --> C[Work-area clamp and center-preserving resize]
-  C --> W[Single native companion window]
+  C --> W[Primary anchored native window]
 ```
 
 `usePresentationLayout` observes the root stack and marked panels. It coalesces
@@ -27,11 +33,9 @@ native window is capped and the renderer scrolls inside its own window bounds.
 The preload exposes only `window.setLayout(surface, {width, height})`; it does
 not expose Electron or Node APIs. The main process accepts this message only
 from the companion window's `webContents`. `fitPresentationSize` caps width at
-520 logical pixels and caps height to the active display's work area minus the
-top margin. `resizePresentationBounds` preserves the existing horizontal center
-and keeps the window inside the work area. Electron display and renderer
-dimensions are both handled as logical pixels (DIP), including negative
-multi-monitor origins.
+520 logical pixels and caps height to the selected display work area. Electron
+display and renderer dimensions are both handled as logical pixels (DIP),
+including negative multi-monitor origins.
 
 The current mode selector is rendered once, inside `InputBar`. It uses menu
 radio semantics, supports arrow/Home/End navigation, closes on Escape, an
@@ -40,20 +44,97 @@ to its trigger after Escape or selection. Escape then dismisses a pending mode
 confirmation or transient notice before collapsing the companion. It does not
 silently answer a pending permission request.
 
-This checkpoint retains the existing cursor presentation implementation. It
-still moves the primary window while enabled; separating that follower into an
-independent passive window is planned for Checkpoint 2 and must not be treated
-as delivered yet.
+## Pinned bar and cursor companion (Checkpoint 2)
+
+The primary transparent BrowserWindow stays horizontally centered on its
+selected display work area and 10–14 logical pixels below that work area's top.
+Renderer-measured layouts resize around the same center. The main window is
+not draggable, and no renderer IPC can set arbitrary X/Y coordinates. Pixel
+persists the selected Electron display id and top offset. Legacy coordinates
+are used only once to infer their old display and are then cleared. If a saved
+display is unavailable, Pixel selects the primary display and persists that
+fallback. Display-add, removal and metrics events reapply the anchor.
+
+When enabled, the cursor companion is a separate 64×64 transparent BrowserWindow
+with the same sandboxed preload settings, `focusable: false`, `movable: false`,
+the ordinary `floating` always-on-top level and native click-through. Its
+renderer shows only the orb; the bridge has no new capabilities. The existing
+spring follower and work-area edge placement move this window at 30 Hz while
+the primary bar is idle. Opening the bar or an approval freezes the follower at
+its last point; disabling the setting closes the window and stops its timer.
+It does not capture screenshots or take a desktop-input lease.
+
+Settings exposes the pinned top-bar status, explicit display selection, a
+10–14 px top offset and the independent cursor-companion toggle with speed,
+offset and reduced-motion settings. A legacy `visualMode: "cursor"` enables the
+new companion only when no explicit new preference was stored. The renderer
+bridge no longer exposes arbitrary main-window position setters or getters.
 
 ## Native layout verification
 
 Pure geometry tests cover 1366×768, 1920×1080 and 2560×1440 logical work areas,
-negative monitor origins, center preservation, and renderer measurement caps.
-They prove the requested geometry calculations, not the final pixels rendered
-by Electron. Actual DPI and clipping acceptance steps are recorded in
+negative monitor origins, monitor fallback, top-center stability and renderer
+measurement caps. They prove calculations, not final rendered pixels, native
+click-through or Electron window lifecycle. DPI, multi-monitor and cursor
+overlay acceptance steps are recorded in
 [`PIXEL_WINDOWS_ACCEPTANCE.md`](../validation/PIXEL_WINDOWS_ACCEPTANCE.md).
 
-## Browser search and history
+## Persistent conversation history
 
-Not delivered by this checkpoint. Their IPC, persistence and permission
-architecture will be documented when those checkpoints are implemented.
+`HistoryStore` remains the storage owner. It keeps an indexed JSON record per
+conversation, with a maximum of 50 records and 200 messages per conversation.
+Search checks titles and the sanitized user-facing transcript; it is scoped to
+the active project when one is selected. Retention evicts old record contents,
+not only their index entries.
+
+The main process owns the selected conversation id and context retrieval. A
+chat IPC request can name the current id, but renderer-supplied `history` is
+discarded. The main process loads only user and assistant messages, removes
+reasoning, tools, images and internal metadata, redacts credential patterns,
+then relies on existing bounded context assembly before contacting the model.
+Tool execution records and audit entries stay in their own stores.
+
+Streaming text is accumulated in memory and written as one user-facing
+assistant outcome when the request ends. Completion, partial cancellation and
+failure are recorded separately. Writes follow `privacy.persistHistory`; a
+disabled setting or failed disk write keeps the conversation in the bounded
+main-process session map only. Conversations cannot be opened, deleted or
+cleared while a task is active. The renderer preserves optimistic messages on
+IPC failure and reloads the main-owned transcript when a panel is revealed.
+
+`RecentChatsPanel` presents Today, Yesterday, Previous days and Older groups,
+with search, incremental loading, New Chat, rename and confirmed delete/clear.
+Conversation switching is blocked in the UI while streaming, a task needs
+attention or permission is pending, and guarded again in main IPC.
+
+## Default-browser search
+
+`parseExplicitSearchCommand` handles direct requests before the model call.
+Normal questions are not interpreted as searches. The narrow
+`browser.openSearch(query, requestText, conversationId)` bridge accepts a
+bounded query, not a URL. Main constructs an HTTPS URL from a fixed Google,
+Bing or DuckDuckGo host and the configured search provider, then calls
+`shell.openExternal`; it never passes arbitrary renderer URLs to the OS.
+
+Explicit user requests can open a results page in Guide mode. For model-proposed
+searches, `browser_open_search` is a state-changing tool that uses the existing
+permission gateway, is unavailable in Guide mode, and can be scoped to the exact
+normalized query. Search success means only that Electron accepted the OS
+launch request. Pixel does not claim to read or summarize results. The separate
+Playwright BrowserSession remains available for approved browser automation.
+
+## Interaction feedback
+
+The response surface keeps reasoning collapsed and separate from the final
+answer. “Spoken aloud” appears only after the native TTS call reports success.
+The screenshot action requests an app-window capture, and the file-picker
+control is labelled as image attachment because image uploads are the supported
+formats. Failed/completed task cards dismiss after four seconds without deleting
+their persisted task evidence. The Settings window is sized around its compact,
+internally scrolling panel.
+
+## Electron references
+
+- [BrowserWindow options](https://www.electronjs.org/docs/latest/api/browser-window) cover preload paths, context isolation, sandboxing, web security and native window behavior.
+- [Electron security recommendations](https://www.electronjs.org/docs/latest/tutorial/security/) recommend keeping context isolation and sandboxing enabled and not passing untrusted content to `shell.openExternal`.
+- [`shell.openExternal`](https://www.electronjs.org/docs/latest/api/shell) opens a validated external URL using the operating system's default application; Pixel constructs the URL in main from a fixed provider configuration.

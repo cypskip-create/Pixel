@@ -19,6 +19,8 @@ import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { arch, cpus, freemem, platform, release, totalmem } from 'node:os';
 import type { ImageAttachment } from '../../shared/types';
+import type { SearchProvider } from '../../shared/types';
+import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../../shared/browserSearch';
 import { BrowserSession } from './browser';
 import { DesktopInputLease } from './inputLease';
 import type { MemoryTools } from '../memory/toolset';
@@ -110,6 +112,9 @@ export interface ExecutorDeps {
   nativeHelper?: NativeHelper;
   /** Convert the helper's physical pixel bounds to Electron DIP coordinates. */
   toDipRect?: (rect: WindowInfo['rect']) => WindowInfo['rect'];
+  /** Opens only a validated HTTPS URL in the user's default browser. */
+  openExternal?: (url: string) => Promise<void>;
+  searchProvider?: () => SearchProvider;
 }
 
 export class ToolExecutors {
@@ -158,7 +163,7 @@ export class ToolExecutors {
     // a time, so "children that did not exist before this call" is exactly the
     // set that belongs to it.
     const before = new Set(this.children);
-    const isBrowserTool = name.startsWith('browser_');
+    const isBrowserTool = name.startsWith('browser_') && name !== 'browser_open_search';
     const onAbort = (): void => {
       this.killChildrenSince(before);
       // An in-flight page operation can only be interrupted by closing the
@@ -169,7 +174,9 @@ export class ToolExecutors {
     try {
       const result = await this.dispatch(name, args, signal, context?.taskId);
       if (signal?.aborted && isBrowserTool && this.deps.browser) await this.deps.browser.close();
-      return signal?.aborted ? cancelledResult(name) : result;
+      // The OS browser launch cannot be undone once accepted. Report the real
+      // result if cancellation races with the short external-launch call.
+      return signal?.aborted && name !== 'browser_open_search' ? cancelledResult(name) : result;
     } finally {
       signal?.removeEventListener('abort', onAbort);
       if (releaseInput && name === 'invoke_ui_element' && this.deps.nativeHelper?.terminating) {
@@ -249,6 +256,8 @@ export class ToolExecutors {
           return await this.typeText(args, signal);
         case 'browser_navigate':
           return await this.browserNavigate(args);
+        case 'browser_open_search':
+          return await this.browserOpenSearch(args, signal);
         case 'browser_inspect':
           return await this.browserInspect();
         case 'browser_click':
@@ -758,6 +767,30 @@ export class ToolExecutors {
         content: `Pixel could not open that page: ${message(error)}`,
         errorCode: 'FAILED',
       };
+    }
+  }
+
+  private async browserOpenSearch(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!query || query.length > MAX_SEARCH_QUERY_LENGTH) {
+      return { ok: false, content: 'Enter a search query with 1–500 characters.', errorCode: 'FAILED' };
+    }
+    if (!this.deps.openExternal || !this.deps.searchProvider) {
+      return { ok: false, content: 'Opening the default browser is unavailable in this build of Pixel.', errorCode: 'UNAVAILABLE' };
+    }
+    if (signal?.aborted) return cancelledResult('browser_open_search');
+    try {
+      const provider = this.deps.searchProvider();
+      const url = createSearchUrl(query, provider);
+      await this.deps.openExternal(url);
+      return {
+        ok: true,
+        content: `Opened search results for ${query} in your default browser. Pixel has not read the results.`,
+        detail: { query, provider },
+        verification: { summary: 'The operating system accepted the external browser launch request.', source: 'Electron shell.openExternal' },
+      };
+    } catch (error) {
+      return { ok: false, content: `Pixel could not open search results in your default browser: ${message(error)}`, errorCode: 'FAILED' };
     }
   }
 

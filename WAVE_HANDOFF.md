@@ -2,16 +2,20 @@
 
 Updated: 2026-11-17
 
-## Active work: UI Experience 2.0
+## Current status: UI Experience 2.0
 
 - Dedicated local branch: `codex/ui-experience-2`, starting at
   `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`.
 - Checkpoint 1 implements the single measured companion panel stack and one
   accessible mode selector. It has not yet been visually accepted on the
   target laptop.
-- Current branch validation and commit identity will be recorded in the latest
-  checkpoint section below. Historical validation counts below describe the
-  tree before this branch and are not the current totals.
+- Checkpoint 2 implementation is complete: the primary bar uses a persisted
+  display anchor, the cursor follower has a separate passive window, and
+  Settings selects the display and configures the independent follower.
+  Typecheck, build, full automated suite and diff check pass; 26 tests remain
+  skipped for unavailable browser/NSIS/native-integration prerequisites. Native
+  visual acceptance remains unverified. Those counts are historical; use the
+  current validation section below for the full UI/history/search tree.
 - Checkpoint 1 local validation: typecheck/build/diff-check passed; full tests
   **669 passed, 0 failed, 26 skipped (695 total; 30 files)**. Browser tests
   need Playwright Chromium, NSIS tests need `makensis`, and the target-window
@@ -25,6 +29,18 @@ Updated: 2026-11-17
 - Do not begin unrelated computer-control, drawing, cloud-computer or Pixel
   Code work during this UI/history/search wave.
 
+### Current tree result
+
+- Completed the panel/layout, display-anchored bar, independent cursor companion, persistent conversations/Recent Chats, configured default-browser search, and compact response/settings/task polish.
+- `npm run typecheck`: passed. `npm run build`: passed.
+- Focused suite: **69 passed across 8 files**. Full suite: **712 passed, 0 failed, 26 skipped across 36 files (738 total)**. Browser and NSIS prerequisites were unavailable; the native foreground integration is opt-in.
+- A final repeat was stopped before Vitest returned a result; the counts above are from the latest completed full-suite run.
+- The isolated electron-builder packaging attempt failed before output with `getaddrinfo ENOTFOUND github.com`; existing `release` artifacts were preserved.
+- `npm run test:preload-sandbox` also stops before the smoke application starts: Electron 45.2.3 exits with `2147483651` (`0x80000003`), without the main-entry marker or report JSON. The harness now clears stale reports and saves launcher diagnostics. This is a pre-app Electron runner failure here, not a failure reported by a bridge assertion.
+- Windows GUI acceptance remains unverified; the Computer Use attempt was stopped before selecting an app. The Windows procedure is in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
+- GitHub Actions investigation found no status checks on remote `main` HEAD `0be3ba45b5b94a2018969670490a8c9b6ad8e80b` and no workflow run for the current unpushed branch. The job log for the reported preload-smoke failure was unavailable, so its remote root cause is not established. The workflow and local smoke script were inspected without weakening the sandbox; rerun `npm run test:preload-sandbox` on Windows or the next CI run to capture the actual failure.
+- Local `HEAD` remains `f10084e6f11129e4c453ba546ed09e50e6b9d8de`; the worktree is intentionally uncommitted for the user to commit.
+
 ## Delivered in this tree
 
 - Durable SQLite task snapshots/events, Zod contracts, conservative restart recovery, pause/resume/cancel, task budgets, verification evidence and a compact execution timeline.
@@ -32,7 +48,10 @@ Updated: 2026-11-17
 - Scoped, one-shot high-risk approvals; prompt-injection data framing; exact-window title checks before Windows text input and native UIA invocation.
 - Human takeover state with explicit acknowledgement and a required fresh observation before any later mutation.
 - Compiled and connected C# UI Automation helper for foreground-window information, bounded semantic element search, exact unique enabled `InvokePattern` invocation, and exact present/absent postcondition checks. Timed-out/cancelled helpers are boundedly terminated; unconfirmed exit quarantines future calls and retains the desktop-input lease.
-- Optional cursor-follow presentation using spring motion and work-area clamping; it is independent of intelligence mode and pauses while expanded.
+- Optional cursor-follow presentation now uses a separate transparent, non-focusable, click-through BrowserWindow. The main bar stays anchored and cannot be dragged; the follower pauses while active panels are open.
+- Main-owned conversation lifecycle now persists sanitized user-facing turns through `HistoryStore`, restores bounded model context, respects `privacy.persistHistory`, and supports the Recent Chats search/create/restore/rename/delete flow. Writes are session-only when persistence is disabled or unavailable.
+- Explicit browser-search commands open a fixed, validated Google/Bing/DuckDuckGo results URL through the operating system's default browser. Model-proposed search uses the existing permission gateway, and Pixel reports the launch without claiming result access.
+- Response reasoning stays collapsed and separate; speech and task completion feedback now match the observed backend outcome. Settings sizing and screenshot/image-attachment labels were corrected.
 - Project memory inspection, correction, deletion and JSON export; versioned skill drafts/review/activation/run history; durable daily routines with missed-run skip, serialization, cancellation, failure pause and one-time manual retry.
 - Windows CI for type checks, Chromium/NSIS tests, sandboxed preload IPC smoke, native-helper compilation and non-publishing distributions. Build logs, smoke/JUnit results and package artifacts are uploaded by the workflow.
 - The Electron preload is bundled with esbuild. Its complete local runtime graph includes the shared IPC registry, with only `electron` external. Dev, build, pack and dist all pass through `build:main`; the existing `window.cyps`/`window.cypsShell` contracts and sandbox settings remain unchanged.
@@ -45,7 +64,8 @@ Updated: 2026-11-17
 - Agent/task/policy: `src/main/agent/`, `src/main/tasks/`, `src/main/agents/coordinator.ts`, `src/main/agent/inputLease.ts`.
 - Native Windows helper and build: `native/PixelNative/PixelNative.cs`, `src/main/services/nativeHelper.ts`, `scripts/build-native.ps1`.
 - Skills/routines/memory: `src/main/skills/`, `src/main/routines/`, `src/main/memory/`.
-- UI/settings: `src/renderer/components/AutomationPanel.tsx`, `MemoryPanel.tsx`, `TaskStrip.tsx`, `SettingsPanel.tsx`, `src/renderer/App.tsx`.
+- UI/settings/history: `src/renderer/components/RecentChatsPanel.tsx`, `ConversationTranscript.tsx`, `SettingsPanel.tsx`, `TaskStrip.tsx`, `src/renderer/App.tsx`, `src/renderer/hooks/useChat.ts`, `src/main/history/`.
+- Search: `src/shared/browserSearch.ts`, `src/main/agent/tools.ts`, `src/main/agent/executors.ts`, and the narrow browser IPC methods in `src/main/ipc.ts` and `src/preload/index.ts`.
 - Packaging: `electron-builder.yml` copies `native/bin/PixelNative.exe` to `resources/native/PixelNative.exe`; `pack` and `dist` build the helper first.
 - Tests: `tests/tasks.test.ts`, `agent-executor.test.ts`, `native-agent-tools.test.ts`, `skills-routines.test.ts`, `memory.test.ts`, `safety.test.ts` and the existing browser, file, document and provider suites.
 
@@ -74,4 +94,4 @@ Updated: 2026-11-17
 
 ## Current branch Git status
 
-Branch: `codex/ui-experience-2`. Checkpoint commits are local only; no push or release is requested.
+Branch: `codex/ui-experience-2`. No commit or push was made; the user will commit the finished changes.

@@ -76,10 +76,25 @@ If the build host sets `ELECTRON_RUN_AS_NODE`, remove it in that shell before te
 
 1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-windows.ps1 -Launch`.
 2. Start the development build with `npm start` or launch `release/win-unpacked/Pixel.exe` after packaging. In this Codex environment, do not treat an Electron exit before window creation as an application pass; use a normal interactive desktop.
-3. Verify the floating orb, tray menu, global shortcut, settings, expand/collapse, drag, emergency stop, focus behavior and restart persistence.
+3. Verify the floating orb, tray menu, global shortcut, settings, expand/collapse, emergency stop, focus behavior and restart persistence. Confirm the main bar cannot be dragged away from its anchor.
 4. Repeat on every attached display, including 125%/150% scaling, negative-coordinate monitor layouts, unplug/replug and taskbar positions.
 5. Record the generated `validation-report-*.json`, OS build, display topology and DPI. A missing window, bad bounds or lost tray entry is a failure, not an assumed pass.
-6. In Settings, select **Follow cursor**. Confirm the compact orb follows without covering the pointer, stays within each display's work area, pauses while expanded, and returns to its remembered position when stationary mode is restored. Repeat with reduced motion and mixed DPI.
+
+## Pinned bar and cursor companion acceptance
+
+1. Start Pixel. Confirm the main pill is centered on the selected display and its top edge is 10–14 logical pixels below the work-area top. Expand the bar, open the mode selector and show a response/task panel; verify the center and top edge remain fixed.
+2. In Settings, select **Move to display** for every connected monitor. Confirm the bar moves to that display's work-area center. Restart Pixel and confirm the selected display is retained.
+3. Move **Top offset** between 10 px and 14 px. Confirm the bar follows the value without changing its horizontal center.
+4. Enable **Show cursor companion**. Confirm a separate orb follows while the top bar stays fixed. Click through the orb onto a harmless underlying control and verify the cursor window did not receive focus or intercept the click.
+5. Move the pointer near each work-area edge and across mixed-DPI monitors, including one left of the primary display. Confirm the follower stays inside the pointer's current display work area.
+6. Expand the bar and open an approval card. Confirm the follower pauses at its last position. Collapse to idle and verify it resumes.
+7. Enable reduced motion and confirm the cursor orb moves directly to each safe target without spring animation. Disable the cursor companion and confirm its window disappears without moving the pinned bar.
+8. Unplug the selected monitor. Confirm Pixel moves to the primary display and persists that fallback. Reconnect it, select it again and confirm restart behavior.
+
+Do not use old drag-position or **Follow cursor** steps: those controls were
+replaced by display anchoring and a separate passive cursor window. Automated
+geometry and settings tests do not prove native click-through or mixed-DPI
+behavior on a real desktop.
 
 The repository's previous environment report explains why a sandboxed Electron/Chromium process may fail before Pixel code runs: [Electron constraints](../ELECTRON-CONSTRAINTS.md). Treat that report as environment-specific; verify on the target laptop.
 
@@ -134,7 +149,7 @@ Run these checks in order and record a pass only after observing the behavior or
 3. **Visible orb:** confirm the floating orb appears, stays on top and does not steal focus.
 4. **Conversation UI:** expand the orb, send a harmless prompt and confirm the conversation surface renders and accepts input.
 5. **Task strip and approval cards:** run a harmless action task; inspect its current step/status in the task strip and confirm the approval card names the action and scope before approving it.
-6. **Cursor-follow mode:** complete the display, edge-clamp, expanded pause and return-to-stationary checks above.
+6. **Cursor companion:** complete display selection, edge-clamp, passive click-through, active-surface pause, disable and restart checks above.
 7. **Native-helper task:** run the harmless UIA fixture procedure below and inspect the task's persisted outcome and verification evidence.
 8. **Unpacked app:** run `npm run pack`, launch `release\win-unpacked\Pixel.exe`, and repeat the orb, conversation, approval, cursor and UIA checks.
 9. **Portable executable:** launch `release\Pixel-Portable-0.2.1.exe` and repeat the core checks. Confirm no install registration is created.
@@ -303,6 +318,101 @@ The 2026-11-17 branch run passed the geometry and DOM interaction tests, but
 has not yet produced a screenshot from this rebuilt branch. Treat all listed
 native visual/DPI/monitor steps as **unverified** until they are completed on
 the laptop.
+
+## UI Experience 2.0 — pinned bar, history and search acceptance
+
+Run these checks after `npm run build` and `npm run build:native`, then repeat
+the package checks against the unpacked Windows application. The automated
+layout, renderer and history tests do not prove native Electron window
+placement, Windows default-browser handling or restart persistence on the
+target profile.
+
+1. Start `npm run dev`. Confirm the primary bar appears centered 10–14 logical
+   pixels below the selected display work-area top. Expand and collapse it,
+   open Settings, Recent Chats and the mode selector, and change modes. Confirm
+   the bar's horizontal center and top anchor stay fixed, the mode selector
+   appears once, panels fit inside the native window, and long content scrolls
+   inside Pixel.
+2. In Settings, select another attached display and restart Pixel. Confirm the
+   selected display is retained. Unplug that display and confirm Pixel falls
+   back to the primary display without opening off-screen.
+3. Enable the cursor companion. Move the pointer across the display and onto a
+   second monitor if available. Confirm it follows independently, does not
+   steal focus or intercept clicks, and pauses while the main bar is active.
+   Disable it and confirm it disappears while the primary bar remains in the
+   same anchored position.
+4. With `privacy.persistHistory` enabled, create two conversations and send a
+   harmless prompt to each. Confirm each conversation continues with its own
+   context, the Recent Chats panel shows the right title and preview, search
+   finds a term in the transcript, rename works, and confirmed delete removes
+   only the selected conversation. Restart Pixel and restore each saved chat.
+   Confirm no API key, reasoning trace, tool arguments or image payload appears
+   in the user-facing transcript storage.
+5. Disable `privacy.persistHistory`, create a conversation and send a harmless
+   prompt. Confirm it is available in the current session but does not create
+   or update a persisted history record. Re-enable persistence and verify new
+   messages save normally.
+6. Select Google, Bing and DuckDuckGo in Settings in turn. For an explicit
+   request such as “Search the web for electric cars — Nairobi”, confirm the
+   Windows default browser opens the configured provider with the complete,
+   correctly encoded query. Repeat with Unicode and punctuation. Pixel should
+   report that it opened the results page, without claiming that it read the
+   results.
+7. Ask an ordinary question such as “What is a search engine?” Confirm no
+   browser opens. In Hybrid/Agent mode, ask the model to open a search and deny
+   or cancel the permission; confirm no browser launch occurs. Confirm an
+   allowed, approved search opens only the selected provider URL.
+8. Check response scrolling and collapsed reasoning, speech feedback after
+   actual playback, screenshot labeling/target, task completion/failure
+   dismissal and the compact Settings layout. Confirm dismissal does not erase
+   task history, and that the emergency stop still cancels active work.
+9. Build and inspect the unpacked app before portable or installer validation.
+   Confirm it shows the same pinned bar and loads Recent Chats, Settings and
+   browser search. Then validate portable launch, clean install, upgrade,
+   uninstall and user-data preservation on a disposable profile.
+
+For a validation run that does not replace any existing files in `release`,
+write the unpacked build to a new directory and retain the complete log:
+
+```powershell
+npx electron-builder --win --dir --publish never --config.directories.output=release/ui-experience-2-validation
+```
+
+Record the OS build, display arrangement/scaling, persistence setting, selected
+search provider, default browser, exact commands, pass/fail/blocked result for
+each item, and paths to screenshots/logs. Do not mark any GUI, installer or
+restart check passed unless it was observed directly on that Windows profile.
+
+### Current checkpoint environment result (2026-11-17)
+
+- Source type checks, the full automated suite and production source build are
+  documented in `PROGRESS.md`. The browser and NSIS test prerequisites and the
+  opt-in native foreground integration were unavailable in that runner.
+- The isolated package attempt failed before creating an output directory
+  because electron-builder could not resolve `github.com` (`ENOTFOUND`).
+  Existing `release` artifacts were preserved.
+- The Windows GUI acceptance for this checkpoint remains unverified. The
+  Computer Use attempt was stopped before an application was selected, so no
+  application settings or user data were changed.
+
+### Local and laptop validation commands
+
+Run these in the repository root on a network-connected Windows development
+machine. The full installer command writes to the standard `release` folder;
+use the isolated command above if existing artifacts must be preserved.
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test
+npm run build
+npm run build:native
+npm run test:preload-sandbox
+npm run dev
+npm run pack
+npm run dist
+```
 
 ## Report template
 

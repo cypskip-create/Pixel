@@ -324,6 +324,20 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'browser_open_search',
+    description: 'Opens an explicit web search in the configured default browser. It does not read or summarize the search results. Requires user approval.',
+    category: 'browser',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', minLength: 1, maxLength: 500 } },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'browser_inspect',
     description:
       'Reads the current browser page: title, URL, visible text, links, buttons and input fields.',

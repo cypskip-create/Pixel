@@ -9,6 +9,7 @@
  */
 
 import type { ChatMessage } from '../../shared/types';
+import { redactTaskText } from '../tasks/schema';
 
 export interface StorageAdapter {
   read(key: string): string | null;
@@ -21,6 +22,26 @@ export interface ConversationRecord {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  projectId?: string;
+  /** Session-only records are intentionally never written to disk. */
+  persistence?: 'persistent' | 'session';
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  preview: string;
+  projectId?: string;
+  persistence: 'persistent' | 'session';
+}
+
+export interface HistoryQuery {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  projectId?: string;
 }
 
 /** Keep at most this many conversations on disk. */
@@ -63,12 +84,18 @@ export class HistoryStore {
   }
 
   load(id: string): ConversationRecord | null {
+    if (!isSafeId(id)) return null;
     const raw = this.storage.read(`history.${id}`);
     if (!raw) return null;
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (!isConversationRecord(parsed)) return null;
-      return parsed;
+      if (!isConversationRecord(parsed) || parsed.id !== id) return null;
+      return {
+        ...parsed,
+        title: redactTaskText(parsed.title).replace(/\s+/g, ' ').trim().slice(0, 80) || 'New conversation',
+        persistence: 'persistent',
+        messages: parsed.messages.filter(isUserFacingMessage).map(sanitizeMessage),
+      };
     } catch {
       return null;
     }
@@ -84,22 +111,62 @@ export class HistoryStore {
 
   /** Create or update a conversation, enforcing caps. */
   save(record: ConversationRecord): void {
+    if (record.persistence === 'session') return;
+    if (!isSafeId(record.id)) throw new Error('Invalid conversation id.');
     const trimmed: ConversationRecord = {
       ...record,
+      title: redactTaskText(record.title.replace(/\s+/g, ' ').trim()).slice(0, 80) || 'New conversation',
+      persistence: 'persistent',
       updatedAt: Date.now(),
-      messages: record.messages.slice(-MAX_MESSAGES_PER_CONVERSATION),
+      messages: record.messages
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+        .slice(-MAX_MESSAGES_PER_CONVERSATION)
+        .map(sanitizeMessage),
     };
     this.storage.write(`history.${record.id}`, JSON.stringify(trimmed));
 
     const ids = this.listIds().filter((existing) => existing !== record.id);
     ids.unshift(record.id);
     const kept = ids.slice(0, MAX_CONVERSATIONS);
+    for (const evicted of ids.slice(MAX_CONVERSATIONS)) this.storage.write(`history.${evicted}`, JSON.stringify(null));
     this.storage.write(INDEX_KEY, JSON.stringify(kept));
   }
 
   delete(id: string): void {
+    if (!isSafeId(id)) return;
     this.storage.write(`history.${id}`, JSON.stringify(null));
     this.storage.write(INDEX_KEY, JSON.stringify(this.listIds().filter((x) => x !== id)));
+  }
+
+  list(query: HistoryQuery = {}): ConversationSummary[] {
+    const search = query.search?.trim().toLocaleLowerCase() ?? '';
+    const limit = clampInteger(query.limit, 1, MAX_CONVERSATIONS, 30);
+    const offset = clampInteger(query.offset, 0, MAX_CONVERSATIONS, 0);
+    const summaries = this.listIds().flatMap((id): ConversationSummary[] => {
+      const record = this.load(id);
+      if (!record) return [];
+      if (record.projectId && query.projectId && record.projectId !== query.projectId) return [];
+      const last = record.messages[record.messages.length - 1];
+      const preview = last ? redactTaskText(last.content).replace(/\s+/g, ' ').slice(0, 160) : '';
+      const searchableText = `${record.title} ${record.messages.map((message) => message.content).join(' ')}`;
+      if (search && !searchableText.toLocaleLowerCase().includes(search)) return [];
+      return [{
+        id: record.id,
+        title: record.title,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+        preview,
+        ...(record.projectId ? { projectId: record.projectId } : {}),
+        persistence: 'persistent',
+      }];
+    });
+    summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+    return summaries.slice(offset, offset + limit);
+  }
+
+  clear(): void {
+    for (const id of this.listIds()) this.storage.write(`history.${id}`, JSON.stringify(null));
+    this.storage.write(INDEX_KEY, JSON.stringify([]));
   }
 
   /** Start a fresh conversation, replacing the anchor id. */
@@ -129,8 +196,40 @@ function isConversationRecord(value: unknown): value is ConversationRecord {
   return (
     typeof candidate.id === 'string' &&
     typeof candidate.title === 'string' &&
-    typeof candidate.createdAt === 'number' &&
-    typeof candidate.updatedAt === 'number' &&
+    typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt) &&
+    typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt) &&
+    (candidate.projectId === undefined || typeof candidate.projectId === 'string') &&
     Array.isArray(candidate.messages)
   );
+}
+
+function isUserFacingMessage(value: unknown): value is ChatMessage {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<ChatMessage>;
+  return (candidate.role === 'user' || candidate.role === 'assistant') &&
+    typeof candidate.content === 'string' &&
+    typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt);
+}
+
+function isSafeId(value: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+}
+
+function clampInteger(value: number | undefined, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, Math.floor(value)))
+    : fallback;
+}
+
+/** Keep the user-facing transcript small and free from secrets/internal tool data. */
+function sanitizeMessage(message: ChatMessage): ChatMessage {
+  const safe: ChatMessage = {
+    id: typeof message.id === 'string' && message.id.length <= 160 ? message.id : `message_${Date.now().toString(36)}`,
+    role: message.role,
+    content: redactTaskText(String(message.content ?? '')).slice(0, 40_000),
+    createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
+  };
+  if (message.aborted === true) safe.aborted = true;
+  if (typeof message.error === 'string') safe.error = redactTaskText(message.error).slice(0, 1_000);
+  return safe;
 }

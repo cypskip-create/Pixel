@@ -1,12 +1,62 @@
 # Pixel release readiness
 
-**Reviewed:** 2026-11-17
-**Version:** 0.2.1  
-**Branch:** `main`  
-**Repair base commit:** `6a62de336cf2005aa8ddd0b745dabd3a53674de0`
-**Decision:** TypeScript, automated tests, source build, native helper and unpacked package are verified. Pixel remains **not yet release-ready** because the sandboxed bridge was not observed in a live Electron renderer here, and packaged-app acceptance still needs the target laptop.
+**Reviewed:** 2026-11-17 (UI Experience 2.0)
+**Version:** 0.2.1
+**Branch:** `codex/ui-experience-2`
+**Current HEAD:** `f10084e6f11129e4c453ba546ed09e50e6b9d8de`
+**Decision:** Source type checking, automated tests and production source build pass. Pixel is **not release-ready** because native UI acceptance and packaged Windows launch were not verified, and the isolated packaging attempt could not reach GitHub. The worktree is intentionally uncommitted so the user can commit it.
 
-## Baseline and integrity
+## Current UI Experience 2.0 evidence
+
+- `npm run typecheck`: passed for renderer and main TypeScript projects.
+- Focused UI/history/search tests: **69 passed across 8 files**.
+- Full Vitest suite: **712 passed, 0 failed, 26 skipped across 36 files (738 tests total)**. Browser tests need Playwright Chromium, installer tests need NSIS, and the native foreground integration suite is opt-in.
+- A later repeat was interrupted before Vitest returned a result; the count above is the most recent completed run.
+- `npm run build`: passed (main TypeScript, esbuild sandbox preload, Vite renderer).
+- `git diff --check`: passed after the documentation edits.
+- `npm run test:preload-sandbox`: blocked before the smoke app starts. Electron 45.2.3 exited with `2147483651` (`0x80000003`); the log contains no main-entry marker and no smoke JSON was written, so bridge assertions did not run. The harness now clears stale output and records launcher metadata plus Electron stderr.
+- An isolated `electron-builder --win --dir --publish never` run targeting `release/ui-experience-2-validation` failed before creating output because `getaddrinfo ENOTFOUND github.com`. No existing `release` artifact was overwritten.
+- The Windows GUI attempt was stopped before an application was selected. No native layout, search-browser launch, restart, unpacked app or installer behavior is claimed as passed.
+- Remote GitHub `main` is `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`; the GitHub connector returned no status checks for it and no PR-triggered workflow run for the local branch. The reported preload-smoke CI failure has no retrievable Actions log in this session. This runner reproduces a pre-main Electron exit, but it does not establish the remote failure cause. `npm run test:preload-sandbox` remains the laptop/CI repro command.
+
+### UI defect causes corrected
+
+- The mode selector was mounted in both `InputBar` and `App`, producing duplicate menus.
+- The native BrowserWindow retained a small fixed active-surface size. CSS stacking could not display a menu or response outside that native window's bounds.
+- UI panels measured and positioned themselves independently, so combined responses, task and approval content could clip or overlap.
+- The primary window reused saved arbitrary coordinates that cursor-follow could update, so returning to stationary mode could leave the bar off its intended anchor.
+- The response surface reported speech before playback was confirmed, and the screenshot and attachment labels did not match their actual capture/upload targets.
+
+The current architecture uses one measured panel stack and a display-anchored
+primary window. The optional cursor follower is a separate passive BrowserWindow.
+Recent Chats and search use the existing main-process history store and typed
+preload contract; default-browser search uses a validated provider URL built in
+main. See [UI architecture](../architecture/PIXEL_UI_ARCHITECTURE.md) and the
+[Windows acceptance checklist](PIXEL_WINDOWS_ACCEPTANCE.md).
+
+## Laptop-side commands
+
+Run these from the repository root on a connected Windows development machine.
+The package commands write to `release`; if existing artifacts must be kept,
+use the isolated output command in the acceptance guide.
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test
+npm run build
+npm run build:native
+npm run test:preload-sandbox
+npm run dev
+npm run pack
+npm run dist
+```
+
+The sections below are historical evidence for the earlier preload repair and
+must not be read as validation of the UI Experience 2.0 tree.
+
+## Previous preload-checkpoint notes (historical)
 
 - The local branch was clean at task start at the base commit shown above.
 - The focused preload repair is committed locally at the user's request. No push, tag or release was created; the resulting commit SHA is reported in the final response.

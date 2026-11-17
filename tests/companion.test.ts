@@ -722,6 +722,21 @@ describe('companion settings', () => {
     expect(s.followSpeed).toBe(1.5);
   });
 
+  it('migrates legacy cursor presentation to an independent follower and clamps anchor preferences', () => {
+    const migrated = mergeSettings({
+      companion: { visualMode: 'cursor', position: { x: -1200, y: 80 }, topOffset: 64 },
+    }).companion;
+    expect(migrated.cursorCompanionEnabled).toBe(true);
+    expect(migrated.position).toEqual({ x: -1200, y: 80 });
+    expect(migrated.topOffset).toBe(14);
+
+    const explicitOff = mergeSettings({
+      companion: { visualMode: 'cursor', cursorCompanionEnabled: false },
+    }).companion;
+    expect(explicitOff.cursorCompanionEnabled).toBe(false);
+    expect(mergeSettings({ companion: { topOffset: 1 } }).companion.topOffset).toBe(10);
+  });
+
   it('upgrades an old settings file that has none of the new fields', () => {
     const old = { companion: { mode: 'hybrid', position: { x: 10, y: 20 } } };
     const s = mergeSettings(old).companion;

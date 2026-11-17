@@ -202,14 +202,14 @@ export function InputBar(props: InputBarProps) {
           </IconButton>
 
           <IconButton
-            label="Attach screenshot of active window"
+            label="Attach screenshot of an app window"
             onClick={onAttachScreenshot}
             disabled={disabled}
           >
             <Camera size={15} strokeWidth={2.2} aria-hidden="true" />
           </IconButton>
 
-          <IconButton label="Attach a file" onClick={onAttachFile} disabled={disabled}>
+          <IconButton label="Attach an image" onClick={onAttachFile} disabled={disabled}>
             <Paperclip size={15} strokeWidth={2.2} aria-hidden="true" />
           </IconButton>
 

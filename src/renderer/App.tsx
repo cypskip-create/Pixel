@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Settings, ShieldAlert, Square, WifiOff } from 'lucide-react';
+import { History, Settings, ShieldAlert, Square, WifiOff } from 'lucide-react';
 import type {
   AssistantState,
+  DiagnosticsSnapshot,
   ImageAttachment,
   Mode,
   PermissionDecision,
@@ -9,16 +10,18 @@ import type {
   TaskRecord,
 } from '@shared/types';
 import { deriveAssistantState } from '@shared/companion-state';
+import { parseExplicitSearchCommand } from '@shared/browserSearch';
 import { getModeDescriptor } from '@shared/types';
 import { Avatar } from '@/components/Avatar';
 import { InputBar } from '@/components/InputBar';
+import { ConversationTranscript } from '@/components/ConversationTranscript';
 import { PermissionCard } from '@/components/PermissionCard';
+import { RecentChatsPanel } from '@/components/RecentChatsPanel';
 import { ResponseBubble } from '@/components/ResponseBubble';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { TaskStrip } from '@/components/TaskStrip';
 import { BridgeContext } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
-import { useDrag } from '@/hooks/useDrag';
 import { useMotionPolicy } from '@/hooks/useMotion';
 import { usePresentationLayout } from '@/hooks/usePresentationLayout';
 import { useSettings } from '@/hooks/useSettings';
@@ -30,11 +33,15 @@ function isSettingsWindow(): boolean {
   return new URLSearchParams(window.location.search).get('window') === 'settings';
 }
 
+function isCursorWindow(): boolean {
+  return new URLSearchParams(window.location.search).get('window') === 'cursor';
+}
+
 export function App(): React.JSX.Element {
   const bridge = readBridge();
   return (
     <BridgeContext.Provider value={bridge}>
-      {isSettingsWindow() ? <SettingsWindow /> : <Companion />}
+      {isSettingsWindow() ? <SettingsWindow /> : isCursorWindow() ? <CursorCompanionWindow /> : <Companion />}
     </BridgeContext.Provider>
   );
 }
@@ -44,6 +51,7 @@ export function App(): React.JSX.Element {
  * ------------------------------------------------------------------ */
 
 function SettingsWindow(): React.JSX.Element {
+  const bridge = readBridge();
   const {
     settings,
     hasApiKey,
@@ -55,6 +63,18 @@ function SettingsWindow(): React.JSX.Element {
     removeApiKey,
     testApiKeyConnection,
   } = useSettings();
+  const [displays, setDisplays] = useState<DiagnosticsSnapshot['displays']>([]);
+
+  useEffect(() => {
+    if (bridge.kind !== 'ready') return;
+    let mounted = true;
+    void bridge.bridge.screen.listDisplays().then((available) => {
+      if (mounted) setDisplays(available);
+    }).catch(() => {
+      if (mounted) setDisplays([]);
+    });
+    return () => { mounted = false; };
+  }, [bridge]);
 
   const close = useCallback(() => {
     const bridge = readBridge();
@@ -63,9 +83,10 @@ function SettingsWindow(): React.JSX.Element {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[var(--color-glass-raised)] text-[var(--color-ink)]">
+    <div className="flex min-h-screen w-full justify-center bg-[var(--color-glass-raised)] p-3 text-[var(--color-ink)]">
       <SettingsPanel
         settings={settings}
+        displays={displays}
         onPatch={patch}
         onRequestMode={setMode}
         onClose={close}
@@ -80,6 +101,30 @@ function SettingsWindow(): React.JSX.Element {
   );
 }
 
+function CursorCompanionWindow(): React.JSX.Element {
+  const bridge = readBridge();
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (bridge.kind !== 'ready') return;
+    let mounted = true;
+    const unsubscribe = safeSubscribe<boolean>(bridge.bridge.window.onCursorMotion, setReducedMotion);
+    void bridge.bridge.settings.get().then((settings) => {
+      if (mounted) setReducedMotion(settings.companion.reducedMotion);
+    }).catch(() => undefined);
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [bridge]);
+
+  return (
+    <div aria-hidden="true" className={`${reducedMotion ? 'reduce-motion' : 'motion-ok'} pointer-events-none grid h-screen w-screen place-items-center bg-transparent`}>
+      <Avatar state="idle" size={52} />
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * The floating companion
  * ------------------------------------------------------------------ */
@@ -87,11 +132,11 @@ function SettingsWindow(): React.JSX.Element {
 function Companion(): React.JSX.Element {
   const bridge = readBridge();
   const { settings, hasApiKey, error: settingsError, patch, setMode } = useSettings();
-  const chat = useChat();
-  const drag = useDrag();
+  const chat = useChat(settings.privacy.persistHistory);
   const reducedMotion = useMotionPolicy(settings.companion.reducedMotion);
 
   const [inputOpen, setInputOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
@@ -103,6 +148,8 @@ function Companion(): React.JSX.Element {
   const [stopped, setStopped] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [speechConfirmed, setSpeechConfirmed] = useState(false);
+  const [searchPending, setSearchPending] = useState(false);
   const layoutRef = useRef<HTMLDivElement | null>(null);
 
   const mode = settings.companion.mode;
@@ -125,9 +172,9 @@ function Companion(): React.JSX.Element {
 
   /* ---------------------------- surface ---------------------------- */
 
-  const bubbleVisible = chat.streaming || chat.content.length > 0 || chat.error !== null;
+  const bubbleVisible = !historyOpen && (chat.showTranscript || chat.streaming || chat.content.length > 0 || chat.error !== null);
   const hasActiveTask =
-    task !== null && ['running', 'planning', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'cancelling'].includes(task.status);
+    task !== null && ['running', 'planning', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'paused', 'blocked', 'cancelling'].includes(task.status);
 
   const nextSurface = useMemo(
     () =>
@@ -136,9 +183,9 @@ function Companion(): React.JSX.Element {
         hasPermission: permission !== null,
         hasActiveTask,
         bubbleVisible,
-        inputOpen,
+        inputOpen: inputOpen || historyOpen,
       }),
-    [permission, hasActiveTask, bubbleVisible, inputOpen],
+    [permission, hasActiveTask, bubbleVisible, inputOpen, historyOpen],
   );
 
   usePresentationLayout(layoutRef, nextSurface);
@@ -151,6 +198,18 @@ function Companion(): React.JSX.Element {
       return undefined;
     }
   }, [bridge]);
+
+  useEffect(() => {
+    if (bridge.kind !== 'ready' || typeof bridge.bridge.window.onSummon !== 'function') return;
+    try {
+      return bridge.bridge.window.onSummon(() => {
+        setInputOpen(true);
+        void chat.revealTranscript();
+      });
+    } catch {
+      return undefined;
+    }
+  }, [bridge, chat.revealTranscript]);
 
   /* --------------------------- subscriptions ------------------------ */
 
@@ -183,8 +242,10 @@ function Companion(): React.JSX.Element {
     let mounted = true;
     const unsubscribe = safeSubscribe<TaskRecord>(api.onUpdate, (record) => {
       setTask(record);
-      if (record.status === 'cancelled' || record.status === 'completed') {
-        window.setTimeout(() => setTask(null), 4000);
+      if (record.status === 'cancelled' || record.status === 'completed' || record.status === 'failed') {
+        window.setTimeout(() => setTask((current) =>
+          current?.id === record.id && current.status === record.status ? null : current,
+        ), 4000);
       }
     });
     void api.list().then((records) => {
@@ -225,13 +286,40 @@ function Companion(): React.JSX.Element {
       showNotice('Pixel is stopped. Clear the emergency stop before asking again.');
       return;
     }
-    if (chat.streaming) return;
+    if (chat.streaming || searchPending) return;
+
+    const explicitSearch = attachments.length === 0 ? parseExplicitSearchCommand(text) : null;
+    if (explicitSearch) {
+      if (bridge.kind !== 'ready' || typeof bridge.bridge.browser?.openSearch !== 'function') {
+        showNotice('Browser search is unavailable in this build of Pixel.');
+        return;
+      }
+      if (!chat.conversationId || chat.historyLoading) {
+        showNotice('Pixel is still restoring the selected conversation.');
+        return;
+      }
+      setDraft('');
+      setSearchPending(true);
+      void bridge.bridge.browser.openSearch(explicitSearch, text, chat.conversationId)
+        .then(async () => {
+          await chat.openConversation(chat.conversationId as string);
+          showNotice(`Opened search results for ${explicitSearch} in your default browser.`);
+        })
+        .catch(async (cause: unknown) => {
+          await chat.openConversation(chat.conversationId as string);
+          setDraft((current) => current || text);
+          showNotice(cause instanceof Error ? cause.message : 'Pixel could not open search results in your default browser.');
+        })
+        .finally(() => setSearchPending(false));
+      return;
+    }
 
     setDraft('');
+    setSpeechConfirmed(false);
     const images = attachments;
     setAttachments([]);
     void chat.send({ text, images, mode });
-  }, [attachments, chat, draft, mode, showNotice, stopped]);
+  }, [attachments, bridge, chat, draft, mode, searchPending, showNotice, stopped]);
 
   const collapse = useCallback(() => {
     if (chat.streaming) chat.stop();
@@ -291,7 +379,7 @@ function Companion(): React.JSX.Element {
     }
     const api = bridge.bridge.screen;
     void api
-      .captureDisplay()
+      .captureActiveWindow()
       .then((result) => {
         if (!result.ok || !result.image) {
           showNotice(result.error?.message ?? 'Pixel could not capture the screen.');
@@ -399,9 +487,11 @@ function Companion(): React.JSX.Element {
     const shell = window.cypsShell;
     if (!shell || typeof shell.voiceSpeak !== 'function') return;
     setSpeaking(true);
+    setSpeechConfirmed(false);
     void shell
       .voiceSpeak(chat.content)
       .then((result) => {
+        if (result.ok) setSpeechConfirmed(true);
         if (!result.ok && result.error) showNotice(result.error);
       })
       .catch((error: unknown) => {
@@ -422,6 +512,28 @@ function Companion(): React.JSX.Element {
     if (bridge.kind !== 'ready') return;
     void bridge.bridge.window.openSettings().catch(() => undefined);
   }, [bridge]);
+
+  const openHistory = useCallback(() => {
+    setInputOpen(true);
+    setHistoryOpen(true);
+  }, []);
+
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    void chat.revealTranscript();
+  }, [chat.revealTranscript]);
+
+  const openConversation = useCallback(async (id: string): Promise<boolean> => {
+    const opened = await chat.openConversation(id);
+    if (opened) setHistoryOpen(false);
+    return opened;
+  }, [chat.openConversation]);
+
+  const startNewConversation = useCallback(async (): Promise<boolean> => {
+    const created = await chat.newConversation();
+    if (created) setHistoryOpen(false);
+    return created;
+  }, [chat.newConversation]);
 
   const emergencyStop = useCallback(() => {
     if (bridge.kind !== 'ready') return;
@@ -512,17 +624,13 @@ function Companion(): React.JSX.Element {
       {nextSurface === 'idle' ? (
         <button
           type="button"
-          onPointerDown={settings.companion.visualMode === 'stationary' ? drag.onPointerDown : undefined}
-          onClick={() => setInputOpen(true)}
+          onClick={() => {
+            setInputOpen(true);
+            void chat.revealTranscript();
+          }}
           aria-label={`Open Pixel. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className={`group relative grid size-[76px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-sky-400/70 ${settings.companion.visualMode === 'stationary' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
-          style={{
-            transform:
-              drag.dragging && drag.offset
-                ? `translate(${drag.offset.x}px, ${drag.offset.y}px)`
-                : undefined,
-          }}
+          className="group relative grid size-[76px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
         >
           <Avatar state={assistantState} size={56} />
         </button>
@@ -614,12 +722,32 @@ function Companion(): React.JSX.Element {
             </div>
           ) : null}
 
-          {bubbleVisible ? (
+          {historyOpen ? (
+            <RecentChatsPanel
+              selectedId={chat.conversationId}
+              disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null}
+              onOpen={openConversation}
+              onNew={startNewConversation}
+              onClose={closeHistory}
+            />
+          ) : chat.showTranscript ? (
+            <ConversationTranscript
+              messages={chat.messages}
+              content={chat.content}
+              reasoning={chat.reasoning}
+              streaming={chat.streaming}
+              error={chat.error}
+              persistence={chat.persistence}
+              onStop={chat.stop}
+              onDismiss={collapse}
+            />
+          ) : bubbleVisible ? (
             <ResponseBubble
               content={chat.content}
               reasoning={chat.reasoning}
               streaming={chat.streaming}
               error={chat.error}
+              spoken={speechConfirmed && !chat.streaming}
               onCollapse={collapse}
               onStop={chat.stop}
               onDismiss={collapse}
@@ -648,10 +776,20 @@ function Companion(): React.JSX.Element {
               onToggleModeMenu={() => setModeMenuOpen((open) => !open)}
               onCloseModeMenu={() => setModeMenuOpen(false)}
               busy={busy}
-              disabled={bridge.kind !== 'ready'}
+              disabled={bridge.kind !== 'ready' || chat.historyLoading || searchPending || historyOpen}
             />
 
             <div className="mt-1.5 flex items-center justify-center gap-1">
+              <button
+                type="button"
+                onClick={() => historyOpen ? closeHistory() : openHistory()}
+                aria-label="Recent chats"
+                aria-expanded={historyOpen}
+                disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null || bridge.kind !== 'ready'}
+                className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-sky-400/70 disabled:opacity-40 ${historyOpen ? 'bg-sky-300/12 text-sky-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
+              >
+                <History aria-hidden="true" className="size-3.5" />
+              </button>
               <button
                 type="button"
                 onClick={openSettings}

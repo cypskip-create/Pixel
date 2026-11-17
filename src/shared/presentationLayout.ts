@@ -14,6 +14,42 @@ export const MIN_LAYOUT_WIDTH = 96;
 export const MAX_LAYOUT_WIDTH = 520;
 export const MIN_LAYOUT_HEIGHT = 96;
 
+/** Resolve persisted display ids safely after monitor removal or reconnection. */
+export function resolveAnchorDisplayId(
+  selectedId: string | null,
+  legacyPositionDisplayId: string | null,
+  availableIds: readonly string[],
+  primaryId: string,
+): string {
+  if (selectedId !== null && availableIds.includes(selectedId)) return selectedId;
+  if (selectedId === null && legacyPositionDisplayId !== null && availableIds.includes(legacyPositionDisplayId)) {
+    return legacyPositionDisplayId;
+  }
+  return availableIds.includes(primaryId) ? primaryId : (availableIds[0] ?? primaryId);
+}
+
+/** Bounds for the persistent island. Width changes never alter its center. */
+export function anchoredTopCenterBounds(
+  workArea: LayoutWorkArea,
+  requestedSize: SurfaceSize,
+  topOffset: number,
+): WindowBounds {
+  const fitted = fitPresentationSize(requestedSize, workArea);
+  const width = Math.min(fitted.width, workArea.width);
+  const height = Math.min(fitted.height, Math.max(1, workArea.height - 14));
+  const maxY = workArea.y + workArea.height - height;
+  const offset = Number.isFinite(topOffset)
+    ? Math.min(Math.max(10, topOffset), 14)
+    : DEFAULT_OFFSET_FROM_TOP;
+
+  return {
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.round(Math.min(Math.max(workArea.y + offset, workArea.y), maxY)),
+    width,
+    height,
+  };
+}
+
 /** Clamp renderer measurements to a compact window that fits its display. */
 export function fitPresentationSize(
   requested: SurfaceSize,

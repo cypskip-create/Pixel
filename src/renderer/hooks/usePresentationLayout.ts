@@ -7,7 +7,7 @@ const SIZE_EPSILON = 3;
 
 /**
  * Measures the visible companion stack and sends its bounds through the narrow
- * preload API. Native code clamps the result to the active monitor's work area.
+ * preload API. Native code clamps the result to the selected display's work area.
  */
 export function usePresentationLayout(
   rootRef: RefObject<HTMLElement | null>,

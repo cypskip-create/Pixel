@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  anchoredTopCenterBounds,
   fitPresentationSize,
+  resolveAnchorDisplayId,
   resizePresentationBounds,
 } from '../src/shared/presentationLayout';
 
@@ -35,9 +37,9 @@ describe('measured native presentation layout', () => {
       workArea,
     );
 
-    expect(fitted).toEqual({ width: 520, height: 1064 });
+    expect(fitted).toEqual({ width: 520, height: 1068 });
     expect(bounds.x).toBe(-1220);
-    expect(bounds.y).toBe(-164);
+    expect(bounds.y).toBe(-168);
     expect(bounds.x).toBeGreaterThanOrEqual(workArea.x);
     expect(bounds.y).toBeGreaterThanOrEqual(workArea.y);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(0);
@@ -63,5 +65,36 @@ describe('measured native presentation layout', () => {
       { width: Number.NaN, height: Number.POSITIVE_INFINITY },
       { x: 0, y: 0, width: 1366, height: 768 },
     )).toEqual({ width: 96, height: 96 });
+  });
+
+  it('anchors at the selected display work-area top center across size changes', () => {
+    const workArea = { x: -1920, y: -80, width: 1920, height: 1040 };
+    const idle = anchoredTopCenterBounds(workArea, { width: 96, height: 96 }, 12);
+    const expanded = anchoredTopCenterBounds(workArea, { width: 480, height: 420 }, 12);
+    const collapsed = anchoredTopCenterBounds(workArea, { width: 96, height: 96 }, 12);
+
+    expect(idle).toEqual({ x: -1008, y: -68, width: 96, height: 96 });
+    expect(expanded.x + expanded.width / 2).toBe(idle.x + idle.width / 2);
+    expect(collapsed).toEqual(idle);
+    expect(expanded.y).toBe(workArea.y + 12);
+  });
+
+  it('clamps the top offset and fits on short or negative-coordinate displays', () => {
+    const workArea = { x: 1920, y: -300, width: 1280, height: 130 };
+    expect(anchoredTopCenterBounds(workArea, { width: 480, height: 400 }, 64)).toEqual({
+      x: 2320,
+      y: -286,
+      width: 480,
+      height: 116,
+    });
+  });
+
+  it('keeps a valid selected display and safely falls back after monitor removal', () => {
+    expect(resolveAnchorDisplayId('display-2', 'display-1', ['display-1', 'display-2'], 'display-1'))
+      .toBe('display-2');
+    expect(resolveAnchorDisplayId('removed', 'display-2', ['display-1', 'display-2'], 'display-1'))
+      .toBe('display-1');
+    expect(resolveAnchorDisplayId(null, 'display-2', ['display-1', 'display-2'], 'display-1'))
+      .toBe('display-2');
   });
 });

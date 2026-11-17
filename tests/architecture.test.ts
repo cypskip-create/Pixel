@@ -96,6 +96,7 @@ describe('ipc channels', () => {
       'window:',
       'chat:',
       'history:',
+      'browser:',
       'screen:',
       'system:',
       'permissions:',
@@ -105,6 +106,31 @@ describe('ipc channels', () => {
     ]) {
       expect(names).toContain(area);
     }
+  });
+});
+
+describe('chat history and browser search trust boundaries', () => {
+  it('keeps model history main-owned and bounded to sanitized user-facing records', () => {
+    const ipc = readFileSync(join(SRC, 'main', 'ipc.ts'), 'utf8');
+    const store = readFileSync(join(SRC, 'main', 'history', 'store.ts'), 'utf8');
+    expect(ipc).toContain('const { history: _rendererHistory, conversationId: _rendererConversationId');
+    expect(ipc).toContain('history: priorHistory');
+    expect(ipc).toContain("message.role === 'user' || message.role === 'assistant'");
+    expect(ipc).toContain('current.privacy.persistHistory');
+    expect(store).toContain("if (record.persistence === 'session') return");
+    expect(store).toContain('redactTaskText');
+  });
+
+  it('builds browser search URLs in main from a bounded query and the selected provider', () => {
+    const ipc = readFileSync(join(SRC, 'main', 'ipc.ts'), 'utf8');
+    const search = readFileSync(join(SRC, 'shared', 'browserSearch.ts'), 'utf8');
+    expect(ipc).toContain('CHANNELS.browserOpenSearch');
+    expect(ipc).toContain('createSearchUrl(queryValue, provider)');
+    expect(ipc).toContain('shell.openExternal(url)');
+    expect(search).toContain('MAX_SEARCH_QUERY_LENGTH = 500');
+    expect(search).toContain("'https://www.google.com/search'");
+    expect(search).toContain("'https://www.bing.com/search'");
+    expect(search).toContain("'https://duckduckgo.com/'");
   });
 });
 
@@ -143,5 +169,19 @@ describe('central companion panel presentation', () => {
     expect(windowSource).toContain('fitPresentationSize(requestedSize');
     expect(windowSource).toContain('CHANNELS.windowFocusLost');
     expect(ipcSource).toContain('CHANNELS.windowSetLayout');
+  });
+
+  it('anchors the primary bar and keeps cursor following in a passive second window', () => {
+    const windowSource = readFileSync(join(SRC, 'main', 'window.ts'), 'utf8');
+    const appSource = readFileSync(join(SRC, 'renderer', 'App.tsx'), 'utf8');
+    const channels = Object.keys(CHANNELS).join(' ');
+    expect(windowSource).toContain('movable: false');
+    expect(windowSource).toContain('anchoredTopCenterBounds');
+    expect(windowSource).toContain('focusable: false');
+    expect(windowSource).toContain('win.setIgnoreMouseEvents(true, { forward: true })');
+    expect(windowSource).toContain("'?window=cursor'");
+    expect(appSource).toContain('function CursorCompanionWindow()');
+    expect(channels).not.toContain('windowSetPosition');
+    expect(channels).not.toContain('windowGetPosition');
   });
 });
