@@ -111,11 +111,14 @@ console, run:
 
 Expect `cyps` to be `"object"`, each listed method to be `"function"`, Settings
 to return its configuration without a key value, and `hasApiKey` to be boolean.
-Open Settings and confirm it loads. Do not replace an existing key for this
-check. If no test key is configured, use a disposable DeepSeek test key in
-Settings and verify the configured indicator survives restart; never paste the
-key into DevTools, logs or task text. With a configured key, send the harmless
-prompt `Reply exactly: PIXEL BRIDGE TEST OK` and verify the response appears.
+Open Settings and confirm it loads. Under **Privacy → API key**, use **Add Key**
+to save a disposable DeepSeek test key if no key is configured; do not replace
+an existing key. Confirm the status changes to **Configured**, restart Pixel,
+and confirm it remains configured without the key being shown. Select **Test
+Connection** and confirm the result matches the provider response. Never paste
+the key into DevTools, logs or task text. With a configured key, send the
+harmless prompt `Reply exactly: PIXEL BRIDGE TEST OK` and verify the response
+appears.
 Check permission cards and the emergency stop with a harmless test task. Repeat
 the preload/Settings smoke on `release\win-unpacked\Pixel.exe`; confirm the
 startup log has no `preload-error` and the bridge methods are available there.

@@ -115,8 +115,9 @@ Signing is the distributor's responsibility and has not been faked.
 Pixel never asks for the key in a chat and never writes it in plaintext.
 
 1. Open the tray menu and choose **Settings...**, or press `Ctrl+,`.
-2. Paste the key into **DeepSeek API key** and save.
-3. The key is encrypted with Windows DPAPI through Electron's `safeStorage`.
+2. Under **Privacy → API key**, choose **Add Key**, enter the key, then choose **Save Key**. Pixel shows only whether a key is configured; it never reads the stored value back into the interface.
+3. Choose **Test Connection** to make one explicit provider check. Use **Change Key** to replace it or **Remove Key** to delete it after confirmation.
+4. The key is encrypted with Windows DPAPI through Electron's `safeStorage`.
 
 If Windows reports that credential encryption is unavailable, Pixel **refuses to
 store the key** rather than falling back to plaintext.

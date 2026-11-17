@@ -134,13 +134,15 @@ export class SettingsStore {
 
   /** Remove the stored key from disk and memory. */
   clearApiKey(): void {
-    this.apiKeyCache = null;
-    this.apiKeyLoaded = true;
     try {
       if (existsSync(this.keyPath)) rmSync(this.keyPath, { force: true });
     } catch {
-      // Nothing useful to do; the in-memory cache is already cleared.
+      // Report failure so the renderer cannot claim removal while the
+      // encrypted credential remains on disk and reappears after restart.
+      throw new Error('Pixel could not remove the saved API key.');
     }
+    this.apiKeyCache = null;
+    this.apiKeyLoaded = true;
   }
 }
 

@@ -45,7 +45,17 @@ export function App(): React.JSX.Element {
  * ------------------------------------------------------------------ */
 
 function SettingsWindow(): React.JSX.Element {
-  const { settings, hasApiKey, error, saving, patch, setMode } = useSettings();
+  const {
+    settings,
+    hasApiKey,
+    error,
+    saving,
+    patch,
+    setMode,
+    saveApiKey,
+    removeApiKey,
+    testApiKeyConnection,
+  } = useSettings();
 
   const close = useCallback(() => {
     const bridge = readBridge();
@@ -61,6 +71,9 @@ function SettingsWindow(): React.JSX.Element {
         onRequestMode={setMode}
         onClose={close}
         hasApiKey={hasApiKey}
+        onSaveApiKey={saveApiKey}
+        onRemoveApiKey={removeApiKey}
+        onTestConnection={testApiKeyConnection}
         error={error}
         saving={saving}
       />

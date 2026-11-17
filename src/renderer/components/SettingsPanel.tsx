@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Brain, Gauge, Keyboard, ListChecks, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
-import type { AppSettings, Mode } from '@shared/types';
+import { useCallback, useEffect, useState } from 'react';
+import { Brain, Eye, EyeOff, Gauge, Keyboard, ListChecks, Mic, ShieldCheck, Sparkles, X } from 'lucide-react';
+import type { AppSettings, ConnectionTestResult, CypsErrorCode, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
@@ -14,6 +14,9 @@ interface SettingsPanelProps {
   onRequestMode: (mode: Mode) => void;
   onClose: () => void;
   hasApiKey: boolean | null;
+  onSaveApiKey: (key: string) => Promise<{ ok: boolean; error?: string }>;
+  onRemoveApiKey: () => Promise<{ ok: boolean; error?: string }>;
+  onTestConnection: () => Promise<ConnectionTestResult>;
   /** Latest write failure, if any. */
   error: string | null;
   saving: boolean;
@@ -32,21 +35,38 @@ export type DeepPartial<T> = {
  * application.
  */
 export function SettingsPanel(props: SettingsPanelProps) {
-  const { settings, onPatch, onRequestMode, onClose, hasApiKey, error, saving } = props;
+  const {
+    settings,
+    onPatch,
+    onRequestMode,
+    onClose,
+    hasApiKey,
+    onSaveApiKey,
+    onRemoveApiKey,
+    onTestConnection,
+    error,
+    saving,
+  } = props;
   const [advanced, setAdvanced] = useState(false);
   const [automationOpen, setAutomationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [keyEditorReset, setKeyEditorReset] = useState(0);
+
+  const closeSettings = useCallback(() => {
+    setKeyEditorReset((value) => value + 1);
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        closeSettings();
       }
     };
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [onClose]);
+  }, [closeSettings]);
 
   const modeDescriptor = getModeDescriptor(settings.companion.mode);
 
@@ -64,7 +84,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             Saving…
           </span>
         ) : null}
-        <IconButton label="Close settings" onClick={onClose}>
+        <IconButton label="Close settings" onClick={closeSettings}>
           <X size={14} strokeWidth={2.4} aria-hidden="true" />
         </IconButton>
       </header>
@@ -171,19 +191,13 @@ export function SettingsPanel(props: SettingsPanelProps) {
             checked={settings.privacy.persistHistory}
             onChange={(value) => onPatch({ privacy: { persistHistory: value } })}
           />
-          <Row label="API key">
-            <span
-              className={`text-[11px] font-medium ${
-                hasApiKey === null
-                  ? 'text-[var(--color-ink-dim)]'
-                  : hasApiKey
-                    ? 'text-emerald-200'
-                    : 'text-amber-200'
-              }`}
-            >
-              {hasApiKey === null ? 'Unknown' : hasApiKey ? 'Configured' : 'Not set'}
-            </span>
-          </Row>
+          <ApiKeyManager
+            hasApiKey={hasApiKey}
+            onSave={onSaveApiKey}
+            onRemove={onRemoveApiKey}
+            onTestConnection={onTestConnection}
+            resetToken={keyEditorReset}
+          />
           <button
             type="button"
             onClick={() => setMemoryOpen(true)}
@@ -228,6 +242,271 @@ export function SettingsPanel(props: SettingsPanelProps) {
       </div>
     </section>
   );
+}
+
+function ApiKeyManager({
+  hasApiKey,
+  onSave,
+  onRemove,
+  onTestConnection,
+  resetToken,
+}: {
+  hasApiKey: boolean | null;
+  onSave: SettingsPanelProps['onSaveApiKey'];
+  onRemove: SettingsPanelProps['onRemoveApiKey'];
+  onTestConnection: SettingsPanelProps['onTestConnection'];
+  resetToken: number;
+}) {
+  const [draft, setDraft] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
+  const [removingKey, setRemovingKey] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    setDraft('');
+    setEditorOpen(false);
+    setShowKey(false);
+    setFeedback(null);
+    setConfirmRemoval(false);
+  }, [resetToken]);
+
+  const closeEditor = () => {
+    setDraft('');
+    setShowKey(false);
+    setEditorOpen(false);
+    setFeedback(null);
+  };
+
+  const saveKey = async () => {
+    if (!draft.trim() || savingKey || removingKey) return;
+    setSavingKey(true);
+    setFeedback(null);
+    try {
+      const result = await onSave(draft);
+      if (result.ok) {
+        setFeedback({ kind: 'success', message: 'API key saved securely.' });
+        setEditorOpen(false);
+        setShowKey(false);
+      } else {
+        setFeedback({ kind: 'error', message: result.error ?? 'Pixel could not save the API key securely.' });
+      }
+    } catch {
+      setFeedback({ kind: 'error', message: 'Pixel could not save the API key securely.' });
+    } finally {
+      setDraft('');
+      setSavingKey(false);
+    }
+  };
+
+  const removeKey = async () => {
+    if (removingKey || savingKey) return;
+    setRemovingKey(true);
+    setFeedback(null);
+    try {
+      const result = await onRemove();
+      if (result.ok) {
+        setDraft('');
+        setEditorOpen(false);
+        setShowKey(false);
+        setConfirmRemoval(false);
+        setFeedback({ kind: 'success', message: 'API key removed.' });
+      } else {
+        setFeedback({ kind: 'error', message: result.error ?? 'Pixel could not remove the saved API key.' });
+      }
+    } catch {
+      setFeedback({ kind: 'error', message: 'Pixel could not remove the saved API key.' });
+    } finally {
+      setRemovingKey(false);
+    }
+  };
+
+  const testConnection = async () => {
+    if (testing || savingKey || removingKey) return;
+    setTesting(true);
+    setFeedback(null);
+    try {
+      const result = await onTestConnection();
+      setFeedback(
+        result.ok
+          ? { kind: 'success', message: 'Connected successfully.' }
+          : { kind: 'error', message: connectionFailureMessage(result.error?.code) },
+      );
+    } catch {
+      setFeedback({ kind: 'error', message: 'Provider unavailable.' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="px-1.5 py-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[11.5px] text-[var(--color-ink-soft)]">API key</span>
+          <span
+            className={`text-[11px] font-medium ${
+              hasApiKey === null
+                ? 'text-[var(--color-ink-dim)]'
+                : hasApiKey
+                  ? 'text-emerald-200'
+                  : 'text-amber-200'
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {hasApiKey === null ? 'Unknown' : hasApiKey ? 'Configured' : 'Not configured'}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {hasApiKey ? (
+            <>
+              <SmallButton onClick={() => { setFeedback(null); setEditorOpen(true); }} disabled={savingKey || removingKey}>
+                Change Key
+              </SmallButton>
+              <SmallButton onClick={() => void testConnection()} disabled={testing || savingKey || removingKey}>
+                {testing ? 'Testing…' : 'Test Connection'}
+              </SmallButton>
+              <SmallButton
+                onClick={() => { setFeedback(null); setConfirmRemoval(true); }}
+                disabled={testing || savingKey || removingKey}
+                tone="danger"
+              >
+                Remove Key
+              </SmallButton>
+            </>
+          ) : !editorOpen ? (
+            <SmallButton onClick={() => { setFeedback(null); setEditorOpen(true); }}>
+              Add Key
+            </SmallButton>
+          ) : null}
+        </div>
+      </div>
+
+      {editorOpen ? (
+        <div className="mt-2 rounded-xl border border-white/10 bg-black/15 p-2">
+          <label htmlFor="deepseek-api-key" className="mb-1 block text-[10.5px] text-[var(--color-ink-dim)]">
+            DeepSeek API key
+          </label>
+          <div className="flex items-center gap-1.5">
+            <input
+              id="deepseek-api-key"
+              aria-label="DeepSeek API key"
+              type={showKey ? 'text' : 'password'}
+              autoComplete="new-password"
+              spellCheck={false}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Enter API key"
+              disabled={savingKey || removingKey}
+              className="no-drag min-w-0 flex-1 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-dim)] focus:border-sky-300/50"
+            />
+            <button
+              type="button"
+              aria-label={showKey ? 'Hide API key' : 'Show API key'}
+              aria-pressed={showKey}
+              onClick={() => setShowKey((value) => !value)}
+              className="no-drag rounded-lg border border-white/10 p-1.5 text-[var(--color-ink-soft)] hover:bg-white/8"
+            >
+              {showKey ? <EyeOff size={13} aria-hidden="true" /> : <Eye size={13} aria-hidden="true" />}
+            </button>
+          </div>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <SmallButton onClick={() => void saveKey()} disabled={!draft.trim() || savingKey || removingKey} primary>
+              {savingKey ? 'Saving…' : 'Save Key'}
+            </SmallButton>
+            <SmallButton onClick={closeEditor} disabled={savingKey || removingKey}>Cancel</SmallButton>
+            {savingKey ? <span role="status" className="text-[10px] text-[var(--color-ink-dim)]">Saving securely…</span> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {confirmRemoval ? (
+        <div role="alertdialog" aria-modal="true" aria-labelledby="remove-key-title" className="mt-2 rounded-xl border border-rose-300/25 bg-rose-500/8 p-2">
+          <p id="remove-key-title" className="text-[11px] font-medium text-[var(--color-ink)]">Remove the saved DeepSeek API key?</p>
+          <p className="mt-0.5 text-[10px] text-[var(--color-ink-dim)]">Pixel will no longer be able to connect to DeepSeek until you add a key again.</p>
+          <div className="mt-1.5 flex gap-1.5">
+            <SmallButton onClick={() => void removeKey()} disabled={removingKey} primary tone="danger">
+              {removingKey ? 'Removing…' : 'Confirm Remove'}
+            </SmallButton>
+            <SmallButton onClick={() => setConfirmRemoval(false)} disabled={removingKey}>Cancel</SmallButton>
+          </div>
+        </div>
+      ) : null}
+
+      {feedback ? (
+        <p
+          role={feedback.kind === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+          className={`mt-1.5 text-[10.5px] ${feedback.kind === 'success' ? 'text-emerald-200' : 'text-rose-200'}`}
+        >
+          {feedback.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SmallButton({
+  children,
+  onClick,
+  disabled = false,
+  primary = false,
+  tone = 'normal',
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  tone?: 'normal' | 'danger';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`no-drag rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        primary
+          ? tone === 'danger'
+            ? 'border-rose-300/30 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30'
+            : 'border-sky-300/30 bg-sky-400/15 text-sky-100 hover:bg-sky-400/25'
+          : tone === 'danger'
+            ? 'border-rose-300/20 text-rose-200 hover:bg-rose-500/12'
+            : 'border-white/10 text-[var(--color-ink-soft)] hover:bg-white/8'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function connectionFailureMessage(code?: CypsErrorCode): string {
+  switch (code) {
+    case 'NO_API_KEY':
+      return 'Not configured.';
+    case 'UNAUTHORIZED':
+      return 'Invalid key.';
+    case 'INSUFFICIENT_BALANCE':
+      return 'Insufficient balance.';
+    case 'RATE_LIMITED':
+      return 'Rate limited.';
+    case 'NETWORK':
+    case 'TIMEOUT':
+      return 'Network error.';
+    case 'SERVER':
+    case 'UNKNOWN':
+      return 'Provider unavailable.';
+    case 'ABORTED':
+      return 'Connection test was canceled.';
+    case 'BAD_REQUEST':
+    case 'MODEL_CAPABILITY':
+      return 'Provider rejected the connection test.';
+    default:
+      return 'Provider unavailable.';
+  }
 }
 
 function Group({

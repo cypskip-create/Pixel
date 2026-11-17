@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppSettings, Mode } from '@shared/types';
+import type { AppSettings, ConnectionTestResult, CypsError, Mode } from '@shared/types';
 import { mergeSettings } from '@shared/types';
 import { useBridge } from '@/hooks/useBridge';
 import type { DeepPartial } from '@/components/SettingsPanel';
@@ -16,9 +16,8 @@ interface SettingsState {
  * Reads and writes AppSettings through the optional native bridge.
  *
  * The preload layer is written independently of this renderer, so every call
- * is defensive: the reply may be an AppSettings, or a `{settings, hasApiKey}`
- * envelope, or absent entirely. A missing or failing bridge degrades to
- * defaults plus a visible error rather than a crash.
+ * is defensive. API-key status is queried through its dedicated secure IPC
+ * method; it is never inferred from or stored in AppSettings.
  */
 export function useSettings() {
   const bridge = useBridge();
@@ -50,23 +49,43 @@ export function useSettings() {
     let cancelled = false;
     void (async () => {
       try {
-        const reply: unknown = await api.get();
+        const settingsRead =
+          typeof api.get === 'function'
+            ? api.get()
+            : Promise.reject(new Error('Settings are unavailable.'));
+        // Do not rely on an optional field in AppSettings: the main process
+        // returns the ordinary settings object and keeps key material separate.
+        const keyStatusRead =
+          typeof api.hasApiKey === 'function'
+            ? api.hasApiKey()
+            : Promise.reject(new Error('API key status is unavailable.'));
+        const [settingsResult, keyStatusResult] = await Promise.allSettled([
+          settingsRead,
+          keyStatusRead,
+        ]);
         if (cancelled || !alive.current) return;
+        if (settingsResult.status === 'rejected') throw settingsResult.reason;
 
-        // Accept both a bare AppSettings and a { settings, hasApiKey } envelope.
-        let raw: unknown = reply;
-        let hasApiKey: boolean | null = null;
-        if (reply !== null && typeof reply === 'object' && 'settings' in reply) {
-          const envelope = reply as { settings?: unknown; hasApiKey?: unknown };
-          raw = envelope.settings;
-          if (typeof envelope.hasApiKey === 'boolean') hasApiKey = envelope.hasApiKey;
-        }
+        // Keep compatibility with older wrappers, but always read status from
+        // hasApiKey() above rather than trusting an envelope's extra field.
+        const reply: unknown = settingsResult.value;
+        const raw =
+          reply !== null && typeof reply === 'object' && 'settings' in reply
+            ? (reply as { settings?: unknown }).settings
+            : reply;
+        const hasApiKey =
+          keyStatusResult.status === 'fulfilled' && typeof keyStatusResult.value === 'boolean'
+            ? keyStatusResult.value
+            : null;
 
         setState({
           settings: mergeSettings(raw),
           hasApiKey,
           loading: false,
-          error: null,
+          error:
+            keyStatusResult.status === 'rejected' || hasApiKey === null
+              ? 'API key status is unavailable.'
+              : null,
           saving: false,
         });
       } catch (cause) {
@@ -140,6 +159,83 @@ export function useSettings() {
     [bridge],
   );
 
+  const saveApiKey = useCallback(
+    async (key: string): Promise<{ ok: boolean; error?: string }> => {
+      if (bridge.kind !== 'ready') {
+        return { ok: false, error: 'Secure key storage is unavailable.' };
+      }
+      const method = bridge.bridge.settings?.setApiKey;
+      if (typeof method !== 'function') {
+        return { ok: false, error: 'Secure key storage is unavailable.' };
+      }
+      try {
+        const result: unknown = await method(key);
+        if (result === null || typeof result !== 'object' || !('ok' in result) || result.ok !== true) {
+          const message =
+            result !== null && typeof result === 'object' && 'error' in result && typeof result.error === 'string'
+              ? result.error
+              : 'Pixel could not save the API key securely.';
+          return { ok: false, error: message };
+        }
+        if (alive.current) {
+          setState((prev) => ({
+            ...prev,
+            hasApiKey: true,
+            error: prev.error === 'API key status is unavailable.' ? null : prev.error,
+          }));
+        }
+        return { ok: true };
+      } catch {
+        // Avoid showing arbitrary IPC exception text, which must never echo a
+        // credential back into renderer UI or logs.
+        return { ok: false, error: 'Pixel could not save the API key securely.' };
+      }
+    },
+    [bridge],
+  );
+
+  const removeApiKey = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (bridge.kind !== 'ready') {
+      return { ok: false, error: 'Secure key storage is unavailable.' };
+    }
+    const method = bridge.bridge.settings?.clearApiKey;
+    if (typeof method !== 'function') {
+      return { ok: false, error: 'Secure key storage is unavailable.' };
+    }
+    try {
+      await method();
+      if (alive.current) {
+        setState((prev) => ({
+          ...prev,
+          hasApiKey: false,
+          error: prev.error === 'API key status is unavailable.' ? null : prev.error,
+        }));
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Pixel could not remove the saved API key.' };
+    }
+  }, [bridge]);
+
+  const testApiKeyConnection = useCallback(async (): Promise<ConnectionTestResult> => {
+    if (bridge.kind !== 'ready') {
+      return { ok: false, error: connectionError('UNKNOWN', 'The native bridge is unavailable.') };
+    }
+    const method = bridge.bridge.settings?.testConnection;
+    if (typeof method !== 'function') {
+      return { ok: false, error: connectionError('UNKNOWN', 'Connection testing is unavailable.') };
+    }
+    try {
+      const result: unknown = await method();
+      if (result !== null && typeof result === 'object' && 'ok' in result && typeof result.ok === 'boolean') {
+        return result as ConnectionTestResult;
+      }
+      return { ok: false, error: connectionError('UNKNOWN', 'DeepSeek returned an invalid connection result.') };
+    } catch {
+      return { ok: false, error: connectionError('UNKNOWN', 'Connection testing is unavailable.') };
+    }
+  }, [bridge]);
+
   const setMode = useCallback(
     (mode: Mode) => {
       patch({ companion: { mode } });
@@ -147,7 +243,11 @@ export function useSettings() {
     [patch],
   );
 
-  return { ...state, patch, setMode };
+  return { ...state, patch, setMode, saveApiKey, removeApiKey, testApiKeyConnection };
+}
+
+function connectionError(code: CypsError['code'], message: string): CypsError {
+  return { code, message, retryable: false };
 }
 
 function describe(cause: unknown): string {

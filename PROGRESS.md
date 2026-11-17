@@ -21,18 +21,21 @@ The existing Electron + React + TypeScript product is retained. The local change
 - The Windows C# UI Automation helper is compiled and connected as an approved, bounded surface: foreground window/title reads, semantic element search, exact unique `InvokePattern` activation, and matching exact present/absent postcondition checks. Actions fail closed if the expected postcondition already held before activation or UIA enumeration is incomplete. Raw coordinate actions are not available through it.
 - Cursor presentation follows the pointer with the existing spring/edge geometry while the orb is collapsed; it is independent of Guide/Agent/Hybrid mode and pauses while the companion is expanded.
 - The task strip shows verified steps distinctly and can display the persisted final response after restart.
+- Settings now manages the DeepSeek API key through existing encrypted main-process IPC: masked draft input with optional reveal, save/change, confirmed removal, configured status and a user-triggered connection test with backend-category feedback. The stored key is never returned to the renderer or written to AppSettings, localStorage, task history or logs.
 
 ## Validation for this tree
 
-Preload bridge checkpoint run on 2026-11-17:
+Preload bridge and DeepSeek key-settings checkpoint run on 2026-11-17:
 
-- `npm run typecheck`: passed for renderer and main TypeScript projects.
-- `npm test`: **655 passed, 0 failed, 0 skipped across 26 files**. All 22 Chromium browser tests and all 9 NSIS tests ran. The browser fixture used local loopback access.
-- `npm run build`: passed. `npm run build:native`: passed and compiled `PixelNative.exe`.
+- `npm run typecheck`: passed for renderer and main TypeScript projects after the key-settings changes.
+- `npm test -- --reporter=dot`: **669 passed, 0 failed, 0 skipped across 27 files**. This includes 14 API-key UI tests covering save/mask/no-plaintext, startup status, replacement, confirmed/canceled/failed removal, failed saves, backend connection result categories, unavailable bridge methods and draft clearing.
+- `npm run build`: passed, including main TypeScript compilation, esbuild preload bundling and Vite production renderer build.
+- The key editor uses component-local draft state and the existing `setApiKey`, `hasApiKey`, `clearApiKey` and `testConnection` IPC. Failed key-file deletion now rejects instead of reporting success while leaving a key that could reappear after restart.
 - `npm run pack`: passed and produced `release/win-unpacked/Pixel.exe` plus the packaged application.
 - The esbuild preload graph contains `src/preload/index.ts` and `src/shared/channels.ts`; Electron is the only external runtime import. The unpacked `app.asar` preload is byte-for-byte identical to `dist/main/preload/index.js` and has no local CommonJS imports.
-- `npm run test:preload-sandbox`: **not verified** in this Codex desktop environment. Electron exited with `2147483651` before the smoke app emitted startup or preload logs. A CUA launch attempt exposed no Pixel window. The user separately reports that the Electron main process, window and React renderer now start on the target laptop; the new preload bridge still requires laptop-side runtime confirmation.
-- The Windows Forms UIA fixture and AgentExecutor harness are prepared. Real Pixel approval cards, settings, encrypted key use, DeepSeek conversation and the real-control UIA flow remain laptop acceptance items.
+- Live Settings acceptance: **not verified in this environment**. The user reports Pixel launches and its sandbox preload smoke passes on the target laptop. Here, `npm run dev` could not bind Vite because port 5199 was already occupied and Electron then exited with `2147483651`; a separate `npm run dev:electron` attempt exited with code 1 without creating a targetable Pixel window. No credential was available for a real DeepSeek request. Therefore configured status after restart, connection success, encrypted-key UI interaction and a harmless live conversation still require laptop validation using the updated acceptance procedure.
+- `npm run test:preload-sandbox`: **not verified** in this Codex desktop environment. The prior smoke attempt exited before startup/preload logs; the user separately reports the preload smoke passed on the target laptop.
+- The Windows Forms UIA fixture and AgentExecutor harness are prepared. Real Pixel approval cards, encrypted-key persistence, the new Settings key-management UI, DeepSeek connection/conversation and the real-control UIA flow remain laptop acceptance items.
 - Voice availability is probed at runtime and varies by machine and execution context; no fixed STT/TTS availability is claimed.
 - Windows CI is configured but was not run from this local tree. It runs the sandbox preload IPC smoke alongside the type checks, full suite, native compilation and distributions; logs, smoke/JUnit results and packages are uploaded and no release is published.
 
@@ -57,7 +60,7 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
 
 ### Unverified
 
-- Final `window.cyps`/`window.cypsShell` injection and IPC behavior in a running Electron sandbox, Settings and encrypted-key UI, DeepSeek conversation, floating orb, task/approval UI, cursor-follow and the live Pixel UIA approval/action flow. The user reports that the main process, window and React renderer now start on the target laptop.
+- The user-reported `window.cyps`/`window.cypsShell` laptop smoke was not repeated here; actual Settings key entry/status, encrypted-key restart persistence, DeepSeek connection/conversation, floating orb, task/approval UI, cursor-follow and the live Pixel UIA approval/action flow remain unverified. The user reports that Pixel launches and the sandbox preload smoke passes on the target laptop, but this runner could not create a Pixel window.
 - Runtime launch of the unpacked and portable packages; clean install, upgrade, uninstall and user-data preservation. The unpacked archive contains the verified bundled preload, but this environment could not launch its Electron window.
 - The GitHub Actions workflow itself; it becomes runnable after the user pushes this branch.
 
