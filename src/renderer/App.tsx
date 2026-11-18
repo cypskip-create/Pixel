@@ -10,6 +10,14 @@ import type {
   TaskRecord,
 } from '@shared/types';
 import { deriveAssistantState } from '@shared/companion-state';
+import {
+  INITIAL_DYNAMIC_ISLAND,
+  ISLAND_TIMING,
+  isDynamicIslandExpanded,
+  reduceDynamicIsland,
+  type DynamicIslandEvent,
+} from '@shared/dynamicIsland';
+import { mergeVoiceTranscriptIntoDraft } from '@shared/companion/pushToTalkSubmission';
 import { parseExplicitSearchCommand } from '@shared/browserSearch';
 import { getModeDescriptor } from '@shared/types';
 import { Avatar } from '@/components/Avatar';
@@ -29,6 +37,7 @@ import { usePresentationLayout } from '@/hooks/usePresentationLayout';
 import { useSettings } from '@/hooks/useSettings';
 import { readBridge, safeSubscribe } from '@/lib/bridge';
 import { resolveSurface } from '@/lib/surface';
+import { MicrophoneCapture } from '@/lib/audioCapture';
 import { Workspace } from '@/Workspace';
 
 /** True when the renderer was opened as the settings window by the shell. */
@@ -42,6 +51,13 @@ function isCursorWindow(): boolean {
 
 function isWorkspaceWindow(): boolean {
   return new URLSearchParams(window.location.search).get('window') === 'workspace';
+}
+
+interface PushToTalkCaptureRecord {
+  sessionId: number;
+  capture: MicrophoneCapture;
+  phase: 'starting' | 'recording' | 'stopping';
+  stopAction?: 'submit' | 'cancel';
 }
 
 export function App(): React.JSX.Element {
@@ -142,7 +158,7 @@ function Companion(): React.JSX.Element {
   const chat = useChat(settings.privacy.persistHistory);
   const reducedMotion = useMotionPolicy(settings.companion.reducedMotion);
 
-  const [inputOpen, setInputOpen] = useState(false);
+  const [island, setIsland] = useState(INITIAL_DYNAMIC_ISLAND);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
@@ -154,15 +170,65 @@ function Companion(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [listening, setListening] = useState(false);
+  const [pushToTalkState, setPushToTalkState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting'>('idle');
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const [speechConfirmed, setSpeechConfirmed] = useState(false);
   const [searchPending, setSearchPending] = useState(false);
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+  const leaveTimer = useRef<number | null>(null);
+
+  const dispatchIsland = useCallback((event: DynamicIslandEvent) => {
+    setIsland((current) => reduceDynamicIsland(current, event));
+  }, []);
+
+  const openIsland = useCallback(() => {
+    dispatchIsland({ type: 'OPEN_CLICK' });
+  }, [dispatchIsland]);
+
+  const onIslandPointerEnter = useCallback(() => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
+    hoverTimer.current = null;
+    leaveTimer.current = null;
+    dispatchIsland({ type: 'POINTER_ENTER' });
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null;
+      dispatchIsland({ type: 'HOVER_DELAY_ELAPSED' });
+    }, ISLAND_TIMING.hoverActivationMs);
+  }, [dispatchIsland]);
+
+  const onIslandPointerLeave = useCallback(() => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    dispatchIsland({ type: 'POINTER_LEAVE' });
+    if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
+    leaveTimer.current = window.setTimeout(() => {
+      leaveTimer.current = null;
+      dispatchIsland({ type: 'LEAVE_GRACE_ELAPSED' });
+    }, ISLAND_TIMING.pointerLeaveGraceMs);
+  }, [dispatchIsland]);
+
+  useEffect(() => () => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
+  }, []);
 
   const mode = settings.companion.mode;
   const modeDescriptor = getModeDescriptor(mode);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const noticeTimer = useRef<number | null>(null);
+  const handledPushToTalkSessions = useRef(new Set<number>());
+  const pushToTalkCapture = useRef<PushToTalkCaptureRecord | null>(null);
+  const manualCapture = useRef<MicrophoneCapture | null>(null);
+
+  useEffect(() => {
+    dispatchIsland({
+      type: 'DRAFT_CHANGED',
+      hasDraft: draft.trim().length > 0 || attachments.length > 0,
+    });
+  }, [attachments.length, dispatchIsland, draft]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -179,20 +245,51 @@ function Companion(): React.JSX.Element {
 
   /* ---------------------------- surface ---------------------------- */
 
-  const bubbleVisible = !historyOpen && (chat.showTranscript || chat.streaming || chat.content.length > 0 || chat.error !== null);
+  const islandExpanded = isDynamicIslandExpanded(island.state);
+  const bubbleVisible = islandExpanded && !historyOpen && (chat.showTranscript || chat.streaming || chat.content.length > 0 || chat.error !== null);
   const hasActiveTask =
     task !== null && ['running', 'planning', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'paused', 'blocked', 'cancelling'].includes(task.status);
+
+  useEffect(() => {
+    dispatchIsland({
+      type: 'RUNTIME_CHANGED',
+      recording: listening || pushToTalkState === 'recording',
+      transcribing: pushToTalkState === 'stopping' || pushToTalkState === 'transcribing',
+      workActive: chat.streaming || (hasActiveTask && permission === null),
+      responseAvailable: !chat.streaming && chat.content.trim().length > 0,
+      approvalRequired: permission !== null,
+    });
+  }, [chat.content, chat.streaming, dispatchIsland, hasActiveTask, listening, permission, pushToTalkState]);
+
+  useEffect(() => {
+    if (island.state !== 'CLICK_EXPANDED' || island.pointerInside || island.hasDraft ||
+        island.workActive || island.recording || island.transcribing || island.approvalRequired) return;
+    const timer = window.setTimeout(
+      () => dispatchIsland({ type: 'IDLE_TIMEOUT' }),
+      ISLAND_TIMING.idleCollapseMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [dispatchIsland, island]);
+
+  useEffect(() => {
+    if (island.state !== 'RESPONSE_AVAILABLE') return;
+    const timer = window.setTimeout(
+      () => dispatchIsland({ type: 'RESPONSE_NOTICE_ELAPSED' }),
+      ISLAND_TIMING.responseNoticeMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [dispatchIsland, island.state]);
 
   const nextSurface = useMemo(
     () =>
       resolveSurface({
         windowHidden: false,
         hasPermission: permission !== null,
-        hasActiveTask,
+        hasActiveTask: hasActiveTask && islandExpanded,
         bubbleVisible,
-        inputOpen: inputOpen || historyOpen,
+        inputOpen: islandExpanded || historyOpen,
       }),
-    [permission, hasActiveTask, bubbleVisible, inputOpen, historyOpen],
+    [permission, hasActiveTask, bubbleVisible, islandExpanded, historyOpen],
   );
 
   usePresentationLayout(layoutRef, nextSurface);
@@ -210,13 +307,13 @@ function Companion(): React.JSX.Element {
     if (bridge.kind !== 'ready' || typeof bridge.bridge.window.onSummon !== 'function') return;
     try {
       return bridge.bridge.window.onSummon(() => {
-        setInputOpen(true);
+        openIsland();
         void chat.revealTranscript();
       });
     } catch {
       return undefined;
     }
-  }, [bridge, chat.revealTranscript]);
+  }, [bridge, chat.revealTranscript, openIsland]);
 
   /* --------------------------- subscriptions ------------------------ */
 
@@ -238,9 +335,177 @@ function Companion(): React.JSX.Element {
       setStopped(true);
       chat.reset();
       setPermission(null);
+      manualCapture.current?.cancel();
+      manualCapture.current = null;
+      setListening(false);
+      void window.cypsShell?.voiceCaptureRelease?.();
       showNotice('Emergency stop: new actions are blocked until you clear it.');
     });
   }, [bridge, chat, showNotice]);
+
+  const finishPushToTalkCapture = useCallback(async (current: PushToTalkCaptureRecord) => {
+    if (pushToTalkCapture.current !== current) return;
+    current.phase = 'stopping';
+    try {
+      const wav = await current.capture.stop();
+      if (pushToTalkCapture.current !== current) return;
+      pushToTalkCapture.current = null;
+      const shell = window.cypsShell;
+      if (!shell?.voicePttTranscribe) throw new Error('Pixel cannot send this recording to its local speech recognizer.');
+      const result = await shell.voicePttTranscribe(current.sessionId, wav);
+      if (!result.ok && !result.error?.toLowerCase().includes('cancelled')) {
+        showNotice(result.error ?? 'Pixel could not transcribe that recording. Nothing was submitted.');
+      }
+    } catch (error) {
+      if (pushToTalkCapture.current === current) pushToTalkCapture.current = null;
+      const message = error instanceof Error ? error.message : 'Pixel could not finish microphone capture.';
+      if (!message.toLowerCase().includes('cancelled')) showNotice(message);
+      void window.cypsShell?.voicePttCaptureReady(current.sessionId, message);
+    } finally {
+      setMicrophoneLevel(0);
+    }
+  }, [showNotice]);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell?.onPushToTalkState || !shell.onPushToTalkStopCapture) return;
+    const unsubscribeState = safeSubscribe(shell.onPushToTalkState, (event) => {
+      if (event.state === 'failed' || event.state === 'cancelled') {
+        const current = pushToTalkCapture.current;
+        if (current && (event.sessionId === undefined || current.sessionId === event.sessionId)) {
+          current.capture.cancel();
+          pushToTalkCapture.current = null;
+        }
+        setPushToTalkState('idle');
+        setMicrophoneLevel(0);
+        if (event.state === 'failed' && event.error) showNotice(event.error);
+        return;
+      }
+
+      setPushToTalkState(event.state);
+      if (event.state !== 'starting' || !Number.isSafeInteger(event.sessionId)) return;
+      const sessionId = event.sessionId as number;
+      if (manualCapture.current || pushToTalkCapture.current) {
+        void shell.voicePttCaptureReady(sessionId, 'Another microphone capture is already active.');
+        return;
+      }
+
+      const capture = new MicrophoneCapture(setMicrophoneLevel);
+      const current: PushToTalkCaptureRecord = { sessionId, capture, phase: 'starting' };
+      pushToTalkCapture.current = current;
+      void capture.start(settings.voice.inputDeviceId).then(async () => {
+        if (pushToTalkCapture.current !== current) {
+          capture.cancel();
+          return;
+        }
+        if (current.stopAction === 'cancel') {
+          capture.cancel();
+          pushToTalkCapture.current = null;
+          setMicrophoneLevel(0);
+          return;
+        }
+        if (current.stopAction === 'submit') {
+          await finishPushToTalkCapture(current);
+          return;
+        }
+        current.phase = 'recording';
+        const accepted = await shell.voicePttCaptureReady(sessionId);
+        if (!accepted && pushToTalkCapture.current === current) {
+          capture.cancel();
+          pushToTalkCapture.current = null;
+          setMicrophoneLevel(0);
+        }
+      }).catch((error: unknown) => {
+        if (pushToTalkCapture.current !== current) return;
+        pushToTalkCapture.current = null;
+        capture.cancel();
+        setMicrophoneLevel(0);
+        const message = error instanceof Error ? error.message : 'Microphone capture could not start.';
+        void shell.voicePttCaptureReady(sessionId, message);
+      });
+    });
+    const unsubscribeStop = safeSubscribe(shell.onPushToTalkStopCapture, (event) => {
+      const current = pushToTalkCapture.current;
+      if (!current || current.sessionId !== event.sessionId) return;
+      if (current.phase === 'starting') {
+        current.stopAction = event.action;
+        if (event.action === 'cancel') {
+          current.capture.cancel();
+          pushToTalkCapture.current = null;
+          setMicrophoneLevel(0);
+        }
+        return;
+      }
+      if (event.action === 'cancel') {
+        current.capture.cancel();
+        pushToTalkCapture.current = null;
+        setMicrophoneLevel(0);
+        return;
+      }
+      void finishPushToTalkCapture(current);
+    });
+    return () => {
+      unsubscribeState();
+      unsubscribeStop();
+      pushToTalkCapture.current?.capture.cancel();
+      pushToTalkCapture.current = null;
+    };
+  }, [finishPushToTalkCapture, settings.voice.inputDeviceId, showNotice]);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell?.onVoiceCaptureCancel) return;
+    return shell.onVoiceCaptureCancel(() => {
+      manualCapture.current?.cancel();
+      manualCapture.current = null;
+      setListening(false);
+      setMicrophoneLevel(0);
+      void shell.voiceCaptureRelease?.();
+    });
+  }, []);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell?.onPushToTalkSubmit) return;
+    return safeSubscribe(shell.onPushToTalkSubmit, (request) => {
+      if (!Number.isSafeInteger(request.sessionId) || typeof request.text !== 'string') return;
+      if (handledPushToTalkSessions.current.has(request.sessionId)) return;
+      handledPushToTalkSessions.current.add(request.sessionId);
+      if (handledPushToTalkSessions.current.size > 32) {
+        const oldest = handledPushToTalkSessions.current.values().next().value;
+        if (oldest !== undefined) handledPushToTalkSessions.current.delete(oldest);
+      }
+
+      const text = request.text.trim().slice(0, 20_000);
+      if (!text) {
+        setPushToTalkState('idle');
+        return;
+      }
+      if (stopped || chat.streaming || hasActiveTask || permission !== null) {
+        setDraft((current) => mergeVoiceTranscriptIntoDraft(current, text));
+        openIsland();
+        setPushToTalkState('idle');
+        showNotice('Your voice instruction is saved in the draft because Pixel is busy. Review it before sending.');
+        return;
+      }
+
+      void chat.send({ text, images: [], mode }).then((sent) => {
+        if (sent) {
+          setPushToTalkState('idle');
+          return;
+        }
+        setDraft((current) => mergeVoiceTranscriptIntoDraft(current, text));
+        openIsland();
+        setPushToTalkState('idle');
+        showNotice('Your voice instruction is saved in the draft. Review it and try again.');
+      }).catch(() => {
+        setDraft((current) => mergeVoiceTranscriptIntoDraft(current, text));
+        openIsland();
+        setPushToTalkState('idle');
+        showNotice('Pixel could not submit the voice instruction. It is saved in the draft for review.');
+      });
+    });
+  }, [chat.send, chat.streaming, hasActiveTask, mode, openIsland, permission, showNotice, stopped]);
 
   useEffect(() => {
     if (bridge.kind !== 'ready') return;
@@ -329,15 +594,11 @@ function Companion(): React.JSX.Element {
   }, [attachments, bridge, chat, draft, mode, searchPending, showNotice, stopped]);
 
   const collapse = useCallback(() => {
-    if (chat.streaming) chat.stop();
-    chat.reset();
-    setInputOpen(false);
+    dispatchIsland({ type: 'CLOSE_CLICK' });
+    setHistoryOpen(false);
     setModeMenuOpen(false);
     setPendingMode(null);
-    setPermission(null);
-    setDraft('');
-    setAttachments([]);
-  }, [chat]);
+  }, [dispatchIsland]);
 
   const requestMode = useCallback(
     (next: Mode) => {
@@ -432,55 +693,79 @@ function Companion(): React.JSX.Element {
     [showNotice],
   );
 
-  /**
-   * Push-to-talk. Windows speech recognition runs locally; if it is missing we
-   * say exactly that rather than pretending to listen.
-   */
+  const finishManualVoiceCapture = useCallback((capture: MicrophoneCapture, reachedLimit = false) => {
+    if (manualCapture.current !== capture) return;
+    manualCapture.current = null;
+    setListening(false);
+    const shell = window.cypsShell;
+    if (!shell?.voiceTranscribeWav) {
+      capture.cancel();
+      void shell?.voiceCaptureRelease?.();
+      showNotice('Pixel cannot send this recording to its local speech recognizer.');
+      return;
+    }
+    void capture.stop().then(async (wav) => {
+      await shell.voiceCaptureRelease?.();
+      const result = await shell.voiceTranscribeWav(wav);
+      if (result.ok && result.text.trim().length > 0) {
+        setDraft((current) => current.length > 0 ? `${current} ${result.text.trim()}` : result.text.trim());
+        if (reachedLimit) showNotice('The 20-second limit was reached. The transcription was added to the draft.');
+        return;
+      }
+      showNotice(result.error ?? 'Pixel did not hear anything.');
+    }).catch((error: unknown) => {
+      void shell.voiceCaptureRelease?.();
+      const message = error instanceof Error ? error.message : 'Speech recognition failed.';
+      if (!message.toLowerCase().includes('cancelled')) showNotice(message);
+    }).finally(() => setMicrophoneLevel(0));
+  }, [showNotice]);
+
+  /** Manual microphone mode: recording stays in the composer until submitted. */
   const toggleListening = useCallback(() => {
     const shell = window.cypsShell;
-    if (!shell || typeof shell.voiceListen !== 'function') {
+    if (!shell || typeof shell.voiceTranscribeWav !== 'function') {
       setListening(false);
       showNotice('Voice input needs the desktop shell, which is not available here.');
       return;
     }
 
     if (listening) {
-      setListening(false);
-      void shell.voiceCancel?.();
+      const capture = manualCapture.current;
+      if (capture) finishManualVoiceCapture(capture);
       return;
     }
 
-    setListening(true);
-    void (async () => {
-      try {
-        const capability = await shell.voiceCapability();
-        if (!capability.speechToText) {
-          setListening(false);
-          showNotice(capability.reason ?? 'No speech recognizer is installed on this computer.');
-          return;
-        }
-
-        const result = await shell.voiceListen(8000);
-        setListening(false);
-        if (result.error?.toLowerCase().includes('cancelled')) return;
-        if (result.ok && result.text.length > 0) {
-          setDraft((current) => (current.length > 0 ? current + ' ' + result.text : result.text));
-          return;
-        }
-        showNotice(
-          result.noSpeech
-            ? 'Pixel did not hear anything. Try again, a little closer to the microphone.'
-            : (result.error ?? 'Speech recognition failed.'),
-        );
-      } catch (error) {
-        setListening(false);
-        showNotice(
-          'Speech recognition failed at ' +
-            (error instanceof Error ? error.message : String(error)),
-        );
+    if (manualCapture.current || pushToTalkCapture.current) {
+      showNotice('Pixel is already using the microphone for another voice interaction.');
+      return;
+    }
+    let capture: MicrophoneCapture;
+    capture = new MicrophoneCapture(setMicrophoneLevel, () => finishManualVoiceCapture(capture, true));
+    manualCapture.current = capture;
+    void shell.voiceCapability().then(async (capability) => {
+      if (!capability.speechToText) throw new Error(capability.reason ?? 'Local speech recognition is unavailable.');
+      const acquired = await shell.voiceCaptureAcquire();
+      if (!acquired) throw new Error('Another Pixel window is already using the microphone.');
+      await capture.start(settings.voice.inputDeviceId);
+      if (manualCapture.current === capture) setListening(true);
+      else {
+        capture.cancel();
+        await shell.voiceCaptureRelease();
       }
-    })();
-  }, [listening, showNotice]);
+    }).catch((error: unknown) => {
+      if (manualCapture.current === capture) manualCapture.current = null;
+      setListening(false);
+      setMicrophoneLevel(0);
+      void shell.voiceCaptureRelease();
+      showNotice(error instanceof Error ? error.message : 'Microphone capture could not start.');
+    });
+  }, [finishManualVoiceCapture, listening, settings.voice.inputDeviceId, showNotice]);
+
+  useEffect(() => () => {
+    manualCapture.current?.cancel();
+    void window.cypsShell?.voiceCaptureRelease?.();
+    pushToTalkCapture.current?.capture.cancel();
+  }, []);
 
   // Speak replies aloud when the user has asked for it.
   const wasStreaming = useRef(false);
@@ -521,9 +806,9 @@ function Companion(): React.JSX.Element {
   }, [bridge]);
 
   const openHistory = useCallback(() => {
-    setInputOpen(true);
+    openIsland();
     setHistoryOpen(true);
-  }, []);
+  }, [openIsland]);
 
   const openWorkspace = useCallback(() => {
     if (bridge.kind === 'ready') void bridge.bridge.window.openWorkspace().catch(() => showNotice('Pixel Workspace could not be opened.'));
@@ -603,22 +888,42 @@ function Companion(): React.JSX.Element {
     hasAnswer: chat.content.length > 0,
     error: chat.error !== null || settingsError !== null,
     listening,
+    transcribing: pushToTalkState === 'stopping' || pushToTalkState === 'transcribing',
     executing: hasActiveTask,
     speaking,
   });
+  const compactAssistantState: AssistantState = island.state === 'RESPONSE_AVAILABLE'
+    ? 'success'
+    : island.state === 'BACKGROUND_WORKING'
+      ? 'thinking'
+      : assistantState;
 
   const rootClass = reducedMotion ? 'reduce-motion' : 'motion-ok';
+  const pushToTalkLabel = pushToTalkState === 'recording'
+    ? `Pixel is listening. Release ${settings.voice.pushToTalkAccelerator.replace(/CommandOrControl/gi, 'Ctrl').replace(/\+/g, ' plus ')} to submit.`
+    : pushToTalkState === 'starting'
+      ? 'Pixel is requesting microphone access.'
+      : pushToTalkState === 'stopping'
+        ? 'Pixel is stopping microphone capture.'
+        : pushToTalkState === 'transcribing'
+          ? 'Pixel is transcribing the recording.'
+          : pushToTalkState === 'submitting'
+            ? 'Pixel is submitting the voice instruction.'
+            : '';
 
   return (
     <div
       ref={layoutRef}
       className={`${rootClass} flex h-screen w-screen flex-col items-center justify-start overflow-x-hidden overflow-y-auto bg-transparent pt-2`}
       data-surface={nextSurface}
+      onPointerEnter={onIslandPointerEnter}
+      onPointerLeave={onIslandPointerLeave}
     >
       {/* Screen readers hear the answer as it arrives. */}
       <p aria-live="polite" aria-atomic="false" className="sr-only">
         {chat.streaming ? chat.content : chat.error ?? ''}
       </p>
+      <p aria-live="polite" aria-atomic="true" className="sr-only">{pushToTalkLabel}</p>
 
       {bridge.kind === 'missing' ? (
         <div
@@ -632,21 +937,34 @@ function Companion(): React.JSX.Element {
         </div>
       ) : null}
 
-      {nextSurface === 'idle' ? (
+      {!islandExpanded && nextSurface === 'idle' ? (
         <button
           type="button"
           onClick={() => {
-            setInputOpen(true);
+            openIsland();
             void chat.revealTranscript();
           }}
-          aria-label={`Open Pixel. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
+          aria-label={pushToTalkState !== 'idle' ? pushToTalkLabel
+            : `Open Pixel. ${island.state === 'RESPONSE_AVAILABLE' ? 'A response is ready. ' : ''}Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className="glass group relative grid h-[54px] w-[112px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
+          className="glass group relative grid h-[38px] w-[138px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.025] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
         >
-          <PixelMark size={31} />
-          <span aria-hidden="true" className="absolute bottom-[10px] right-[31px] rounded-full border-2 border-[var(--color-glass)]"><Avatar state={assistantState} size={12} /></span>
+          {pushToTalkState === 'recording' ? (
+            <span className="island-ptt-indicator" aria-hidden="true">
+              <PixelMark size={17} />
+              <span className="island-ptt-wave">{[3, 6, 4, 8, 5, 7, 3].map((height, index) => {
+                const amplitude = Math.max(0.12, microphoneLevel);
+                return <i key={index} style={{ height: `${Math.max(2, Math.round((height + 2) * amplitude))}px` }} />;
+              })}</span>
+            </span>
+          ) : (
+            <>
+              <PixelMark size={19} />
+              <span aria-hidden="true" className="absolute bottom-[7px] right-[48px] rounded-full border-2 border-[var(--color-glass)]"><Avatar state={compactAssistantState} size={9} /></span>
+            </>
+          )}
         </button>
-      ) : (
+      ) : islandExpanded || nextSurface !== 'idle' ? (
         <div
           data-layout-panel
           className="animate-slide-down flex w-full flex-col items-center gap-2 px-2"
@@ -789,6 +1107,7 @@ function Companion(): React.JSX.Element {
               onCloseModeMenu={() => setModeMenuOpen(false)}
               busy={busy}
               disabled={bridge.kind !== 'ready' || chat.historyLoading || searchPending || historyOpen}
+              autoFocus={island.state === 'CLICK_EXPANDED' && !historyOpen}
             />
 
             <div className="mt-1.5 flex items-center justify-center gap-1">
@@ -847,7 +1166,7 @@ function Companion(): React.JSX.Element {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       <input
         ref={fileInputRef}

@@ -66,6 +66,7 @@ export function getModeDescriptor(mode: Mode): ModeDescriptor {
 export const ASSISTANT_STATES = [
   'idle',
   'listening',
+  'transcribing',
   'thinking',
   'responding',
   'speaking',
@@ -322,7 +323,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voice: {
     pushToTalkAccelerator: 'CommandOrControl+Shift+Space',
     inputDeviceId: null,
-    sttModel: 'base',
+    sttModel: 'base.en',
     ttsEnabled: false,
     ttsVoice: null,
     ttsRate: 1,

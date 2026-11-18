@@ -3,10 +3,11 @@ import {
   Check, FolderKanban, Maximize2, Minimize2, Plus, ShieldAlert, Wrench, X,
 } from 'lucide-react';
 import type {
-  AuditEntry, ConversationSummary, DiagnosticsSnapshot, ImageAttachment, Mode, PermissionDecision,
+  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, ImageAttachment, Mode, PermissionDecision,
   PermissionRequest, ProjectView, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
 } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
+import { deriveAssistantState } from '@shared/companion-state';
 import { AutomationPanel } from '@/components/AutomationPanel';
 import { WorkspaceConversationHeader } from '@/components/WorkspaceConversationHeader';
 import { WorkspaceComposer } from '@/components/WorkspaceComposer';
@@ -22,6 +23,7 @@ import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
 import { safeSubscribe } from '@/lib/bridge';
 import { taskDisplayState, selectActiveTask, isTaskActive } from '@/lib/task-presentation';
+import { MicrophoneCapture } from '@/lib/audioCapture';
 
 export function Workspace(): React.JSX.Element {
   const bridge = useBridge();
@@ -47,13 +49,53 @@ export function Workspace(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [listening, setListening] = useState(false);
+  const [pushToTalkState, setPushToTalkState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting'>('idle');
   const [recentOutcome, setRecentOutcome] = useState<TaskRecord | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottom = useRef(true);
   const knownTasks = useRef(new Map<string, TaskRecord>());
+  const voiceCapture = useRef<MicrophoneCapture | null>(null);
+  const voiceStartup = useRef(false);
   const activeMode = settings.companion.mode;
   const activeTask = useMemo(() => selectActiveTask(tasks), [tasks]);
   const title = chat.historyLoading ? 'Restoring conversation…' : history.find((item) => item.id === chat.conversationId)?.title ?? 'New conversation';
+  const assistantState: AssistantState = deriveAssistantState({
+    stopped,
+    permission: permission !== null,
+    streaming: chat.streaming,
+    hasAnswer: chat.content.length > 0,
+    error: chat.error !== null || settingsError !== null,
+    listening: listening || pushToTalkState === 'recording',
+    transcribing: pushToTalkState === 'stopping' || pushToTalkState === 'transcribing',
+    executing: activeTask !== null,
+  });
+
+  useEffect(() => () => {
+    voiceCapture.current?.cancel();
+    voiceCapture.current = null;
+    void window.cypsShell?.voiceCaptureRelease?.();
+  }, []);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell?.onVoiceCaptureCancel) return;
+    return shell.onVoiceCaptureCancel(() => {
+      voiceStartup.current = false;
+      voiceCapture.current?.cancel();
+      voiceCapture.current = null;
+      setListening(false);
+      void shell.voiceCaptureRelease?.();
+    });
+  }, []);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell?.onPushToTalkState) return;
+    return shell.onPushToTalkState((event) => {
+      if (event.state === 'failed' || event.state === 'cancelled') setPushToTalkState('idle');
+      else setPushToTalkState(event.state);
+    });
+  }, []);
 
   useEffect(() => {
   const media = window.matchMedia('(prefers-color-scheme: light)');
@@ -83,7 +125,14 @@ export function Workspace(): React.JSX.Element {
     const unsubResolved = safeSubscribe<string>(api.onResolved, (id) => setPermission((current) => current?.id === id ? null : current));
     let alive = true;
     void api.listPending().then((items) => { if (alive && items.length) setPermission(items[0] ?? null); }).catch(() => undefined);
-    const unsubStop = safeSubscribe(bridge.bridge.system.onEmergencyStop, () => setStopped(true));
+    const unsubStop = safeSubscribe(bridge.bridge.system.onEmergencyStop, () => {
+      setStopped(true);
+      setListening(false);
+      voiceStartup.current = false;
+      voiceCapture.current?.cancel();
+      voiceCapture.current = null;
+      void window.cypsShell?.voiceCaptureRelease?.();
+    });
     void bridge.bridge.system.isEmergencyStopped().then((value) => { if (alive) setStopped(value); }).catch(() => undefined);
     return () => { alive = false; unsubRequest(); unsubResolved(); unsubStop(); };
   }, [bridge]);
@@ -186,20 +235,78 @@ export function Workspace(): React.JSX.Element {
     } catch { setNotice('Pixel could not capture the active window.'); }
   }, [bridge]);
 
+  const finishWorkspaceVoiceCapture = useCallback(async (capture: MicrophoneCapture, reachedLimit = false) => {
+    if (voiceCapture.current !== capture) return;
+    voiceCapture.current = null;
+    setListening(false);
+    const shell = window.cypsShell;
+    if (!shell?.voiceTranscribeWav) {
+      capture.cancel();
+      await shell?.voiceCaptureRelease?.();
+      setNotice('Pixel cannot send this recording to its local speech recognizer.');
+      return;
+    }
+    try {
+      const wav = await capture.stop();
+      await shell.voiceCaptureRelease?.();
+      const result = await shell.voiceTranscribeWav(wav);
+      if (result.ok && result.text.trim()) {
+        setDraft((current) => current ? `${current} ${result.text.trim()}` : result.text.trim());
+        if (reachedLimit) setNotice('The 20-second limit was reached. The transcription was added to the composer.');
+      } else {
+        setNotice(result.error ?? 'Pixel did not hear anything.');
+      }
+    } catch (cause) {
+      await shell.voiceCaptureRelease?.();
+      const error = cause instanceof Error ? cause.message : 'Voice transcription failed.';
+      if (!error.toLowerCase().includes('cancelled')) setNotice(error);
+    }
+  }, []);
+
   const toggleVoice = useCallback(async () => {
     const shell = window.cypsShell;
-    if (!shell?.voiceListen || !shell.voiceCapability) { setNotice('Voice input is unavailable in this build.'); return; }
-    if (listening) { setListening(false); await shell.voiceCancel?.(); return; }
-    setListening(true);
+    if (!shell?.voiceTranscribeWav || !shell.voiceCapability) { setNotice('Voice input is unavailable in this build.'); return; }
+    if (listening) {
+      const capture = voiceCapture.current;
+      if (capture) await finishWorkspaceVoiceCapture(capture);
+      return;
+    }
+    if (voiceStartup.current) {
+      voiceStartup.current = false;
+      voiceCapture.current?.cancel();
+      voiceCapture.current = null;
+      await shell.voiceCaptureRelease?.();
+      setNotice('Microphone startup was cancelled.');
+      return;
+    }
+    voiceStartup.current = true;
     try {
       const capability = await shell.voiceCapability();
-      if (!capability.speechToText) { setNotice(capability.reason ?? 'No speech recognizer is installed.'); return; }
-      const result = await shell.voiceListen(8_000);
-      if (result.ok && result.text.trim()) setDraft((current) => current ? `${current} ${result.text}` : result.text);
-      else if (!result.error?.toLowerCase().includes('cancelled')) setNotice(result.error ?? 'Pixel did not hear anything.');
-    } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Voice input failed.'); }
-    finally { setListening(false); }
-  }, [listening]);
+      if (!voiceStartup.current) return;
+      if (!capability.speechToText) throw new Error(capability.reason ?? 'Local speech recognition is unavailable.');
+      const acquired = await shell.voiceCaptureAcquire();
+      if (!acquired) throw new Error('Another Pixel window is already using the microphone.');
+      if (!voiceStartup.current) { await shell.voiceCaptureRelease(); return; }
+      let capture: MicrophoneCapture;
+      capture = new MicrophoneCapture(() => undefined, () => { void finishWorkspaceVoiceCapture(capture, true); });
+      voiceCapture.current = capture;
+      await capture.start(settings.voice.inputDeviceId);
+      if (!voiceStartup.current || voiceCapture.current !== capture) {
+        capture.cancel();
+        await shell.voiceCaptureRelease();
+        return;
+      }
+      setListening(true);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : 'Voice input failed.';
+      if (voiceStartup.current) setNotice(error);
+      voiceCapture.current?.cancel();
+      voiceCapture.current = null;
+      await shell.voiceCaptureRelease?.();
+    } finally {
+      voiceStartup.current = false;
+    }
+  }, [finishWorkspaceVoiceCapture, listening, settings.voice.inputDeviceId]);
 
   const respondPermission = useCallback(async (decision: PermissionDecision) => {
     if (bridge.kind !== 'ready') return;
@@ -271,7 +378,7 @@ export function Workspace(): React.JSX.Element {
   ) : null;
 
   return (
-    <div className="workspace-shell" data-workspace>
+    <div className={`workspace-shell${settings.companion.reducedMotion ? ' reduce-motion' : ''}`} data-workspace>
       <header className="workspace-titlebar drag">
         <div className="flex min-w-0 items-center gap-2"><PixelMark size={22} /><span className="pixel-wordmark pixel-wordmark-large">PIXEL</span><span className="workspace-title-divider" />
           <span className="truncate text-[13px] text-[var(--color-ink-soft)]">{viewTitle[view]}</span>
@@ -318,6 +425,7 @@ export function Workspace(): React.JSX.Element {
               canSearch={bridge.kind === 'ready' && Boolean(chat.conversationId)}
               hasTaskDetails={activeTask !== null}
               onOpenTaskDetails={() => setContextOpen(true)}
+              assistantState={assistantState}
             />
             {pendingApproval}
             {activeTask ? <WorkspaceTaskActivity task={activeTask} onOpenDetails={() => setContextOpen(true)} /> : null}

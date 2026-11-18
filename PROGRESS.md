@@ -2,7 +2,26 @@
 
 Updated: 2026-11-18. Version: 0.2.1.
 
-## Current local validation — conversation-first Workspace
+## Current checkpoint — Interaction Engine 3.0
+
+Branch: `codex/interaction-engine-3`. Started from `b7ccac1fc17824317a1606f5b89bb61a13bbc52d`. The implementation and this validation entry are committed together locally; nothing was pushed or published.
+
+- Added a testable Dynamic Island state reducer with a 144×52 DIP native idle surface and 138×38 visible pill, 140 ms hover, 950 ms pointer grace and 4.5 s idle collapse. Click-pinned presentation preserves drafts, approvals and ongoing tasks. Geometry changes only for fixed presentation surfaces; response text scrolls internally and preserves manual scroll-up.
+- Added configured global push-to-talk with a narrowly scoped native key-release watcher. The helper observes only the configured chord, enforces a 20-second bound, and returns distinct release/cancel/timeout/failure outcomes. Keydown starts capture without a capability-probe delay; only audio is requested, at most 20 seconds is held, and the Island displays a small live waveform without opening or focusing chat.
+- PTT release finalizes one session and submits one valid local transcript through the existing chat and permission system. Manual microphone dictation only inserts text into the draft. Cancellation paths include explicit stop, emergency stop, window destruction, screen lock and suspend. Speech uses installed Windows System.Speech or optional CPU/int8 faster-whisper with an already cached model; no model download or cloud audio path is enabled.
+- Added PTT shortcut validation/conflict handling, watcher crash/restart and terminal-transition tests, fixed a release-state regression that previously skipped capture finalization, and fixed modifier parsing in the C# helper. Native helper compilation and the configured-chord CLI smoke pass (`released`, exit 0).
+- Added the original geometric reactive Workspace character and shared recording/transcription/assistant state. Workspace surfaces use the cooler blue-charcoal palette; the Island remains a compact original dark Pixel surface. No Acrylic, Mica or backdrop blur was added.
+- `npm run typecheck`: passed (renderer, main and test projects).
+- `npm test -- --reporter=dot`: **781 passed, 0 failed, 2 skipped (783 total; 45 files passed, 1 skipped)** with Playwright Chromium installed and local fixture access enabled. The two skips are the opt-in real-desktop foreground integration tests. The isolated NSIS preflight suite separately passed **9/9**; the browser file passed **22/22**.
+- `npm run build`: passed (main/preload build, Vite renderer and icon generation). The unpacked package build passed to `artifacts/interaction-engine-3-rc-20261118/win-unpacked`; `app.asar` contains `dist/main/preload/index.js`, whose only runtime `require` is `electron`, and the package includes `PixelNative.exe`.
+- `npm run test:preload-sandbox`: **unverified/blocked**. Electron 45.2.3 exited with `2147483651` (`0x80000003`) before the smoke application started or produced a report. The Electron binary also returns this code for `--version`; no current-branch Pixel window or startup log was created. A visible Pixel process belongs to the separate `C:\dev\Pixel` checkout and was not treated as evidence.
+- The default `npm run pack` attempt could not resolve `github.com` in the restricted shell. After network-enabled packaging was allowed, the same source produced the isolated unpacked Windows artifact above; no signing or publishing occurred. `npm run dist`, portable launch, NSIS install/upgrade/uninstall and packaged GUI use remain unverified.
+- Local Windows capability probing varied by execution context: the sandboxed probe reported `speechToText=false`, while the full Windows test context reported `speechToText=true` and `textToSpeech=true`. This does not prove microphone capture or accurate transcription. No hardware PTT conversation, CPU/memory/latency benchmark, 100/125/150% DPI review, real display click-through, or GPU comparison was completed.
+- Existing `.github/workflows/windows-ci.yml` covers typecheck, sandbox preload smoke, Chromium tests, native helper compilation, packaging and artifact upload. No GitHub run corresponds to this local branch because it was not pushed. The packaged GPU/renderer-child-process issue remains a separate unresolved diagnosis; this preload and interaction work does not claim to fix it.
+
+See [`docs/validation/INTERACTION_ENGINE_3_READINESS.md`](docs/validation/INTERACTION_ENGINE_3_READINESS.md) for status categories and exact evidence, and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md) for the laptop procedures. Earlier progress entries below are historical.
+
+## Previous checkpoint — conversation-first Workspace
 
 Current branch: `codex/ui-experience-2`. Starting commit: `1000f622157ebd50aec83cae35a92635c2009dbf` (original dark floating UI restoration). The Workspace redesign is a focused local change; no push or release was made.
 

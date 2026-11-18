@@ -149,7 +149,10 @@ describe('shared Pixel Workspace', () => {
     expect(workspace).toContain('system.emergencyStop');
     expect(workspace).not.toContain('variant="inline"');
     expect(workspace).not.toContain('window.prompt');
-    expect(styles).toContain('--workspace-surface: #0c1019');
+    expect(styles).toContain('--workspace-surface: #151c28');
+    expect(styles).toContain('--workspace-panel: #1c2635');
+    expect(styles).toContain('--workspace-panel-solid: #243144');
+    expect(styles).toContain('--workspace-hover: #2c3b51');
     expect(styles).toContain('background: var(--workspace-panel-solid)');
   });
 });
@@ -193,8 +196,10 @@ describe('window surface sizes', () => {
     expect(SURFACE_SIZES.active.width).toBeLessThanOrEqual(520);
   });
 
-  it('keeps the idle orb small', () => {
-    expect(SURFACE_SIZES.idle.width).toBeLessThanOrEqual(128);
+  it('keeps the idle pill compact and thin', () => {
+    expect(SURFACE_SIZES.idle).toEqual({ width: 144, height: 52 });
+    expect(SURFACE_SIZES.idle.width).toBeLessThanOrEqual(155);
+    expect(SURFACE_SIZES.idle.height).toBeLessThanOrEqual(54);
   });
 });
 
@@ -206,11 +211,14 @@ describe('central companion panel presentation', () => {
     expect(inputBar.match(/<ModeSwitcher\b/g)).toHaveLength(1);
   });
 
-  it('measures renderer panels and routes a bounded layout through the bridge', () => {
+  it('reports fixed per-surface geometry and routes it through the bridge', () => {
     const hook = readFileSync(join(SRC, 'renderer', 'hooks', 'usePresentationLayout.ts'), 'utf8');
     const windowSource = readFileSync(join(SRC, 'main', 'window.ts'), 'utf8');
     const ipcSource = readFileSync(join(SRC, 'main', 'ipc.ts'), 'utf8');
-    expect(hook).toContain('ResizeObserver');
+    expect(hook).toContain('SURFACE_SIZES[surface]');
+    expect(hook).not.toMatch(/new\s+ResizeObserver/);
+    expect(hook).not.toMatch(/new\s+MutationObserver/);
+    expect(hook).not.toMatch(/\.scrollHeight|\.scrollWidth/);
     expect(hook).toContain('setLayout(surface');
     expect(windowSource).toContain('fitPresentationSize(requestedSize');
     expect(windowSource).toContain('CHANNELS.windowFocusLost');

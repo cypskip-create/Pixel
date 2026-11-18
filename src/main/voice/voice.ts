@@ -1,10 +1,9 @@
 /**
  * Voice input and output.
  *
- * Implemented on Windows' built-in `System.Speech` through PowerShell, so it is
- * a real speech engine rather than a simulation:
- *  - recognition uses the installed desktop recognizer with a dictation grammar;
- *  - synthesis uses the installed system voices.
+ * Uses Windows' built-in `System.Speech` for dictation/synthesis when present.
+ * An optional Python `faster-whisper` worker can transcribe captured WAV input
+ * with a model already present in the local cache; it never downloads one.
  *
  * If no recognizer or voice is installed, the capability check says exactly
  * that. Pixel never returns invented transcription.
@@ -13,10 +12,16 @@
  */
 
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { terminateProcessTree } from '../services/process';
+import type { PythonWorker } from '../services/python-worker';
 
 /** Longest single dictation window. */
 export const MAX_LISTEN_MS = 20_000;
+export const MAX_VOICE_WAV_BYTES = 44 + 16_000 * 2 * 21;
 
 export interface VoiceCapability {
   speechToText: boolean;
@@ -36,6 +41,21 @@ export interface RecognitionResult {
 export class VoiceService {
   private speaking = false;
   private readonly activeControllers = new Set<AbortController>();
+  private capabilityCache: VoiceCapability | null = null;
+  private capabilityPending: Promise<VoiceCapability> | null = null;
+
+  constructor(private readonly pythonWorker?: PythonWorker) {
+    // A forced process exit can bypass finally; delete only Pixel's generated
+    // short-lived voice buffers from an earlier run when the service restarts.
+    try {
+      for (const name of readdirSync(tmpdir())) {
+        const match = /^pixel-voice-(\d+)-[a-f0-9-]+\.wav$/i.exec(name);
+        if (match && Number(match[1]) !== process.pid) {
+          try { unlinkSync(join(tmpdir(), name)); } catch { /* leave files owned by another active Pixel process */ }
+        }
+      }
+    } catch { /* temp cleanup is best-effort; no audio is kept in app data */ }
+  }
 
   /** Cancel current recognition and speech workers. */
   cancelAll(): number {
@@ -45,7 +65,17 @@ export class VoiceService {
   }
 
   /** Probe the machine once and cache the answer. */
-  async capability(): Promise<VoiceCapability> {
+  capability(): Promise<VoiceCapability> {
+    if (this.capabilityCache) return Promise.resolve(this.capabilityCache);
+    if (this.capabilityPending) return this.capabilityPending;
+    this.capabilityPending = this.probeCapability().then((capability) => {
+      this.capabilityCache = capability;
+      return capability;
+    }).finally(() => { this.capabilityPending = null; });
+    return this.capabilityPending;
+  }
+
+  private async probeCapability(): Promise<VoiceCapability> {
     if (process.platform !== 'win32') {
       return {
         speechToText: false,
@@ -55,22 +85,31 @@ export class VoiceService {
     }
 
     try {
-      const output = await runPowerShell(CAPABILITY_SCRIPT, 15_000);
-      const parsed = parseCapability(output);
-      if (!parsed) {
+      const [systemResult, pythonResult] = await Promise.allSettled([
+        runPowerShell(CAPABILITY_SCRIPT, 15_000).then(parseCapability),
+        this.pythonWorker?.capabilities() ?? Promise.resolve(null),
+      ]);
+      const system = systemResult.status === 'fulfilled' ? systemResult.value : null;
+      const python = pythonResult.status === 'fulfilled' && pythonResult.value?.ok
+        ? pythonResult.value.result
+        : null;
+      const fasterWhisper = python?.optional.faster_whisper === true;
+      const speechToText = Boolean(system?.speechToText || fasterWhisper);
+      const textToSpeech = Boolean(system?.textToSpeech);
+      if (!speechToText && !textToSpeech) {
         return {
           speechToText: false,
           textToSpeech: false,
-          reason: 'Windows speech services did not respond.',
+          reason: 'No local speech recognizer or voice is available for this Windows account.',
         };
       }
-      if (!parsed.speechToText && !parsed.textToSpeech) {
-        return {
-          ...parsed,
-          reason: 'No speech recognizer or voice is installed for this Windows account.',
-        };
-      }
-      return parsed;
+      return {
+        speechToText,
+        textToSpeech,
+        ...(fasterWhisper && !system?.speechToText
+          ? { reason: 'Offline faster-whisper is installed. Pixel will check for the selected local model when you transcribe.' }
+          : undefined),
+      };
     } catch (error) {
       return {
         speechToText: false,
@@ -117,6 +156,65 @@ export class VoiceService {
     }
   }
 
+  /** Transcribe a short, in-memory mono 16 kHz PCM WAV captured by the renderer. */
+  async transcribeWav(input: Uint8Array, signal?: AbortSignal, model = 'base.en'): Promise<RecognitionResult> {
+    if (process.platform !== 'win32') {
+      return { ok: false, text: '', confidence: 0, error: 'Voice input is only supported on Windows.' };
+    }
+    const validation = validateVoiceWav(input);
+    if (validation) return { ok: false, text: '', confidence: 0, error: validation };
+    if (signal?.aborted) return { ok: false, text: '', confidence: 0, error: 'Transcription was cancelled.' };
+
+    const file = join(tmpdir(), `pixel-voice-${process.pid}-${randomUUID()}.wav`);
+    const controller = new AbortController();
+    const onParentAbort = (): void => controller.abort();
+    signal?.addEventListener('abort', onParentAbort, { once: true });
+    this.activeControllers.add(controller);
+
+    try {
+      writeFileSync(file, Buffer.from(input), { flag: 'wx', mode: 0o600 });
+      if (this.pythonWorker && !controller.signal.aborted) {
+        try {
+          const capabilities = await this.pythonWorker.capabilities();
+          if (capabilities.ok && capabilities.result.optional.faster_whisper === true) {
+            const preferredModel = resolveWhisperModel(model);
+            const whisper = await this.pythonWorker.transcribeAudio(file, preferredModel, controller.signal);
+            if (whisper.ok) {
+              const text = whisper.result.text.trim().replace(/\s+/g, ' ');
+              if (text.length < 2) return { ok: false, text: '', confidence: 0, noSpeech: true, error: 'No speech was detected.' };
+              return { ok: true, text, confidence: 0 };
+            }
+            if (whisper.error.code === 'NO_TEXT') {
+              return { ok: false, text: '', confidence: 0, noSpeech: true, error: whisper.error.message };
+            }
+            if (whisper.error.code === 'CANCELLED' || controller.signal.aborted) {
+              return { ok: false, text: '', confidence: 0, error: 'Transcription was cancelled.' };
+            }
+            // A missing model or failed optional backend falls through to the
+            // Windows local recognizer. No model is downloaded automatically.
+          }
+        } catch {
+          // Optional Python inference does not prevent the Windows fallback.
+        }
+      }
+      if (controller.signal.aborted) return { ok: false, text: '', confidence: 0, error: 'Transcription was cancelled.' };
+      const output = await runPowerShell(
+        buildWaveRecognitionScript(MAX_LISTEN_MS),
+        MAX_LISTEN_MS + 10_000,
+        controller.signal,
+        { CYPS_AUDIO_FILE: file },
+      );
+      const parsed = parseRecognition(output);
+      return parsed ?? { ok: false, text: '', confidence: 0, error: 'The speech recognizer returned nothing usable.' };
+    } catch (error) {
+      return { ok: false, text: '', confidence: 0, error: message(error) };
+    } finally {
+      signal?.removeEventListener('abort', onParentAbort);
+      this.activeControllers.delete(controller);
+      try { unlinkSync(file); } catch { /* the temp file may not have been created */ }
+    }
+  }
+
   /** Speak text with the installed system voice. */
   async speak(text: string): Promise<{ ok: boolean; error?: string }> {
     if (process.platform !== 'win32') {
@@ -147,6 +245,12 @@ export class VoiceService {
   isSpeaking(): boolean {
     return this.speaking;
   }
+}
+
+function resolveWhisperModel(model: string): string {
+  if (model === 'tiny' || model === 'tiny.en') return 'tiny.en';
+  if (model === 'small' || model === 'small.en') return 'small.en';
+  return 'base.en';
 }
 
 /* -------------------------------------------------------------------- *
@@ -182,6 +286,43 @@ export function buildRecognitionScript(timeoutMs: number): string {
     '}',
     '$rec.Dispose();',
   ].join(' ');
+}
+
+/** Build a script that consumes only the validated transient WAV file. */
+export function buildWaveRecognitionScript(timeoutMs: number): string {
+  return [
+    '$ErrorActionPreference = "Stop";',
+    'Add-Type -AssemblyName System.Speech;',
+    '$rec = [System.Speech.Recognition.SpeechRecognitionEngine]::new();',
+    '$stream = [System.IO.File]::OpenRead($env:CYPS_AUDIO_FILE);',
+    'try {',
+    '  $rec.SetInputToWaveStream($stream);',
+    '  $rec.LoadGrammar([System.Speech.Recognition.DictationGrammar]::new());',
+    `  $result = $rec.Recognize([TimeSpan]::FromMilliseconds(${Math.round(timeoutMs)}));`,
+    '  if ($null -eq $result) { Write-Output "NORESULT"; }',
+    '  else { Write-Output ("RESULT|{0}|{1}" -f $result.Text.Replace("|", " "), $result.Confidence); }',
+    '} finally { $stream.Dispose(); $rec.Dispose(); }',
+  ].join(' ');
+}
+
+/** Reject malformed or oversized audio before it reaches a subprocess. */
+export function validateVoiceWav(input: Uint8Array): string | null {
+  if (!(input instanceof Uint8Array) || input.byteLength < 44 + 6_400) {
+    return 'The recording was too short or malformed to transcribe.';
+  }
+  if (input.byteLength > MAX_VOICE_WAV_BYTES) return 'The recording exceeded Pixel’s 20-second voice limit.';
+  const header = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
+  if (header.toString('ascii', 0, 4) !== 'RIFF' || header.toString('ascii', 8, 12) !== 'WAVE' ||
+      header.readUInt16LE(20) !== 1 || header.readUInt16LE(22) !== 1 ||
+      header.readUInt32LE(24) !== 16_000 || header.readUInt16LE(34) !== 16 ||
+      header.toString('ascii', 36, 40) !== 'data') {
+    return 'Pixel received an unsupported audio format. Try recording again.';
+  }
+  const dataBytes = header.readUInt32LE(40);
+  if (dataBytes !== input.byteLength - 44 || dataBytes % 2 !== 0) {
+    return 'Pixel received an incomplete audio recording. Try again.';
+  }
+  return null;
 }
 
 export const SPEAK_SCRIPT = [

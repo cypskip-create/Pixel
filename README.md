@@ -217,9 +217,14 @@ completed actions explicitly so nothing implies a rollback that did not happen.
   `window.cyps` preload bridge.
 - No screen capture without an explicit user action. There is no timer and no
   background capture path.
-- Voice is partially implemented with local Windows System.Speech services.
-  Recognition and synthesis are probed at runtime and can vary by machine and
-  execution context. The microphone and voice UI path has not been verified.
+- Voice input supports a configured global push-to-talk chord (default
+  `Ctrl+Shift+Space`) and explicit manual dictation. Push-to-talk submits one
+  valid local transcript; manual dictation leaves it in the draft. Recognition
+  uses Windows System.Speech when installed, or optional local faster-whisper
+  only when its selected model is already cached. Pixel never downloads a model
+  or sends raw audio to a provider. Availability depends on the Windows account,
+  microphone permission and installed local model; the full microphone path
+  still requires laptop acceptance.
 - Model output cannot grant permission. Tool authority is a local policy table.
 - Instructions found on websites, in documents, or in screenshots are treated as
   untrusted data, and the system prompt says so.

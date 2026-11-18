@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, X } from 'lucide-react';
 import type { AppSettings, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
@@ -7,6 +7,7 @@ import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { AutomationPanel } from '@/components/AutomationPanel';
 import { MemoryPanel } from '@/components/MemoryPanel';
 import { PixelMark } from '@/components/PixelMark';
+import { MicrophoneCapture } from '@/lib/audioCapture';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -56,6 +57,84 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [automationOpen, setAutomationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [keyEditorReset, setKeyEditorReset] = useState(0);
+  const [pushToTalkStatus, setPushToTalkStatus] = useState<{ accelerator: string; ok: boolean; reason?: string } | null>(null);
+  const [speechCapability, setSpeechCapability] = useState<{ speechToText: boolean; reason?: string } | null>(null);
+  const [microphones, setMicrophones] = useState<Array<{ deviceId: string; label: string }>>([]);
+  const [microphoneTest, setMicrophoneTest] = useState(false);
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
+  const [microphoneError, setMicrophoneError] = useState<string | null>(null);
+  const microphoneCapture = useRef<MicrophoneCapture | null>(null);
+  const microphoneTestTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell) return;
+    let mounted = true;
+    const shortcutStatus = shell.getPushToTalkStatus?.();
+    if (shortcutStatus) void shortcutStatus.then((status) => { if (mounted) setPushToTalkStatus(status); }).catch(() => undefined);
+    const voiceStatus = shell.voiceCapability?.();
+    if (voiceStatus) void voiceStatus.then((status) => { if (mounted) setSpeechCapability(status); }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [settings.voice.pushToTalkAccelerator]);
+
+  useEffect(() => () => {
+    if (microphoneTestTimer.current !== null) window.clearTimeout(microphoneTestTimer.current);
+    microphoneCapture.current?.cancel();
+    microphoneCapture.current = null;
+    void window.cypsShell?.voiceCaptureRelease?.();
+  }, []);
+
+  const stopMicrophoneTest = useCallback(() => {
+    if (microphoneTestTimer.current !== null) window.clearTimeout(microphoneTestTimer.current);
+    microphoneTestTimer.current = null;
+    microphoneCapture.current?.cancel();
+    microphoneCapture.current = null;
+    void window.cypsShell?.voiceCaptureRelease?.();
+    setMicrophoneTest(false);
+    setMicrophoneLevel(0);
+  }, []);
+
+  useEffect(() => {
+    const shell = window.cypsShell;
+    if (!shell?.onVoiceCaptureCancel) return;
+    return shell.onVoiceCaptureCancel(stopMicrophoneTest);
+  }, [stopMicrophoneTest]);
+
+  const toggleMicrophoneTest = useCallback(() => {
+    if (microphoneCapture.current) {
+      stopMicrophoneTest();
+      setMicrophoneError('Microphone test stopped. No audio was saved.');
+      return;
+    }
+    setMicrophoneError(null);
+    const capture = new MicrophoneCapture(setMicrophoneLevel);
+    microphoneCapture.current = capture;
+    void (async () => {
+      const shell = window.cypsShell;
+      if (!shell?.voiceCaptureAcquire) throw new Error('Microphone testing is unavailable in this build.');
+      const acquired = await shell.voiceCaptureAcquire();
+      if (!acquired) throw new Error('Another Pixel window is already using the microphone.');
+      await capture.start(settings.voice.inputDeviceId, false);
+      if (microphoneCapture.current !== capture) { capture.cancel(); return; }
+      setMicrophoneTest(true);
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setMicrophones(devices.filter((device) => device.kind === 'audioinput').map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `Microphone ${index + 1}`,
+      })));
+      microphoneTestTimer.current = window.setTimeout(() => {
+        stopMicrophoneTest();
+        setMicrophoneError('Microphone test reached its 20-second limit. No audio was saved.');
+      }, 20_000);
+    })().catch((error: unknown) => {
+      if (microphoneCapture.current === capture) microphoneCapture.current = null;
+      capture.cancel();
+      void window.cypsShell?.voiceCaptureRelease?.();
+      setMicrophoneTest(false);
+      setMicrophoneLevel(0);
+      setMicrophoneError(error instanceof Error ? error.message : 'Microphone test could not start.');
+    });
+  }, [settings.voice.inputDeviceId, stopMicrophoneTest]);
 
   const closeSettings = useCallback(() => {
     setKeyEditorReset((value) => value + 1);
@@ -242,8 +321,19 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <ShortcutEditor value={settings.workspaceAccelerator} onCommit={(value) => onPatch({ workspaceAccelerator: value })} />
           </Row>
           <Row label="Push to talk">
-            <Accelerator value={settings.voice.pushToTalkAccelerator} />
+            <ShortcutEditor
+              value={settings.voice.pushToTalkAccelerator}
+              ariaLabel="Push-to-talk shortcut"
+              onCommit={(value) => onPatch({ voice: { pushToTalkAccelerator: value } })}
+            />
           </Row>
+          {pushToTalkStatus && !pushToTalkStatus.ok ? (
+            <p role="status" className="px-1 pb-1 text-[10px] leading-snug text-amber-200">
+              Push-to-talk unavailable: {pushToTalkStatus.reason ?? 'Windows could not register this shortcut.'}
+            </p>
+          ) : pushToTalkStatus?.ok ? (
+            <p role="status" className="px-1 pb-1 text-[10px] text-emerald-200">Push-to-talk shortcut is registered.</p>
+          ) : null}
           <p className="mt-1 px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
             Workspace uses the configured accelerator above. Global shortcuts must be unique;
             the emergency stop always works, even while Pixel is mid-task.
@@ -273,9 +363,48 @@ export function SettingsPanel(props: SettingsPanelProps) {
             checked={settings.voice.ttsEnabled}
             onChange={(value) => onPatch({ voice: { ttsEnabled: value } })}
           />
-          <Row label="Speech model">
-            <span className="text-[11px] text-[var(--color-ink-soft)]">{settings.voice.sttModel}</span>
+          <Row label="Microphone">
+            <select
+              aria-label="Microphone input device"
+              value={settings.voice.inputDeviceId ?? ''}
+              onChange={(event) => onPatch({ voice: { inputDeviceId: event.target.value || null } })}
+              className="no-drag max-w-[230px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="">System default</option>
+              {microphones.map((device) => <option key={device.deviceId || device.label} value={device.deviceId}>{device.label}</option>)}
+            </select>
           </Row>
+          <Row label="Local model">
+            <select
+              aria-label="Local speech model"
+              value={['tiny.en', 'base.en', 'small.en'].includes(settings.voice.sttModel) ? settings.voice.sttModel : 'base.en'}
+              onChange={(event) => onPatch({ voice: { sttModel: event.target.value } })}
+              className="no-drag max-w-[180px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="tiny.en">Tiny English · fastest</option>
+              <option value="base.en">Base English · balanced</option>
+              <option value="small.en">Small English · more memory</option>
+            </select>
+          </Row>
+          <div className="mx-1 flex items-center gap-2 pb-1">
+            <button
+              type="button"
+              onClick={toggleMicrophoneTest}
+              aria-pressed={microphoneTest}
+              className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
+            >
+              {microphoneTest ? 'Stop microphone test' : 'Test microphone'}
+            </button>
+            <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-white/10" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(microphoneLevel * 100)}>
+              <div className="h-full rounded-full bg-cyan-300 transition-[width] duration-100" style={{ width: `${Math.round(microphoneLevel * 100)}%` }} />
+            </div>
+          </div>
+          {microphoneError ? <p role={microphoneError.includes('stopped') ? 'status' : 'alert'} className="px-1 text-[10px] text-[var(--color-ink-dim)]">{microphoneError}</p> : null}
+          <p className="px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
+            {speechCapability === null ? 'Checking local speech recognition…' : speechCapability.speechToText
+              ? 'Uses local faster-whisper (CPU int8, only when its model is already cached); otherwise falls back to Windows Speech. Models are never downloaded automatically.'
+              : speechCapability.reason ?? 'Local speech recognition is unavailable.'}
+          </p>
         </Group>
 
         <Group icon={ShieldCheck} title="Privacy">
@@ -646,12 +775,12 @@ function Accelerator({ value }: { value: string }) {
   );
 }
 
-function ShortcutEditor({ value, onCommit }: { value: string; onCommit: (value: string) => void }): React.JSX.Element {
+function ShortcutEditor({ value, onCommit, ariaLabel = 'Open Workspace shortcut' }: { value: string; onCommit: (value: string) => void; ariaLabel?: string }): React.JSX.Element {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   return (
     <input
-      aria-label="Open Workspace shortcut"
+      aria-label={ariaLabel}
       value={draft}
       maxLength={80}
       onChange={(event) => setDraft(event.target.value)}

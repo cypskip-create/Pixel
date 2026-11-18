@@ -407,9 +407,8 @@ export class WindowManager {
   }
 
   /**
-   * Apply one renderer-measured panel layout. The measured request is clamped
-   * to a compact width and the selected display's work area before it reaches
-   * native window bounds.
+   * Apply one deliberate presentation-state layout. Its fixed size is clamped
+   * to the selected display's work area before it reaches native window bounds.
    */
   setLayout(surface: Surface, requestedSize: { width: number; height: number }): void {
     this.surface = surface;

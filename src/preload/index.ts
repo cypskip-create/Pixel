@@ -237,6 +237,45 @@ const shell = {
   onModeChanged: (handler: (mode: Mode) => void): (() => void) =>
     subscribe(CH.modeChanged, handler),
 
+  getPushToTalkStatus: () =>
+    ipcRenderer.invoke(CH.shortcutsGetStatus) as Promise<{
+      accelerator: string;
+      ok: boolean;
+      reason?: string;
+    } | null>,
+
+  onPushToTalkState: (handler: (event: {
+    state: 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting' | 'failed' | 'cancelled';
+    error?: string;
+    sessionId?: number;
+  }) => void): (() => void) => subscribe(CH.voicePttState, handler),
+
+  onPushToTalkStopCapture: (handler: (event: { sessionId: number; action: 'submit' | 'cancel' }) => void): (() => void) =>
+    subscribe(CH.voicePttStopCapture, handler),
+
+  voicePttCaptureReady: (sessionId: number, error?: string) =>
+    ipcRenderer.invoke(CH.voicePttCaptureReady, sessionId, error) as Promise<boolean>,
+
+  voicePttTranscribe: (sessionId: number, audio: Uint8Array) =>
+    ipcRenderer.invoke(CH.voicePttTranscribe, sessionId, audio) as Promise<{ ok: boolean; error?: string }>,
+
+  voiceTranscribeWav: (audio: Uint8Array) =>
+    ipcRenderer.invoke(CH.voiceTranscribeWav, audio) as Promise<{
+      ok: boolean;
+      text: string;
+      confidence: number;
+      error?: string;
+      noSpeech?: boolean;
+    }>,
+
+  voiceCaptureAcquire: () => ipcRenderer.invoke(CH.voiceCaptureAcquire) as Promise<boolean>,
+  voiceCaptureRelease: () => ipcRenderer.invoke(CH.voiceCaptureRelease) as Promise<boolean>,
+  onVoiceCaptureCancel: (handler: () => void): (() => void) => subscribe(CH.voiceCaptureCancel, handler),
+
+  /** The main companion routes this one-shot transcript through chat.send. */
+  onPushToTalkSubmit: (handler: (request: { sessionId: number; text: string }) => void): (() => void) =>
+    subscribe(CH.voicePttSubmit, handler),
+
   /** Windows speech capability. Reports honestly when speech is unavailable. */
   voiceCapability: () =>
     ipcRenderer.invoke(CH.voiceCapability) as Promise<{

@@ -1,8 +1,8 @@
 # Pixel UI architecture
 
-Updated: 2026-11-17
+Updated: 2026-11-18
 
-## Companion panel layout (Checkpoint 1)
+## Companion panel layout and Dynamic Island (Interaction Engine 3.0)
 
 The companion is one transparent Electron window containing one renderer panel
 stack. The renderer does not create a full-screen overlay, and panel components
@@ -11,24 +11,33 @@ do not resize the native window independently.
 The earlier clipping had two direct causes: `ModeSwitcher` was mounted by both
 `App` and `InputBar`, and the native active window stayed at a fixed compact
 height. A React z-index cannot escape the native BrowserWindow bounds. The
-selector now has one mount point, and all visible surfaces participate in the
-same measured stack before the main process changes native bounds.
+selector now has one mount point. Geometry is fixed per deliberate presentation
+surface so a changing response body cannot resize the native window.
 
 ```mermaid
 flowchart TD
-  R[Input bar, Recent Chats, response, task, approval, notice, mode menu] --> M[Debounced renderer measurement]
+  R[Compact pill, input, response, task, approval, notice, mode menu] --> M[Fixed per-surface DIP size]
   M --> P[Typed window.setLayout preload method]
   P --> I[Main IPC sender check]
   I --> C[Work-area clamp and center-preserving resize]
   C --> W[Primary anchored native window]
 ```
 
-`usePresentationLayout` observes the root stack and marked panels. It coalesces
-layout changes for 120 ms and ignores changes of three logical pixels or less.
-The mode selector is in normal document flow beneath the input bar, so the
-measurement includes its actual height. Response, task and approval surfaces
-also participate in the same vertical stack. At the display's height limit the
-native window is capped and the renderer scrolls inside its own window bounds.
+`usePresentationLayout` reports one bounded size when the deliberate surface
+changes: a 144×52 DIP idle window containing a 138×38 visible pill, a 480×190
+input panel, a 480×460 response panel, or a 480×320 task panel. The main process
+clamps the requested size to the selected display. Response and transcript
+content scroll inside bounded renderer panels; token updates never become
+native geometry updates. The response panel preserves the user's scroll position
+when they have scrolled away from the bottom.
+
+`src/shared/dynamicIsland.ts` owns hover, click-pinned, background, response,
+recording and approval presentation states. Hover waits 140 ms, leaving grants
+950 ms to return, and an idle click-pinned panel closes after 4.5 seconds only
+when there is no pointer interaction, draft, task, recording or approval. A
+manual close changes presentation only; it does not clear draft text, history,
+work or pending approvals. Runtime work remains in the existing conversation and
+task services.
 
 The preload exposes only `window.setLayout(surface, {width, height})`; it does
 not expose Electron or Node APIs. The main process accepts this message only
@@ -78,6 +87,50 @@ measurement caps. They prove calculations, not final rendered pixels, native
 click-through or Electron window lifecycle. DPI, multi-monitor and cursor
 overlay acceptance steps are recorded in
 [`PIXEL_WINDOWS_ACCEPTANCE.md`](../validation/PIXEL_WINDOWS_ACCEPTANCE.md).
+
+## Push-to-talk and local transcription
+
+The global shortcut manager registers only the configured PTT chord. On
+keydown, a short-lived `PixelNative` mode samples only the virtual keys in that
+chord until any key is released, Pixel cancels, the helper exits, or its
+20-second bound expires. It does not install a keyboard hook, retain a key
+sequence, or forward keystrokes. Spawn failure, helper crash, cancellation and
+timeout produce distinct terminal results; the next hold can start a fresh
+watcher.
+
+The main process creates a session id and sends a start event to the companion
+renderer without showing or focusing a window. This deliberately avoids a
+PowerShell/Python capability probe on keydown. The renderer requests audio-only
+microphone access after that explicit gesture, displays its live level waveform
+inside the compact Island, and stops tracks on release, cancellation, emergency
+stop, screen lock or suspend. It records at most 20 seconds, resamples to mono
+16 kHz PCM and passes a bounded WAV to the main process. No screenshot is
+captured as part of voice input.
+
+Main validates the PTT sender, session and one-shot release transition before
+transcription. It accepts the audio only for the released active session and
+submits a valid transcript once through the existing chat/permission path. If
+Pixel is busy, stopped, has a pending approval, or cannot submit, the transcript
+is returned to the draft for review. Manual microphone mode uses the same local
+transcriber but never auto-submits. Both paths release the microphone lease and
+discard renderer audio buffers after use.
+
+Windows System.Speech is the built-in local recognizer when installed. The
+optional faster-whisper worker is CPU/int8 and uses `local_files_only`; it
+accepts only the supported English model names and never downloads a model.
+Transient WAV files are deleted after recognition, including error and cancel
+paths. Pixel does not log transcript text or audio. The sandboxed capability
+probe reported `speechToText=false`; the full Windows test run with local
+process access reported `speechToText=true` and `textToSpeech=true`, consistent
+with a Windows System.Speech recognizer being available outside the sandbox.
+This probe does not establish microphone access or transcription accuracy. No
+speech workload, CPU, memory or latency measurement is claimed. Actual laptop
+microphone and focus behavior remain manual acceptance items.
+
+The Workspace character consumes the shared PTT/runtime events. Recording and
+transcription do not open the Workspace, expand the Island or take focus from
+the user's current application. The main renderer remains the single PTT audio
+owner, so opening or closing Workspace cannot start a second recorder.
 
 ## Persistent conversation history
 
