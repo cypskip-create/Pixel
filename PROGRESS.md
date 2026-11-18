@@ -1,23 +1,27 @@
 # Pixel progress
 
-Updated: 2026-11-17. Version: 0.2.1.
+Updated: 2026-11-18. Version: 0.2.1.
 
-## Current local validation — glass system and task verification display
+## Current local validation — original dark floating UI restoration
 
-Current branch: `codex/ui-experience-2`. Current HEAD: `c090ec0cfe3d485fb234257e9ec2ccbaeffd72f3`. The repair is uncommitted for the user to review and commit.
+Current branch: `codex/ui-experience-2`. Restoration is based on `0da5b8b53c0bd8fe0ba38106c794456e0a9d50d1`; this change is the focused restoration commit.
 
-- Reused the supplied block P mark and palette. The P geometry remains canonical in `src/shared/pixelMark.json`; this repair does not change it.
-- On supported Windows 11 builds, the companion selects DWM Acrylic. A `PIXEL_GLASS_MODE=fallback` override selects the opaque CSS treatment and native `none` backdrop for comparison. Main-window CSS now uses shared, restrained tint/edge/shadow levels; it no longer implies that CSS blur can see through to other desktop apps. Settings and Workspace remain on their existing opaque/Mica window treatments.
+- Restored the original dark navy surface colors from `bd4401661a5003d09f609957591096e38734cf17` (`0.88` primary, `0.95` raised) while preserving the transparent native window needed for its shape. Windows explicitly uses `backgroundMaterial: 'none'` in the floating and Workspace windows; no Acrylic, Mica, CSS backdrop filter, Acrylic variables or renderer query override remain.
+- Removed backdrop blur from the floating companion, its redesign-only gradient highlight and extra toolbar capsule. Restored the reference commit's dark shadow stack and borders; the lower toolbar is back to its original unboxed row. The supplied geometric P mark, buttons and current layout remain.
+- The Workspace layout, controls and dark surface colors, cursor character, task verification display, chat/history, search, settings, DeepSeek bridge, permissions and emergency stop are retained. Its prior Mica and CSS blur materials are removed.
 - A completed task record with unresolved `pendingVerifications` now displays **Needs verification** and excludes that step from its verified count. Persisted status and task actions are unchanged. The existing executor already fails closed when it cannot verify a requested postcondition.
 - Added `npm run dev:gpu` / `dev:electron:gpu` for GPU-enabled development comparison. Existing `npm run dev` still uses `--disable-gpu`; production does not disable GPU.
-- `npm run typecheck`: passed. `npm run build`: passed after the glass and task UI changes.
-- Full Vitest suite: **722 passed, 0 failed, 26 skipped (748 total), across 37 passed files and 1 skipped file (38 total)**. Skips: 17 browser tests (Playwright Chromium unavailable), 7 NSIS tests (`makensis` unavailable), and 2 opt-in native foreground tests. The final full run used a disposable temporary `USERPROFILE` because this execution sandbox blocks test fixtures under the real home directory. Python document extraction ran and passed. JUnit: `artifacts/test-results/glass-repair-vitest.xml`.
-- GitHub Actions run `44159366265` (Windows CI run 7, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`, containing the prior `c090ec0` head) failed in the test step: 10 document tests used a hard-coded developer Python path absent on the runner, and one worker cancellation test depended on a fixed 50 ms startup delay. Native compilation and packaging were skipped after the test failure. This repair configures Python 3.12, uses a discovered/explicit interpreter path, and waits with a bounded deadline for worker startup. The workflow has not been rerun because this branch is local and the user will push.
-- Windows DWM readback before this CSS change reported Acrylic (`DWMSBT_TRANSIENTWINDOW`, value 3) for Pixel and Mica (value 2) for Workspace on build `26300.9974`, with system transparency enabled. The supplied screenshot shows the old, overly opaque surfaces. I have not launched this changed build or captured its new appearance; visual acceptance remains unverified.
+- `npm run typecheck`: passed.
+- `npm test -- --reporter=default`: **721 passed, 0 failed, 26 skipped (747 total; 39 files: 38 passed, 1 skipped)**. Skips: 17 browser checks because Playwright Chromium is absent, 7 NSIS checks because `makensis` is absent, and 2 opt-in native foreground integration checks.
+- `npm run build`: passed (main TypeScript, bundled sandbox preload, Vite renderer and app icon).
+- `git diff --check`: passed. The focused appearance regression test checks the restored navy fills/borders/shadows, absence of CSS/system backdrop material and transparent companion window.
+- `npm run test:preload-sandbox`: could not run to completion in this environment. Electron 45.2.3 exited with `2147483651` (`0x80000003`) before creating a report; its log contains launcher metadata but no Electron stderr or smoke JSON.
+- GitHub Actions run `44159366265` (Windows CI run 7, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`, containing the prior `c090ec0` head) failed in the test step: 10 document tests used a hard-coded developer Python path absent on the runner, and one worker cancellation test depended on a fixed 50 ms startup delay. Native compilation and packaging were skipped after the test failure. Existing changes on this branch configure Python 3.12, use a discovered/explicit interpreter path, and wait with a bounded deadline for worker startup. The workflow has not been rerun because this branch is local and the user will push.
+- Before restoration, Windows DWM readback reported Acrylic (`DWMSBT_TRANSIENTWINDOW`, value 3) for Pixel. The restored build has not yet been read back or captured, so visual acceptance remains unverified.
 - GPU diagnosis remains separate: existing environment evidence includes Chromium Crashpad “not connected” and a sandboxed Electron GUI-start failure. This points to child-process coordination in that environment, but does not identify the root cause of the packaged failure on the user's laptop. No GPU/driver report or post-change packaged GPU run is available.
-- Interactive visual acceptance, normal-GPU startup, packaged app, portable executable and installer flows remain **unverified**. No user data, credentials, history or app identity were changed. No commit or push was made.
+- Interactive visual acceptance over white/dark webpages and the desktop remains **unverified**. The existing targetable Pixel process is from a separate, inaccessible `C:\dev\Pixel` checkout. Its Vite server occupies port 5199; Vite started on 5299, but this sandbox's Electron child process exited before app startup. No screenshots were captured and no current-branch GUI behavior is claimed. Normal-GPU startup, packaged app, portable executable and installer flows also remain **unverified**. No user data, credentials, history or app identity were changed.
 
-See `docs/validation/PIXEL_RELEASE_READINESS.md` for evidence and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for the exact laptop comparison procedure. Earlier checkpoint counts below are historical.
+See `docs/validation/PIXEL_RELEASE_READINESS.md` for evidence and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for the exact laptop acceptance procedure. Earlier checkpoint counts below are historical.
 
 ## UI Experience 2.0 — Checkpoint 1
 

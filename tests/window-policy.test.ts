@@ -1,25 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { safeExternalHttpUrl } from '../src/shared/externalUrl';
 import { mergeSettings } from '../src/shared/types';
-import { isTrustedRendererUrl, resolveCompanionGlassMode, supportsWindowsBackdrop } from '../src/main/windowPolicy';
+import { isTrustedRendererUrl } from '../src/main/windowPolicy';
 
-describe('Windows backdrop policy', () => {
-  it('opts into acrylic and Mica only on supported Windows 11 builds', () => {
-    expect(supportsWindowsBackdrop('10.0.22000')).toBe(false);
-    expect(supportsWindowsBackdrop('10.0.22621')).toBe(true);
-    expect(supportsWindowsBackdrop('10.0.26100')).toBe(true);
-    expect(supportsWindowsBackdrop('6.1.7601')).toBe(false);
-    expect(supportsWindowsBackdrop('not-windows')).toBe(false);
-  });
-
-  it('uses the native Acrylic window backdrop only when available and allows a fallback comparison', () => {
-    expect(resolveCompanionGlassMode('win32', '10.0.26100')).toBe('acrylic');
-    expect(resolveCompanionGlassMode('win32', '10.0.22000')).toBe('fallback');
-    expect(resolveCompanionGlassMode('linux', '6.8.0')).toBe('fallback');
-    expect(resolveCompanionGlassMode('win32', '10.0.26100', 'fallback')).toBe('fallback');
-    expect(resolveCompanionGlassMode('win32', '10.0.26100', 'unknown')).toBe('acrylic');
-  });
-
+describe('Workspace window policy', () => {
   it('bounds restored Workspace dimensions and accepts the configured shortcut', () => {
     const settings = mergeSettings({
       workspaceAccelerator: 'CommandOrControl+Alt+P',

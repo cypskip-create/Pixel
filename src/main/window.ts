@@ -13,11 +13,10 @@
 import { BrowserWindow, screen } from 'electron';
 import type { Display, WebContents, WebFrameMain } from 'electron';
 import { join } from 'node:path';
-import { release as osRelease } from 'node:os';
 import type { CompanionSettings, Surface } from '../shared/types';
 import type { WorkspaceWindowState } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
-import { isTrustedRendererUrl, resolveCompanionGlassMode, supportsWindowsBackdrop } from './windowPolicy';
+import { isTrustedRendererUrl } from './windowPolicy';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
 import {
@@ -35,7 +34,7 @@ import {
 } from '../shared/companion/cursorFollow';
 import type { FollowState } from '../shared/companion/cursorFollow';
 
-export { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES, isTrustedRendererUrl, supportsWindowsBackdrop };
+export { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES, isTrustedRendererUrl };
 
 export interface WindowManagerDeps {
   preloadPath: string;
@@ -78,7 +77,6 @@ export class WindowManager {
   private ignoringMouse = false;
   private pendingSummon = false;
   private readonly deps: WindowManagerDeps;
-  private readonly glassMode: ReturnType<typeof resolveCompanionGlassMode>;
   private legacyPosition: { x: number; y: number } | null;
   private readonly displayListeners: Array<(...args: any[]) => void> = [];
 
@@ -90,7 +88,6 @@ export class WindowManager {
     this.legacyPosition = initialSettings.position;
     this.topOffset = initialSettings.topOffset;
     this.deps = deps;
-    this.glassMode = resolveCompanionGlassMode(process.platform, osRelease(), process.env.PIXEL_GLASS_MODE);
     this.registerDisplayListeners();
   }
 
@@ -110,9 +107,7 @@ export class WindowManager {
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
-      ...(process.platform === 'win32'
-        ? { backgroundMaterial: this.glassMode === 'acrylic' ? 'acrylic' as const : 'none' as const }
-        : {}),
+      ...(process.platform === 'win32' ? { backgroundMaterial: 'none' as const } : {}),
       resizable: false,
       movable: false,
       minimizable: false,
@@ -161,7 +156,7 @@ export class WindowManager {
       this.mainReady = false;
     });
 
-    this.loadRenderer(win, `?pixel-glass=${this.glassMode}`);
+    this.loadRenderer(win);
     this.main = win;
     return win;
   }
@@ -240,7 +235,7 @@ export class WindowManager {
       fullscreenable: true,
       autoHideMenuBar: true,
       backgroundColor: '#10141d',
-      ...(process.platform === 'win32' && supportsWindowsBackdrop(osRelease()) ? { backgroundMaterial: 'mica' as const } : {}),
+      ...(process.platform === 'win32' ? { backgroundMaterial: 'none' as const } : {}),
       webPreferences: {
         preload: this.deps.preloadPath,
         contextIsolation: true,

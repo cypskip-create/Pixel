@@ -25,49 +25,42 @@ uses harmless stub IPC handlers and a test-only API-key placeholder. It writes
 `preload-sandbox-smoke.log` on success. A failure before the Electron app starts
 is an environment failure, not a pass.
 
-## Floating glass and task status comparison
+## Restored dark floating UI
 
-The supplied screenshot is the pre-repair state. Do the comparison on the
-target laptop and record a fresh screenshot for each run. Close Pixel normally
-between runs so the single-instance lock does not redirect a launch to the old
-process.
+Use the rebuilt app on the target laptop and record a screenshot for each
+background. Close Pixel normally before launching a different build so the
+single-instance lock does not redirect the launch to an older process.
 
-1. Test the default Windows Acrylic path, with the existing GPU-disabled
-   development diagnostic:
+1. From the repository root, build and start the development app:
 
    ```powershell
-   Remove-Item Env:PIXEL_GLASS_MODE -ErrorAction SilentlyContinue
+   npm run build
    npm run dev
    ```
 
-2. Stop the process with `Ctrl+C`, confirm Pixel has exited, then compare the
-   opaque CSS fallback:
+2. Observe Pixel over a white webpage, a dark webpage, then the desktop with
+   other windows minimized. Save a screenshot at each state.
+3. Confirm the original navy panels are back, no grey frosted surfaces or blur
+   remain, desktop text does not show through distractingly, and the P mark,
+   rounded shape, compact alignment and button contrast are intact.
+4. Click another application to confirm it receives focus and input normally.
+   Check the Island's menus, Recent Chats, Settings and approval controls. Open
+   Workspace and confirm its layout, projects, tools, memory and task activity
+   still work. Restore a saved conversation and send a harmless DeepSeek prompt.
+5. Confirm the Island stays at its selected top-center display position and no
+   flicker or stray rectangular backdrop appears during startup or expansion.
+6. Stop the `npm run dev` process with `Ctrl+C`, confirm it exited, and repeat
+   the visual/runtime check with the normal GPU path:
 
    ```powershell
-   $env:PIXEL_GLASS_MODE = 'fallback'
-   npm run dev
-   ```
-
-3. Stop it, clear the override, and separately test the normal GPU path:
-
-   ```powershell
-   Remove-Item Env:PIXEL_GLASS_MODE -ErrorAction SilentlyContinue
    npm run dev:gpu
    ```
 
-Check that the P mark is unchanged; Recent Chats, the composer and toolbar read
-as related surfaces; text and controls remain legible over both dark and bright
-desktop content; edges and shadows stay subtle; and Acrylic does not leave a
-visible rectangular patch outside the rounded island. Open Settings, an
-approval card and the task strip to check their elevated surfaces. If a task has
-a pending postcondition, the strip must say **Needs verification** and must not
-count that step as verified. Do not infer a successful visual result from CSS
-build output alone.
-
-The override affects only the launched process. It does not change stored Pixel
-settings. `npm run dev` still passes `--disable-gpu`; `npm run dev:gpu` omits it
-and is the separate GPU comparison. Do not add `--no-sandbox` or loosen the
-BrowserWindow security flags during either run.
+The main and Workspace windows explicitly select the Windows system backdrop
+`none`, and the renderer contains no CSS `backdrop-filter`. Do not add Acrylic,
+Mica or any blur material during this check. The standard `npm run dev` keeps
+its existing `--disable-gpu` diagnostic; `npm run dev:gpu` omits that switch.
+Do not add `--no-sandbox` or loosen the BrowserWindow security flags.
 
 Capture a reproducible local evidence bundle from the repository root:
 

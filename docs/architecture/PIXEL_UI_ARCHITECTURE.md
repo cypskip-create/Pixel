@@ -133,7 +133,7 @@ formats. Failed/completed task cards dismiss after four seconds without deleting
 their persisted task evidence. The Settings window is sized around its compact,
 internally scrolling panel.
 
-## Supplied P mark and frosted surfaces
+## Supplied P mark and dark surfaces
 
 The user supplied the visual reference used for the Pixel mark. Its geometry is
 hand-traced once in [`src/shared/pixelMark.json`](../../src/shared/pixelMark.json):
@@ -146,22 +146,20 @@ mark alone with transparent surroundings so Windows can blend it with the tray.
 The cursor buddy stays a separate pointer character and uses the same cyan/aqua
 palette.
 
-The island surfaces use shared translucent fills, restrained edges and shadows.
-On supported Windows 11 builds, the native BrowserWindow selects DWM Acrylic;
-the renderer uses lighter tints so that material can show through. CSS
-`backdrop-filter` only samples other renderer content and cannot blur the
-desktop or other applications, so the companion's glass utilities do not use it
-to claim an external blur. The opaque fallback is selectable with
-`PIXEL_GLASS_MODE=fallback`. Workspace keeps its existing Windows Mica window
-backdrop and opaque reading surface; CSS filters there affect only content
-inside Workspace.
+The floating companion keeps a transparent native window so its rounded shape
+works over the desktop. On Windows both the companion and Workspace explicitly
+select the `none` system backdrop. The Island restores the reference navy panel
+fills (`0.88` primary and `0.95` raised), original borders and rounded corners.
+The companion and Workspace no longer apply CSS `backdrop-filter`. There is no
+blur or translucency-mode experiment to toggle. The lower companion toolbar is
+an unboxed row; the approved P mark and controls remain.
 
-The DWM attribute was read back as Acrylic for the pre-repair Pixel window and
-Mica for Workspace on Windows build `26300.9974`. The supplied pre-repair
-screenshot showed overly opaque, separate cards. The edited surface tints have
-not yet been visually checked in a new running build. GPU acceleration is not
-disabled in production; `npm run dev:electron` keeps `--disable-gpu`, while
-`npm run dev:gpu` provides a separate normal-GPU development comparison.
+The pre-rollback DWM readback showed Acrylic on Pixel and Mica on Workspace,
+which confirms that the previous system materials had been active. The restored
+build has not yet been visually checked on the target laptop. GPU acceleration
+is not disabled in production; `npm run dev:electron` retains `--disable-gpu`
+as the diagnostic launch, and `npm run dev:gpu` remains available for a
+separate normal-GPU check.
 
 ## Separate Pixel Workspace window
 

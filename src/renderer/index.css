@@ -4,7 +4,7 @@
  * Cyps renderer stylesheet.
  *
  * The Electron window is frameless and transparent. The page must therefore be
- * truly transparent — the floating orb is the only thing on screen. Everything
+ * truly transparent — the floating companion is the only thing on screen. Everything
  * below the "design tokens" block exists to support that one rule.
  */
 
@@ -18,14 +18,12 @@
   --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
     "Inter", "Helvetica Neue", Arial, sans-serif;
 
-  /* Opaque fallback values keep dialogs legible without a native backdrop. */
-  --color-glass: rgb(13 17 28 / 0.92);
-  --color-glass-raised: rgb(18 23 35 / 0.96);
+  /* Original dark navy surfaces used by the floating companion. */
+  --color-glass: rgb(13 17 28 / 0.88);
+  --color-glass-raised: rgb(22 28 43 / 0.95);
   --color-glass-border: rgb(255 255 255 / 0.1);
-  --color-glass-border-strong: rgb(255 255 255 / 0.14);
-  --color-toolbar-glass: rgb(14 19 30 / 0.94);
-  --color-popover-glass: rgb(17 22 34 / 0.98);
-  --color-glass-edge: rgb(255 255 255 / 0.08);
+  --color-glass-border-strong: rgb(255 255 255 / 0.18);
+  --color-popover-glass: rgb(20 26 40 / 0.97);
 
   --color-ink: #e9edf7;
   --color-ink-soft: #b9c2d6;
@@ -49,35 +47,10 @@
   --color-glass-raised: rgb(255 255 255 / 0.97);
   --color-glass-border: rgb(15 23 42 / 0.12);
   --color-glass-border-strong: rgb(15 23 42 / 0.22);
-  --color-toolbar-glass: rgb(245 248 252 / 0.96);
   --color-popover-glass: rgb(255 255 255 / 0.985);
-  --color-glass-edge: rgb(255 255 255 / 0.78);
   --color-ink: #0f172a;
   --color-ink-soft: #334155;
   --color-ink-dim: #5b6779;
-}
-
-/*
- * The native Windows Acrylic material is applied behind the companion window
- * by DWM. CSS backdrop-filter only samples renderer content; it cannot blur
- * other desktop windows. These lighter tints reveal DWM's material while
- * retaining enough contrast for text and controls.
- */
-html[data-pixel-glass="acrylic"] {
-  --color-glass: rgb(13 17 28 / 0.34);
-  --color-glass-raised: rgb(18 23 35 / 0.56);
-  --color-glass-border: rgb(255 255 255 / 0.13);
-  --color-glass-border-strong: rgb(255 255 255 / 0.17);
-  --color-toolbar-glass: rgb(14 19 30 / 0.39);
-  --color-popover-glass: rgb(17 22 34 / 0.76);
-  --color-glass-edge: rgb(255 255 255 / 0.1);
-}
-
-html[data-pixel-glass="acrylic"].theme-light {
-  --color-glass: rgb(248 250 253 / 0.36);
-  --color-glass-raised: rgb(248 250 253 / 0.63);
-  --color-toolbar-glass: rgb(245 248 252 / 0.46);
-  --color-popover-glass: rgb(248 250 253 / 0.84);
 }
 
 /* ------------------------------------------------------------------ *
@@ -148,7 +121,7 @@ html[data-pixel-glass="acrylic"].theme-light {
     color: #fff;
   }
 
-  /* Thin scrollbars that suit the glass aesthetic. */
+  /* Thin scrollbars that suit the compact dark interface. */
   * {
     scrollbar-width: thin;
     scrollbar-color: rgb(148 163 184 / 0.45) transparent;
@@ -174,22 +147,18 @@ html[data-pixel-glass="acrylic"].theme-light {
   background: var(--color-glass);
   border: 1px solid var(--color-glass-border);
   box-shadow:
-    0 12px 30px -22px rgb(0 0 0 / 0.68),
-    inset 0 1px 0 var(--color-glass-edge);
+    0 18px 44px -12px rgb(0 0 0 / 0.6),
+    0 4px 14px -6px rgb(0 0 0 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.07);
 }
 
 @utility glass-raised {
   background: var(--color-glass-raised);
   border: 1px solid var(--color-glass-border-strong);
   box-shadow:
-    0 16px 38px -27px rgb(0 0 0 / 0.72),
-    inset 0 1px 0 rgb(255 255 255 / 0.075);
-}
-
-@utility glass-toolbar {
-  background: var(--color-toolbar-glass);
-  border: 1px solid var(--color-glass-border);
-  box-shadow: 0 10px 26px -21px rgb(0 0 0 / 0.68), inset 0 1px 0 var(--color-glass-edge);
+    0 26px 60px -16px rgb(0 0 0 / 0.7),
+    0 8px 20px -8px rgb(0 0 0 / 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 0.09);
 }
 
 @media (prefers-contrast: more) {
@@ -208,11 +177,6 @@ html[data-pixel-glass="acrylic"].theme-light {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-.island-collapsed {
-  background-image: linear-gradient(155deg, rgb(255 255 255 / 0.055), transparent 54%);
-  box-shadow: 0 11px 28px -20px rgb(0 0 0 / 0.72), inset 0 1px 0 rgb(255 255 255 / 0.09);
 }
 
 .pixel-brand-lockup { display: inline-flex; height: 24px; align-items: center; gap: 7px; padding: 0 7px 0 4px; }
@@ -251,8 +215,6 @@ html[data-pixel-glass="acrylic"].theme-light {
   overflow: hidden;
   color: var(--color-ink);
   background: var(--workspace-surface);
-  backdrop-filter: blur(18px) saturate(125%);
-  -webkit-backdrop-filter: blur(18px) saturate(125%);
 }
 
 .theme-light .workspace-shell {
@@ -290,8 +252,6 @@ html[data-pixel-glass="acrylic"].theme-light {
   padding: 19px 12px 12px;
   border-right: 1px solid var(--color-glass-border);
   background: var(--workspace-panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 .workspace-new-chat { display: flex; height: 40px; align-items: center; gap: 9px; border: 1px solid rgb(91 208 232 / 0.26); border-radius: 12px; padding: 0 12px; background: rgb(42 175 207 / 0.11); color: var(--color-ink); font-size: 13px; font-weight: 600; transition: background 120ms, border-color 120ms; }
 .workspace-new-chat:hover { border-color: rgb(91 208 232 / 0.48); background: rgb(42 175 207 / 0.18); }
@@ -355,7 +315,7 @@ html[data-pixel-glass="acrylic"].theme-light {
 .workspace-suggestions button { border: 1px solid var(--color-glass-border); border-radius: 999px; padding: 8px 11px; color: var(--color-ink-soft); font-size: 11px; }
 .workspace-suggestions button:hover { border-color: rgb(77 207 231 / .38); background: var(--workspace-hover); }
 .workspace-error { align-self: center; max-width: 860px; width: 100%; border: 1px solid rgb(251 113 133 / .25); border-radius: 11px; padding: 10px 12px; color: #fda4af; font-size: 12px; }
-.workspace-composer { flex: 0 0 auto; margin: 0 auto 21px; width: min(860px, calc(100% - 48px)); border: 1px solid var(--color-glass-border-strong); border-radius: 20px; background: var(--color-glass); box-shadow: 0 18px 42px -26px rgb(0 0 0 / .85), inset 0 1px rgb(255 255 255 / .1); backdrop-filter: blur(14px) saturate(130%); -webkit-backdrop-filter: blur(14px) saturate(130%); }
+.workspace-composer { flex: 0 0 auto; margin: 0 auto 21px; width: min(860px, calc(100% - 48px)); border: 1px solid var(--color-glass-border-strong); border-radius: 20px; background: var(--color-glass); box-shadow: 0 18px 42px -26px rgb(0 0 0 / .85), inset 0 1px rgb(255 255 255 / .1); }
 .workspace-composer-input { display: block; width: 100%; min-height: 68px; max-height: 190px; resize: vertical; border: 0; outline: none; background: transparent; padding: 16px 17px 8px; color: var(--color-ink); font-size: 14px; line-height: 1.6; }
 .workspace-composer-input::placeholder { color: var(--color-ink-dim); }
 .workspace-composer-input:disabled { cursor: not-allowed; }

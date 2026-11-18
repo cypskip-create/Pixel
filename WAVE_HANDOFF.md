@@ -1,22 +1,23 @@
 # Pixel implementation handoff
 
-Updated: 2026-11-17
+Updated: 2026-11-18
 
-## Current handoff — frosted glass, Workspace and P mark
+## Current handoff — original dark floating UI restoration
 
-- Branch: `codex/ui-experience-2`; current HEAD: `c090ec0cfe3d485fb234257e9ec2ccbaeffd72f3`. Changes are uncommitted for the user to review and commit; no push was made.
-- The companion now pairs the Windows DWM Acrylic backdrop with lighter shared surface tints, modest edges and shadows; the opaque fallback can be selected with `PIXEL_GLASS_MODE=fallback`. `npm run dev:gpu` launches the GPU-enabled development path for comparison while the normal `npm run dev` retains `--disable-gpu`.
-- A completed task with unresolved postcondition checks is displayed as **Needs verification**; task storage and action permissions are not changed.
-- Local checks: `npm run typecheck` and `npm run build` passed. Full suite: **722 passed, 0 failed, 26 skipped (748 total; 38 files)**. Skips: 17 Playwright browser tests (Chromium missing), 7 NSIS tests (`makensis` missing), 2 opt-in foreground integration tests. The suite ran with a temporary test profile because the sandbox cannot write under the real home folder. JUnit: `artifacts/test-results/glass-repair-vitest.xml`.
-- GitHub Windows CI run 7 (`44159366265`, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`, containing the prior HEAD) failed before native build/package: 10 document tests depended on a developer-only Python path, and one worker cancellation test raced on a fixed sleep. The workflow and tests now provision Python 3.12 and use bounded worker-start polling. CI still needs a user push to rerun.
-- DWM readback before the CSS correction showed Pixel Acrylic and Workspace Mica on Windows build `26300.9974`; the supplied image is the old opaque UI. This edited build was not launched for a new screenshot, and GPU-enabled/package/installer acceptance remains open. Existing Crashpad child-process evidence does not establish a laptop GPU root cause.
+- Branch: `codex/ui-experience-2`; restoration is based on `0da5b8b53c0bd8fe0ba38106c794456e0a9d50d1`. This is the focused restoration commit.
+- The companion is back on its original navy colors (`0.88`/`0.95` fills), border and shadow stack, with no native system backdrop, no CSS backdrop blur, no redesign gradient highlight and an unboxed lower toolbar. Its transparent native shape, P logo and controls remain.
+- Workspace layout, controls and dark surfaces remain; native Mica and CSS blur are removed. Cursor character, task verification status, history, search, DeepSeek and security behavior remain. The GPU-enabled dev script and CI fixes are also retained.
+- Typecheck and production build passed. Full Vitest suite: **721 passed, 0 failed, 26 skipped (747 total; 39 files)**. The 26 skips are 17 missing Chromium, 7 missing NSIS and 2 opt-in native integration tests. The preload sandbox smoke exits before reporting (`2147483651` / `0x80000003`).
+- Visual acceptance on white and dark web content and the desktop is unverified: this environment's Electron child process exits before app startup, while the already-open Pixel window belongs to a separate `C:\dev\Pixel` checkout. No screenshots were captured.
+- The earlier Windows CI run 7 (`44159366265`, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`) failed on a developer-only Python path and a fixed-sleep worker race. Those CI fixes are present in the branch but need a push to rerun.
+- The prior DWM readback reported Acrylic for Pixel before this rollback. The current build has not been read back or captured. The separate packaged GPU issue remains unresolved; existing Crashpad child-process evidence does not establish a laptop GPU root cause.
 - Read `docs/validation/PIXEL_RELEASE_READINESS.md` for exact evidence and `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for the next laptop steps. Earlier counts below are historical.
 
 ## Previous UI Experience 2.0 wave notes (historical)
 
 - The current branch and HEAD are listed in the handoff section above. The
   remaining notes in this section describe earlier checkpoints and their
-  test counts are superseded by the current 718-test result above.
+  test counts are superseded by the current 747-test result above.
 - Checkpoint 1 implements the single measured companion panel stack and one
   accessible mode selector. It has not yet been visually accepted on the
   target laptop.
