@@ -13,11 +13,28 @@ declare global {
 
     /**
      * Shell-originated notifications that are not part of the CypsBridge data
-     * contract (the tray changing mode, and local speech services). Optional
+     * contract (the tray changing mode, local speech services and the narrow
+     * push-to-talk lifecycle). Optional
      * for the same reason.
      */
     cypsShell?: {
       onModeChanged(handler: (mode: Mode) => void): () => void;
+      getPushToTalkStatus(): Promise<{ accelerator: string; ok: boolean; reason?: string } | null>;
+      onPushToTalkState(handler: (event: {
+        state: 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting' | 'failed' | 'cancelled';
+        error?: string;
+        sessionId?: number;
+      }) => void): () => void;
+      onPushToTalkStopCapture(handler: (event: { sessionId: number; action: 'submit' | 'cancel' }) => void): () => void;
+      voicePttCaptureReady(sessionId: number, error?: string): Promise<boolean>;
+      voicePttTranscribe(sessionId: number, audio: Uint8Array): Promise<{ ok: boolean; error?: string }>;
+      voiceTranscribeWav(audio: Uint8Array): Promise<{
+        ok: boolean; text: string; confidence: number; error?: string; noSpeech?: boolean;
+      }>;
+      voiceCaptureAcquire(): Promise<boolean>;
+      voiceCaptureRelease(): Promise<boolean>;
+      onVoiceCaptureCancel(handler: () => void): () => void;
+      onPushToTalkSubmit(handler: (request: { sessionId: number; text: string }) => void): () => void;
       voiceCapability(): Promise<{
         speechToText: boolean;
         textToSpeech: boolean;

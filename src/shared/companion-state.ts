@@ -12,6 +12,7 @@ export interface CompanionStateSignals {
   hasAnswer: boolean;
   error: boolean;
   listening: boolean;
+  transcribing?: boolean;
   /** A task is planning/running in the existing TaskManager flow. */
   executing?: boolean;
   /** Local speech playback is currently in progress. */
@@ -28,6 +29,7 @@ export function deriveAssistantState(input: CompanionStateSignals): AssistantSta
   if (input.pointing) return 'pointing';
   if (input.executing) return 'executing';
   if (input.listening) return 'listening';
+  if (input.transcribing) return 'transcribing';
   if (input.speaking) return 'speaking';
   if (input.streaming) return input.hasAnswer ? 'responding' : 'thinking';
   return 'idle';

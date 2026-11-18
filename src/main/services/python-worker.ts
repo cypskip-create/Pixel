@@ -62,6 +62,11 @@ export interface ExtractedDocument {
   pages: number | null;
 }
 
+export interface TranscribedAudio {
+  text: string;
+  language: string;
+}
+
 export interface PythonWorkerOptions {
   /** Interpreter to run. Defaults to the configured or discovered python. */
   pythonPath?: string;
@@ -137,6 +142,11 @@ export class PythonWorker {
 
   async extract(path: string, signal?: AbortSignal): Promise<WorkerResult<ExtractedDocument>> {
     return this.send<ExtractedDocument>('extract', { path }, this.options.requestTimeoutMs, signal);
+  }
+
+  /** Optional offline faster-whisper path. It never downloads a model. */
+  async transcribeAudio(path: string, model: string, signal?: AbortSignal): Promise<WorkerResult<TranscribedAudio>> {
+    return this.send<TranscribedAudio>('transcribe_audio', { path, model }, 90_000, signal);
   }
 
   /** Stop the worker. Safe to call when it is not running. */

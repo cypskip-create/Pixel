@@ -26,15 +26,22 @@ export function ConversationTranscript({
 }: ConversationTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [reasoningOpen, setReasoningOpen] = useState(false);
+  const pinnedToBottom = useRef(true);
 
   useEffect(() => {
     const node = scrollRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
+    if (node && pinnedToBottom.current) node.scrollTop = node.scrollHeight;
   }, [messages.length, content]);
+
+  const handleScroll = (): void => {
+    const node = scrollRef.current;
+    if (!node) return;
+    pinnedToBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
+  };
 
   return (
     <section aria-label="Conversation transcript" data-layout-panel className="glass flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]" style={{ maxHeight: 'min(46vh, 320px)' }}>
-      <div ref={scrollRef} className="selectable min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
+      <div ref={scrollRef} onScroll={handleScroll} className="selectable min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
         {messages.map((message) => (
           <article key={message.id} className={message.role === 'user' ? 'ml-7 rounded-xl bg-sky-300/10 px-2.5 py-2' : 'mr-3 rounded-xl bg-white/5 px-2.5 py-2'}>
             <div className="mb-1 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]">{message.role === 'assistant' ? <PixelMark size={12} /> : null}<span>{message.role === 'user' ? 'You' : 'Pixel'}{message.aborted ? ' · Stopped' : ''}</span></div>

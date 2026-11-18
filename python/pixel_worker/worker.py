@@ -26,6 +26,7 @@ import json
 import os
 import sys
 import traceback
+from functools import lru_cache
 from typing import Any, Callable, Dict
 
 PROTOCOL_VERSION = 1
@@ -78,6 +79,7 @@ def capabilities() -> Dict[str, Any]:
     caps["optional"]["xlsx"] = probe("openpyxl")
     caps["optional"]["ocr"] = probe("pytesseract") and probe("PIL")
     caps["optional"]["embeddings"] = probe("sentence_transformers") or probe("onnxruntime")
+    caps["optional"]["faster_whisper"] = probe("faster_whisper")
 
     if pymupdf:
         caps["formats"].append("pdf")
@@ -256,10 +258,62 @@ def extract(params: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=1)
+def _load_whisper_model(model_name: str) -> Any:
+    try:
+        from faster_whisper import WhisperModel
+    except Exception as exc:
+        raise WorkerError("CAPABILITY_MISSING", "The optional faster-whisper package is not installed.") from exc
+
+    # Offline by default: never download a model or transmit audio implicitly.
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        return WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=max(1, min(os.cpu_count() or 1, 4)),
+            num_workers=1,
+            local_files_only=True,
+        )
+    except Exception as exc:
+        raise WorkerError(
+            "CAPABILITY_MISSING",
+            f"The local faster-whisper model '{model_name}' is not installed in the offline model cache.",
+        ) from exc
+
+
+def transcribe_audio(params: Dict[str, Any]) -> Dict[str, Any]:
+    path = _check_path(params.get("path"))
+    if os.path.getsize(path) > 700_000:
+        raise WorkerError("TOO_LARGE", "The voice recording exceeds the local transcription limit.")
+    model_name = params.get("model", "base.en")
+    if model_name not in {"tiny.en", "base.en", "small.en"}:
+        raise WorkerError("BAD_REQUEST", "Choose tiny.en, base.en, or small.en for local English transcription.")
+
+    model = _load_whisper_model(model_name)
+    try:
+        segments, info = model.transcribe(
+            path,
+            language="en",
+            beam_size=1,
+            vad_filter=True,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
+        )
+        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip()).strip()
+    except Exception as exc:
+        raise WorkerError("DECODE_ERROR", "The local speech model could not decode this recording.") from exc
+    if not text:
+        raise WorkerError("NO_TEXT", "No speech was detected in the recording.")
+    return {"text": text, "language": getattr(info, "language", "en")}
+
+
 OPS: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     "capabilities": lambda _params: capabilities(),
     "ping": lambda _params: {"pong": True},
     "extract": extract,
+    "transcribe_audio": transcribe_audio,
 }
 
 

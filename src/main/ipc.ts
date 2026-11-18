@@ -62,6 +62,7 @@ import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
 import { PythonWorker } from './services/python-worker';
 import { NativeHelper } from './services/nativeHelper';
 import { VoiceService } from './voice/voice';
+import type { RecognitionResult } from './voice/voice';
 import { VISION_MODEL } from '../shared/types';
 import {
   AuditLog,
@@ -85,6 +86,7 @@ import type { WindowManager } from './window';
 import { redactTaskText } from './tasks/schema';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../shared/browserSearch';
 import { safeExternalHttpUrl } from '../shared/externalUrl';
+import { claimPushToTalkEnd } from '../shared/companion/pushToTalkSession';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -104,6 +106,9 @@ export interface IpcContext {
   };
   /** Request the UI's permission prompt surfaces. */
   sendToRenderer: (channel: string, payload: unknown) => void;
+  /** PTT transcript is consumed by the one main companion renderer only. */
+  sendToMainRenderer?: (channel: string, payload: unknown) => void;
+  getShortcutStatus?: () => unknown;
   onSettingsChange?: (settings: AppSettings) => void;
   onQuit: () => void;
 }
@@ -131,6 +136,9 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   emergency: EmergencyController;
   tasks: TaskManager;
   routines: LocalRoutineScheduler;
+  startPushToTalk: () => void;
+  endPushToTalk: (reason: 'released' | 'timeout' | 'cancelled' | 'unavailable' | 'failed') => void;
+  cancelVoiceCapture: () => void;
   shutdown: () => void;
 }> {
   const { settings, windows, provider, captures } = context;
@@ -329,7 +337,41 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     (request) => context.sendToRenderer(CHANNELS.permissionsRequest, request),
     (requestId) => context.sendToRenderer(CHANNELS.permissionsResolved, requestId),
   );
-  const voice = new VoiceService();
+  const voice = new VoiceService(pythonWorker);
+  let activePtt: {
+    id: number;
+    controller: AbortController;
+    released: boolean;
+    captureReady: boolean;
+    transcribing: boolean;
+    releaseTimer: ReturnType<typeof setTimeout> | null;
+  } | null = null;
+  let manualVoiceCaptureOwner: number | null = null;
+  let pttSequence = 0;
+  const notifyPtt = (
+    state: 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting' | 'failed' | 'cancelled',
+    error?: string,
+    sessionId?: number,
+  ): void => {
+    context.sendToRenderer(CHANNELS.voicePttState, {
+      state,
+      ...(error ? { error } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
+  };
+  const cancelPttSession = (state: 'failed' | 'cancelled', error?: string): void => {
+    const session = activePtt;
+    activePtt = null;
+    if (session?.releaseTimer) clearTimeout(session.releaseTimer);
+    session?.controller.abort();
+    if (session) {
+      context.sendToMainRenderer?.(CHANNELS.voicePttStopCapture, {
+        sessionId: session.id,
+        action: 'cancel',
+      });
+    }
+    notifyPtt(state, error, session?.id);
+  };
 
   /** Tool names that finished before the stop, for an honest report. */
   const completedActions: string[] = [];
@@ -361,6 +403,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     },
     killChildren: () => {
       voice.cancelAll();
+      cancelPttSession('cancelled');
       void pythonWorker.shutdown();
       return executors.killAll();
     },
@@ -441,6 +484,68 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     isStopped: () => emergency.isStopped(),
     getProjectId: () => memoryStore.getActiveProject(),
   });
+
+  const startPushToTalk = (): void => {
+    if (activePtt) return;
+    if (manualVoiceCaptureOwner !== null) {
+      notifyPtt('failed', 'Another Pixel window is already recording. Stop that recording before using push-to-talk.');
+      return;
+    }
+    if (agent.isRunning || emergency.isStopped()) {
+      notifyPtt('failed', emergency.isStopped()
+        ? 'Clear emergency stop before using push-to-talk.'
+        : 'Pixel is already handling a request. Your existing work was not interrupted.');
+      return;
+    }
+
+    const session = {
+      id: ++pttSequence,
+      controller: new AbortController(),
+      released: false,
+      captureReady: false,
+      transcribing: false,
+      releaseTimer: null,
+    };
+    activePtt = session;
+    if (!context.sendToMainRenderer) {
+      cancelPttSession('failed', 'Pixel could not start microphone capture in its companion window.');
+      return;
+    }
+    // Start microphone capture on the actual keydown path. Capability probing
+    // may invoke PowerShell or initialize Python; waiting for it here would
+    // miss speech at the beginning of a hold. Transcription still reports its
+    // real capability/error result after release.
+    notifyPtt('starting', undefined, session.id);
+  };
+
+  const endPushToTalk = async (
+    reason: 'released' | 'timeout' | 'cancelled' | 'unavailable' | 'failed',
+  ): Promise<void> => {
+    const session = activePtt;
+    if (!session || !claimPushToTalkEnd(session)) return;
+
+    if (reason !== 'released') {
+      const error = reason === 'timeout'
+        ? 'Push-to-talk reached its 20-second safety limit and stopped.'
+        : reason === 'unavailable'
+          ? 'Pixel could not track the shortcut release; recording was cancelled.'
+          : reason === 'failed'
+            ? 'Pixel could not track the shortcut release; recording was cancelled.'
+            : undefined;
+      cancelPttSession(reason === 'cancelled' ? 'cancelled' : 'failed', error);
+      return;
+    }
+    notifyPtt('stopping', undefined, session.id);
+    context.sendToMainRenderer?.(CHANNELS.voicePttStopCapture, {
+      sessionId: session.id,
+      action: 'submit',
+    });
+    session.releaseTimer = setTimeout(() => {
+      if (activePtt === session) {
+        cancelPttSession('failed', 'Pixel did not receive the finished microphone audio. Nothing was submitted.');
+      }
+    }, 5_000);
+  };
 
   const routines = new LocalRoutineScheduler(
     routineStore,
@@ -621,6 +726,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   /* ----------------------------- settings ---------------------------- */
 
   registerHandler(CHANNELS.settingsGet, (): AppSettings => settings.get());
+  registerHandler(CHANNELS.shortcutsGetStatus, (): unknown => context.getShortcutStatus?.() ?? null);
 
   registerHandler(CHANNELS.settingsSet, (_event, patch: DeepSeekSettingsPatch): AppSettings => {
     const next = settings.set(patch ?? {});
@@ -992,6 +1098,85 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.voiceCapability, () => voice.capability());
 
+  registerHandler(CHANNELS.voiceCaptureAcquire, (event): boolean => {
+    if (activePtt || (manualVoiceCaptureOwner !== null && manualVoiceCaptureOwner !== event.sender.id)) return false;
+    manualVoiceCaptureOwner = event.sender.id;
+    event.sender.once('destroyed', () => {
+      if (manualVoiceCaptureOwner === event.sender.id) manualVoiceCaptureOwner = null;
+    });
+    return true;
+  });
+
+  registerHandler(CHANNELS.voiceCaptureRelease, (event): boolean => {
+    if (manualVoiceCaptureOwner !== event.sender.id) return false;
+    manualVoiceCaptureOwner = null;
+    return true;
+  });
+
+  const cancelVoiceCapture = (): void => {
+    manualVoiceCaptureOwner = null;
+    context.sendToRenderer(CHANNELS.voiceCaptureCancel, {});
+  };
+
+  const isMainRenderer = (event: IpcMainInvokeEvent): boolean =>
+    windows.getMainWindow()?.webContents === event.sender;
+
+  registerHandler(CHANNELS.voicePttCaptureReady, (event, sessionId: number, error?: string): boolean => {
+    if (!isMainRenderer(event)) return false;
+    const session = activePtt;
+    if (!session || session.id !== sessionId) return false;
+    if (error) {
+      cancelPttSession('failed', error.slice(0, 300));
+      return false;
+    }
+    if (session.released || session.captureReady || session.controller.signal.aborted) return false;
+    session.captureReady = true;
+    notifyPtt('recording', undefined, session.id);
+    return true;
+  });
+
+  registerHandler(CHANNELS.voicePttTranscribe, async (event, sessionId: number, audio: Uint8Array): Promise<{ ok: boolean; error?: string }> => {
+    if (!isMainRenderer(event)) {
+      return { ok: false, error: 'Push-to-talk audio must come from Pixel’s companion window.' };
+    }
+    const session = activePtt;
+    if (!session || session.id !== sessionId || !session.released || session.transcribing || session.controller.signal.aborted) {
+      return { ok: false, error: 'This push-to-talk session is no longer active.' };
+    }
+    if (session.releaseTimer) clearTimeout(session.releaseTimer);
+    session.releaseTimer = null;
+    session.transcribing = true;
+    notifyPtt('transcribing', undefined, session.id);
+
+    const result = await voice.transcribeWav(audio, session.controller.signal, settings.get().voice.sttModel);
+    if (activePtt !== session || session.controller.signal.aborted) {
+      return { ok: false, error: 'Transcription was cancelled.' };
+    }
+    activePtt = null;
+    if (!result.ok || result.text.trim().length < 2) {
+      const detail = result.noSpeech
+        ? 'Pixel did not hear speech. Hold Ctrl+Shift+Space while speaking, then release.'
+        : result.error ?? 'Pixel could not transcribe that recording. Nothing was submitted.';
+      notifyPtt('failed', detail, session.id);
+      audit.record('system', 'Push-to-talk did not produce a usable transcript', 'error');
+      return { ok: false, error: detail };
+    }
+
+    const transcript = result.text.trim().replace(/\s+/g, ' ');
+    audit.record('system', 'Push-to-talk instruction transcribed', 'ok', `${transcript.length} characters`);
+    notifyPtt('submitting', undefined, session.id);
+    context.sendToMainRenderer?.(CHANNELS.voicePttSubmit, { sessionId: session.id, text: transcript });
+    return { ok: true };
+  });
+
+  registerHandler(CHANNELS.voiceTranscribeWav, async (_event, audio: Uint8Array): Promise<RecognitionResult> => {
+    const result = await voice.transcribeWav(audio, undefined, settings.get().voice.sttModel);
+    if (result.ok) audit.record('system', 'Voice input transcribed', 'ok', `${result.text.length} characters`);
+    else if (result.noSpeech) audit.record('system', 'Voice input: no speech detected', 'ok');
+    else audit.record('system', 'Voice input failed', 'error', result.error);
+    return result;
+  });
+
   registerHandler(CHANNELS.voiceListen, async (_event, timeoutMs?: number) => {
     const result = await voice.listen(
       typeof timeoutMs === 'number' ? { timeoutMs } : {},
@@ -1008,6 +1193,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.voiceCancel, (): number => {
     const cancelled = voice.cancelAll();
+    cancelPttSession('cancelled');
     audit.record('system', 'Voice operation cancelled', 'cancelled', `${cancelled} worker(s)`);
     return cancelled;
   });
@@ -1050,8 +1236,12 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     emergency,
     tasks,
     routines,
+    startPushToTalk,
+    endPushToTalk,
+    cancelVoiceCapture,
     shutdown: () => {
       routines.stop();
+      cancelPttSession('cancelled');
       voice.cancelAll();
       void pythonWorker.shutdown();
       executors.killAll();

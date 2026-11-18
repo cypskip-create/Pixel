@@ -5,9 +5,12 @@ import {
   SPEAK_SCRIPT,
   VoiceService,
   buildRecognitionScript,
+  buildWaveRecognitionScript,
   parseCapability,
   parseRecognition,
+  validateVoiceWav,
 } from '../src/main/voice/voice';
+import { encodePcm16Wav } from '../src/renderer/lib/audioCapture';
 
 describe('parseCapability', () => {
   it('reads recognizer and voice counts', () => {
@@ -73,6 +76,31 @@ describe('recognition script', () => {
   it('caps the listening window at the documented maximum', () => {
     // Callers must not be able to record indefinitely.
     expect(MAX_LISTEN_MS).toBeLessThanOrEqual(30_000);
+  });
+
+  it('recognizes a captured WAV without reopening the default microphone', () => {
+    const script = buildWaveRecognitionScript(5000);
+    expect(script).toContain('SetInputToWaveStream');
+    expect(script).toContain('$env:CYPS_AUDIO_FILE');
+    expect(script).not.toContain('SetInputToDefaultAudioDevice');
+  });
+});
+
+describe('transient voice audio', () => {
+  it('encodes mono PCM WAV at 16 kHz and validates its structure', () => {
+    const audio = encodePcm16Wav(new Float32Array(3_200).fill(0.25), 16_000);
+    expect(Buffer.from(audio).toString('ascii', 0, 4)).toBe('RIFF');
+    expect(Buffer.from(audio).toString('ascii', 8, 12)).toBe('WAVE');
+    expect(validateVoiceWav(audio)).toBeNull();
+  });
+
+  it('rejects truncated, unsupported, and oversized buffers before a subprocess starts', () => {
+    expect(validateVoiceWav(new Uint8Array(40))).toMatch(/short|malformed/i);
+    expect(validateVoiceWav(encodePcm16Wav(new Float32Array(3_199), 16_000))).toMatch(/short/i);
+    const stereo = encodePcm16Wav(new Float32Array(4000), 16_000);
+    new DataView(stereo.buffer).setUint16(22, 2, true);
+    expect(validateVoiceWav(stereo)).toMatch(/unsupported/i);
+    expect(validateVoiceWav(new Uint8Array(44 + 16_000 * 2 * 22))).toMatch(/20-second/i);
   });
 });
 

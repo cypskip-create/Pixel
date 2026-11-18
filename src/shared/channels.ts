@@ -109,6 +109,16 @@ export const CHANNELS = {
   voiceListen: 'voice:listen',
   voiceCancel: 'voice:cancel',
   voiceSpeak: 'voice:speak',
+  voicePttState: 'voice:pttState',
+  voicePttSubmit: 'voice:pttSubmit',
+  voicePttStopCapture: 'voice:pttStopCapture',
+  voicePttCaptureReady: 'voice:pttCaptureReady',
+  voicePttTranscribe: 'voice:pttTranscribe',
+  voiceTranscribeWav: 'voice:transcribeWav',
+  voiceCaptureAcquire: 'voice:captureAcquire',
+  voiceCaptureRelease: 'voice:captureRelease',
+  voiceCaptureCancel: 'voice:captureCancel',
+  shortcutsGetStatus: 'shortcuts:getStatus',
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

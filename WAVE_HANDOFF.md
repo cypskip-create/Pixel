@@ -2,7 +2,18 @@
 
 Updated: 2026-11-18
 
-## Current handoff — conversation-first Workspace
+## Current handoff — Interaction Engine 3.0
+
+- Branch: `codex/interaction-engine-3`, based on `b7ccac1fc17824317a1606f5b89bb61a13bbc52d`. The complete interaction checkpoint is committed locally only; nothing was pushed or released.
+- Dynamic Island uses fixed 144×52 idle bounds with a 138×38 visible pill. Hover/click/leave/idle transitions are reducer-driven; token streaming never controls native window geometry. Response scrolling preserves the user's position.
+- Global PTT uses the configured accelerator plus a short-lived native release watcher that samples only that chord, cancels on helper failure and times out at 20 seconds. Microphone capture is explicit and audio-only. Release submits one valid local transcript; manual dictation stays in the draft. Shared state drives the Island and Workspace character.
+- The Workspace keeps its existing conversation-first structure, uses the cool blue-charcoal surfaces and shows the original geometric reactive character. No Acrylic, Mica or backdrop blur was introduced.
+- TypeScript passed. Full suite: **781 passed, 0 failed, 2 skipped (783 total; 45 files passed, 1 skipped)** with Chromium/local fixture access. NSIS preflight: **9/9**. Native helper compiled and its configured PTT chord smoke returned `released` with exit 0. Production build passed.
+- An isolated unpacked artifact is at `artifacts/interaction-engine-3-rc-20261118/win-unpacked`. The archived preload was inspected: it contains no local CommonJS imports and keeps Electron as its only runtime require. The helper is packaged beside it.
+- Real app/sandbox smoke remains blocked: Electron 45.2.3 exits `0x80000003` before app code, including for `--version`; the current branch did not create a targetable window. Microphone, dictation accuracy, PTT focus, GPU behavior, visual/DPI, portable and installer flows remain unverified. No CPU/memory benchmark or GitHub run was produced. CI remains configured in `.github/workflows/windows-ci.yml`; this branch is local and was not pushed.
+- The only skipped automated tests are two opt-in native foreground desktop integration cases. See [`docs/validation/INTERACTION_ENGINE_3_READINESS.md`](docs/validation/INTERACTION_ENGINE_3_READINESS.md) and the Interaction Engine section of [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md).
+
+## Previous handoff — conversation-first Workspace
 
 - Branch: `codex/ui-experience-2`; base commit `1000f622157ebd50aec83cae35a92635c2009dbf`. The focused Workspace changes are local and have not been pushed.
 - The app opens to a compact conversation view. Recent chats and New Chat remain in the sidebar; secondary destinations are grouped under Library. Mode selection and web search are in the compact conversation header. The composer auto-expands. Emergency stop remains accessible in the title bar.

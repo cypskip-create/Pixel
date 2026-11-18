@@ -40,6 +40,8 @@ interface InputBarProps {
   busy: boolean;
   /** Blocks submission when the native bridge is unavailable. */
   disabled: boolean;
+  /** Hover previews must never take keyboard focus from the foreground app. */
+  autoFocus?: boolean;
 }
 
 const PLACEHOLDER: Record<Mode, string> = {
@@ -69,6 +71,7 @@ export function InputBar(props: InputBarProps) {
     onCloseModeMenu,
     busy,
     disabled,
+    autoFocus = true,
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -80,11 +83,11 @@ export function InputBar(props: InputBarProps) {
   // Auto-focus on activation: the user opened this to type.
   useEffect(() => {
     const node = textareaRef.current;
-    if (!node) return;
+    if (!node || !autoFocus) return;
     node.focus();
     const end = node.value.length;
     node.setSelectionRange(end, end);
-  }, []);
+  }, [autoFocus]);
 
   // Grow with content, then scroll internally. Never taller than 5 lines.
   useEffect(() => {

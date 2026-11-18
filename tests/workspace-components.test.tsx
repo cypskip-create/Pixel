@@ -86,6 +86,7 @@ describe('conversation-first Workspace controls', () => {
     const rendered = mount(<WorkspaceConversationHeader
       title="Search planning" currentMode="guide" onRequestMode={vi.fn()}
       onSearchWeb={onSearchWeb} canSearch hasTaskDetails={false} onOpenTaskDetails={vi.fn()}
+      assistantState="idle"
     />);
     act(() => rendered.querySelector<HTMLButtonElement>('[aria-label="More conversation actions"]')?.click());
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Search the web'))?.click());

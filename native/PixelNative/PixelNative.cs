@@ -51,6 +51,7 @@ internal static class Program
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref NativeMessage message);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref NativeMessage message);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsDelegate callback, IntPtr state);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
 
     private const uint EventSystemForeground = 0x0003;
     private const uint EventSystemMinimizeStart = 0x0016;
@@ -64,6 +65,8 @@ internal static class Program
     private const int TargetLimit = 512;
     private const int MaxExternalWindows = 50;
     private const int FallbackPollMs = 250;
+    private const int PushToTalkSafetyTimeoutMs = 20000;
+    private const int PushToTalkPollMs = 20;
     private static readonly object WindowLock = new object();
     private static readonly HashSet<int> PixelProcessIds = new HashSet<int>();
     private static readonly Dictionary<IntPtr, WindowRecord> TargetsByHandle = new Dictionary<IntPtr, WindowRecord>();
@@ -111,8 +114,15 @@ internal static class Program
         public long ObservedAt;
     }
 
-    private static int Main()
+    private static int Main(string[] commandLineArgs)
     {
+        // This short-lived mode observes only the configured chord while Pixel's
+        // registered PTT shortcut is active. It never records or forwards key events.
+        if (commandLineArgs != null && commandLineArgs.Length == 1 && String.Equals(commandLineArgs[0], "--watch-ptt-release", StringComparison.Ordinal))
+            return 3;
+        if (commandLineArgs != null && commandLineArgs.Length == 2 && String.Equals(commandLineArgs[0], "--watch-ptt-release", StringComparison.Ordinal))
+            return WatchPushToTalkRelease(commandLineArgs[1]);
+
         // PER_MONITOR_AWARE_V2 = -4. Must run before any UI Automation call so
         // that bounding rectangles come back in physical pixels.
         try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (Exception) { }
@@ -151,6 +161,124 @@ internal static class Program
             }
         }
         return 0;
+    }
+
+    private static int WatchPushToTalkRelease(string accelerator)
+    {
+        List<int> keys;
+        if (!TryParsePushToTalkKeys(accelerator, out keys))
+        {
+            Console.Out.WriteLine("unavailable");
+            return 3;
+        }
+        var timer = Stopwatch.StartNew();
+        if (!PushToTalkChordDown(keys))
+        {
+            Console.Out.WriteLine("released");
+            return 0;
+        }
+
+        while (timer.ElapsedMilliseconds < PushToTalkSafetyTimeoutMs)
+        {
+            if (!PushToTalkChordDown(keys))
+            {
+                Console.Out.WriteLine("released");
+                return 0;
+            }
+            Thread.Sleep(PushToTalkPollMs);
+        }
+
+        Console.Out.WriteLine("timeout");
+        return 2;
+    }
+
+    private static bool PushToTalkChordDown(List<int> keys)
+    {
+        // Only the configured chord's key states are sampled. No unrelated key
+        // state or sequence is read or retained.
+        for (int index = 0; index < keys.Count; index++)
+            if (!IsKeyDown(keys[index])) return false;
+        return keys.Count > 1;
+    }
+
+    private static bool TryParsePushToTalkKeys(string accelerator, out List<int> keys)
+    {
+        keys = new List<int>();
+        bool hasModifier = false;
+        bool hasPrimary = false;
+        if (String.IsNullOrWhiteSpace(accelerator)) return false;
+        string[] parts = accelerator.Split('+');
+        if (parts.Length < 2 || parts.Length > 4) return false;
+        for (int index = 0; index < parts.Length; index++)
+        {
+            string part = parts[index].Trim();
+            if (part.Length == 0) return false;
+            int key;
+            bool modifier;
+            if (!TryVirtualKey(part, out key, out modifier)) return false;
+            if (modifier && index == parts.Length - 1) return false;
+            if (!modifier && hasPrimary) return false;
+            hasModifier = hasModifier || modifier;
+            hasPrimary = hasPrimary || !modifier;
+            if (keys.Contains(key)) return false;
+            keys.Add(key);
+        }
+        return hasModifier && hasPrimary;
+    }
+
+    private static bool TryVirtualKey(string keyName, out int virtualKey, out bool modifier)
+    {
+        string key = keyName.ToLowerInvariant();
+        modifier = true;
+        if (key == "control" || key == "ctrl" || key == "commandorcontrol") { virtualKey = 0x11; return true; }
+        else if (key == "shift") { virtualKey = 0x10; return true; }
+        else if (key == "alt") { virtualKey = 0x12; return true; }
+        else if (key == "super" || key == "meta" || key == "command") { virtualKey = 0x5B; return true; }
+        else
+        {
+            modifier = false;
+            if (key.Length == 1 && ((key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9')))
+            {
+                virtualKey = Char.ToUpperInvariant(key[0]);
+                return true;
+            }
+            if (key.Length >= 2 && key[0] == 'f')
+            {
+                int functionNumber;
+                if (Int32.TryParse(key.Substring(1), out functionNumber) && functionNumber >= 1 && functionNumber <= 24)
+                {
+                    virtualKey = 0x70 + functionNumber - 1;
+                    return true;
+                }
+            }
+            switch (key)
+            {
+                case "space": virtualKey = 0x20; return true;
+                case "enter":
+                case "return": virtualKey = 0x0D; return true;
+                case "escape":
+                case "esc": virtualKey = 0x1B; return true;
+                case "tab": virtualKey = 0x09; return true;
+                case "backspace": virtualKey = 0x08; return true;
+                case "delete": virtualKey = 0x2E; return true;
+                case "insert": virtualKey = 0x2D; return true;
+                case "home": virtualKey = 0x24; return true;
+                case "end": virtualKey = 0x23; return true;
+                case "pageup": virtualKey = 0x21; return true;
+                case "pagedown": virtualKey = 0x22; return true;
+                case "up": virtualKey = 0x26; return true;
+                case "down": virtualKey = 0x28; return true;
+                case "left": virtualKey = 0x25; return true;
+                case "right": virtualKey = 0x27; return true;
+            }
+        }
+        virtualKey = 0;
+        return false;
+    }
+
+    private static bool IsKeyDown(int virtualKey)
+    {
+        return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
     }
 
     private static object Handle(string command, Dictionary<string, object> args)

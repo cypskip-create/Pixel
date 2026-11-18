@@ -2,6 +2,86 @@
 
 This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that Pixel now starts on the target Windows laptop and its sandbox preload smoke test passes. This procedure includes the focused foreground-context integration. Record only behavior observed directly on the tested machine; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local build and test evidence.
 
+## Latest checkpoint: Interaction Engine 3.0 (2026-11-18)
+
+The implementation is present and automated checks cover the presentation
+reducer, fixed geometry, stream scrolling, shortcut dispatch, watcher release,
+cancellation, timeout and helper-crash recovery. **This Codex environment did
+not verify the visible app, microphone, speech recognition, or a real PTT
+conversation.** Do not mark those passed from the automated results.
+
+### Dynamic Island and streaming
+
+1. Launch the current checkout with `npm run dev`. Confirm the 138×38 visible
+   pill is centered at the selected display's top work-area edge. Test at 100%,
+   125% and 150% scale, on each display, with the taskbar on each edge where
+   practical.
+2. Hover for 140 ms, move between the pill and panel, and leave/re-enter within
+   the 950 ms grace period. Confirm hover does not focus the text field or steal
+   focus from the app underneath. Click the pill and confirm the editor can
+   receive focus. Leave it idle for 4.5 seconds; a non-empty draft must remain
+   available and a pending approval must stay visible.
+3. Request a long harmless explanation while another app has focus. Confirm
+   the Island stays compact during generation. Open it intentionally and check
+   that the bounded response scroll follows the tail until you scroll up, then
+   preserves your reading position. Confirm the top-center position does not
+   change for individual tokens and the app does not flash or steal focus.
+4. Repeat after cold launch. Open Workspace, verify the original geometric
+   character follows listening/thinking/working/approval states, and confirm
+   Recent Chats, mode controls, permissions and emergency stop still work.
+
+### Push-to-talk and microphone
+
+1. In Settings → Voice, review the PTT accelerator and microphone input. Check
+   that Windows reports a local speech recognizer or that a faster-whisper
+   package and selected model are installed in the offline cache. Pixel does not
+   fetch a model automatically. If the local capability is unavailable, stop
+   here and record voice as unavailable for that Windows account.
+2. Focus Notepad or a browser, hold the configured default `Ctrl+Shift+Space`,
+   and say: “Pixel, tell me the current time.” Confirm only an audio capture
+   starts, the small waveform animates in the compact pill, no screenshot is
+   taken, the app beneath remains focused, and neither chat nor Workspace opens.
+3. Release the shortcut. Confirm the microphone indicator stops, one local
+   transcript is submitted exactly once, Pixel responds, and the conversation
+   is saved. Check the transcript is accurate; a tool returning without error
+   is not evidence of transcription. Repeat with a longer harmless instruction.
+4. In manual microphone mode, dictate a sentence and stop. Confirm the text is
+   added to the composer and is not submitted automatically. Cancel a capture,
+   deny microphone permission, unplug the chosen input and test the 20-second
+   safety limit; each should produce a clear failure and stop the mic. Confirm
+   emergency stop, screen lock, suspend and restart recover without leaving a
+   recorder active or duplicating a submission.
+5. Recheck the active app focus, Island size, cursor companion, chat history and
+   emergency stop after both success and failure cases.
+
+### Current packaged build
+
+Use a unique output folder so an existing release directory is preserved:
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test
+npm run test:preload-sandbox
+npm run build
+npm run build:native
+npx electron-builder --win --dir --publish never --config.directories.output=artifacts/interaction-engine-3-validation
+```
+
+Launch `artifacts\interaction-engine-3-validation\win-unpacked\Pixel.exe`
+on the target desktop. Confirm the transparent rounded Island and bundled
+sandbox preload load; then repeat Settings, chat history, harmless DeepSeek,
+permission and emergency-stop checks. Keep the `artifacts` folder, command
+logs, test report, screenshot set, OS build and display/DPI notes with the
+acceptance result. `npm run dist` is a separate NSIS/portable build and must not
+be claimed complete unless it exits successfully. Installer, upgrade,
+uninstall and data-preservation checks remain separate release gates.
+
+The automated test suite on 2026-11-18 passed with Chromium installed and local
+fixture access enabled; the exact totals and the Electron host failure are in
+the current Interaction Engine entry in `PROGRESS.md`.
+
 ## Automated checks before opening Pixel
 
 Run from the repository root in a normal Windows PowerShell session:
@@ -527,7 +607,7 @@ search provider, default browser, exact commands, pass/fail/blocked result for
 each item, and paths to screenshots/logs. Do not mark any GUI, installer or
 restart check passed unless it was observed directly on that Windows profile.
 
-### Current checkpoint environment result (2026-11-17)
+### Previous checkpoint environment result (2026-11-17)
 
 - `npm run typecheck`, `npm run build`, `npm run build:native` and the Electron
   runtime version check passed. The full suite passed **718 tests, 0 failed,

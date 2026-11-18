@@ -55,6 +55,15 @@ export const ORB_VISUALS: Record<AssistantState, OrbVisual> = {
     busy: true,
     mark: { kind: 'ring', r: 7.5, width: 2.4 },
   },
+  transcribing: {
+    label: 'Transcribing',
+    blurb: 'Converting the held voice instruction into text.',
+    tone: 'var(--color-state-thinking)',
+    shape: 'wave',
+    motion: 'orb-sheen',
+    busy: true,
+    mark: { kind: 'bars', widths: [1.5, 3.1, 4.2, 2.4, 1.4] },
+  },
   thinking: {
     label: 'Thinking',
     blurb: 'Reasoning about your request.',

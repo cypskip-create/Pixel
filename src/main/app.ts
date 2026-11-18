@@ -6,7 +6,8 @@
  * concerns (single instance, startup, clean quit) also live here.
  */
 
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, Menu, powerMonitor, session, shell } from 'electron';
+import { existsSync } from 'node:fs';
 import { release as osRelease } from 'node:os';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/channels';
@@ -24,6 +25,7 @@ import { RuntimeProvider } from './providers/runtime';
 import { ScreenCapture } from './screen';
 import { SettingsStore } from './settings';
 import { ShortcutManager } from './shortcuts';
+import { PushToTalkReleaseWatcher } from './services/pushToTalkReleaseWatcher';
 import { TrayController } from './tray';
 import { WindowManager } from './window';
 
@@ -78,6 +80,12 @@ function rendererDir(): string {
 /** <root>/dist/main/preload/index.js - compiled alongside the main bundle. */
 function preloadPath(): string {
   return join(mainDir(), '..', 'preload', 'index.js');
+}
+
+function nativeHelperPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'native', 'PixelNative.exe')
+    : join(app.getAppPath(), 'native', 'bin', 'PixelNative.exe');
 }
 
 function createWindowManager(store: SettingsStore): WindowManager {
@@ -202,6 +210,13 @@ export async function start(): Promise<void> {
 
   windows = createWindowManager(store);
   windows.setPresentationSettings(store.get().companion);
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const mediaTypes = (details as { mediaTypes?: Array<'audio' | 'video'> }).mediaTypes;
+    const audioOnly = permission === 'media' &&
+      Array.isArray(mediaTypes) && mediaTypes.length === 1 &&
+      mediaTypes[0] === 'audio';
+    callback(audioOnly && windows?.isTrustedApplicationSender(contents, contents.mainFrame) === true);
+  });
 
   // Capture is authorized per explicit UI action only.
   let captureAuthorized = false;
@@ -252,6 +267,13 @@ export async function start(): Promise<void> {
         try { win.webContents.send(channel, payload); } catch { /* a closing window may reject delivery */ }
       }
     },
+    sendToMainRenderer: (channel, payload) => {
+      const main = windows?.getMainWindow();
+      if (main && !main.isDestroyed() && !main.webContents.isDestroyed()) {
+        try { main.webContents.send(channel, payload); } catch { /* a closing renderer may reject delivery */ }
+      }
+    },
+    getShortcutStatus: () => shortcuts?.getStatus().pushToTalk ?? null,
     onSettingsChange: (next) => {
       shortcuts?.apply(next);
       tray?.rebuild();
@@ -289,6 +311,7 @@ export async function start(): Promise<void> {
     onOpenSettings: () => windows?.createSettingsWindow(),
     onOpenWorkspace: () => windows?.openWorkspace(),
     onEmergencyStop: () => {
+      shortcuts?.cancelPushToTalk();
       controller.emergency.trigger();
     },
     onQuit: () => {
@@ -304,10 +327,21 @@ export async function start(): Promise<void> {
     onToggle: () => windows?.toggle(),
     onOpenWorkspace: () => windows?.openWorkspace(),
     onEmergencyStop: () => {
+      shortcuts?.cancelPushToTalk();
       controller.emergency.trigger();
     },
-  });
+    onPushToTalkStart: () => controller.startPushToTalk(),
+    onPushToTalkEnd: (reason) => controller.endPushToTalk(reason),
+  }, new PushToTalkReleaseWatcher({ executablePath: nativeHelperPath(), exists: existsSync }));
   shortcuts.apply(store.get());
+  powerMonitor.on('suspend', () => {
+    shortcuts?.cancelPushToTalk();
+    controller.cancelVoiceCapture();
+  });
+  powerMonitor.on('lock-screen', () => {
+    shortcuts?.cancelPushToTalk();
+    controller.cancelVoiceCapture();
+  });
 
   const mainWindow = windows.createMainWindow();
 
