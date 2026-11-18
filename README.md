@@ -48,6 +48,11 @@ position are saved locally. The supplied cyan, aqua and white P mark is defined
 once in `src/shared/pixelMark.json` and reused by the renderer, tray and Windows
 app icon.
 
+Workspace opens directly into the conversation. Recent chats stay in the
+sidebar, secondary areas live under Library, and execution details appear only
+when requested. Approval cards remain visible with the conversation; the mode
+selector and message composer stay compact until needed.
+
 Pixel uses the original dark navy panel colors inside its transparent floating
 window. Windows system backdrops and CSS backdrop blur are disabled; the rounded
 shape still comes from the transparent native window. The Workspace layout,

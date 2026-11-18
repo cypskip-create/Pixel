@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { countVerifiedSteps, taskDisplayState } from '../src/renderer/lib/task-presentation';
+import type { TaskRecord, TaskStatus } from '../src/shared/types';
+import { countVerifiedSteps, isTaskActive, selectActiveTask, taskDisplayState } from '../src/renderer/lib/task-presentation';
+
+function task(id: string, status: TaskStatus): TaskRecord {
+  return { id, status, title: id, steps: [], createdAt: 10 };
+}
 
 describe('task display state', () => {
   it('does not present a completed record as complete while UI postconditions are pending', () => {
@@ -28,5 +33,19 @@ describe('task display state', () => {
         { stepId: 'step-3', toolName: 'verify_ui_state' },
       ],
     })).toBe(1);
+  });
+
+  it('does not promote a recent completed task to current activity', () => {
+    const completed = task('old', 'completed');
+    expect(isTaskActive(completed)).toBe(false);
+    expect(selectActiveTask([completed])).toBeNull();
+  });
+
+  it('selects a live approval or running task and excludes terminal records', () => {
+    const failed = task('failed', 'failed');
+    const waiting = task('waiting', 'awaiting_approval');
+    expect(selectActiveTask([failed, waiting])).toBe(waiting);
+    expect(isTaskActive({ status: 'pause_requested' })).toBe(true);
+    expect(isTaskActive({ status: 'cancelling' })).toBe(true);
   });
 });
