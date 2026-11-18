@@ -6,6 +6,20 @@ export interface TaskDisplayState {
   verificationPending: boolean;
 }
 
+const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
+  'planning', 'running', 'pause_requested', 'awaiting_approval', 'awaiting_user',
+  'paused', 'blocked', 'cancelling',
+]);
+
+/** A finished task is never selected as current activity just because it is recent. */
+export function isTaskActive(task: Pick<TaskRecord, 'status'>): boolean {
+  return ACTIVE_TASK_STATUSES.has(task.status);
+}
+
+export function selectActiveTask(tasks: TaskRecord[]): TaskRecord | null {
+  return tasks.find(isTaskActive) ?? null;
+}
+
 /** Keep persisted task state intact while presenting unresolved verification accurately. */
 export function taskDisplayState(
   task: Pick<TaskRecord, 'status' | 'pendingVerifications'>,

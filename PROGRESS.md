@@ -2,7 +2,23 @@
 
 Updated: 2026-11-18. Version: 0.2.1.
 
-## Current local validation — original dark floating UI restoration
+## Current local validation — conversation-first Workspace
+
+Current branch: `codex/ui-experience-2`. Starting commit: `1000f622157ebd50aec83cae35a92635c2009dbf` (original dark floating UI restoration). The Workspace redesign is a focused local change; no push or release was made.
+
+- Replaced the always-open activity panel with a closed-by-default task-details panel. Current activity appears as a compact conversation status; approvals remain inline and actionable. Completed tasks do not become the current task when no work is active. Unresolved postconditions say **Awaiting verification**.
+- The Workspace now opens to the conversation, with recent chats in a 232px sidebar and secondary pages grouped under Library. The chat header has a compact mode trigger and contextual menu; Search the web no longer uses a blocking prompt. The composer starts at one line and grows to 160px. Emergency stop remains in the title bar, and F11 still toggles fullscreen.
+- Conversation scroll sticks only when already near the bottom; sending a new turn and opening another conversation return to the bottom. Recent history can be opened, renamed and deleted with confirmation. Project, task, skills/routines, memory, tools, settings, attachments, voice and screenshot controls remain accessible.
+- New components: `WorkspaceSidebar`, `WorkspaceConversationHeader`, `CompactModeSelector`, `WorkspaceComposer`, and `WorkspaceTaskActivity`/`WorkspaceTaskDetails`. Added UI regression tests for the compact mode menu, keyboard/focus dismissal, sidebar navigation/recent chat selection, composer resizing/send/stop, task detail access and verification status. Task presentation tests ensure terminal tasks never fill the active slot.
+- `npm run typecheck`: passed (renderer and main projects).
+- `npm run verify`: passed. This includes both TypeScript projects, production build, preload bundling, Vite renderer and icon generation. Full Vitest result: **732 passed, 0 failed, 26 skipped (758 total; 40 files: 39 passed, 1 skipped)**. The 26 skips are 17 browser checks without Playwright Chromium, 7 NSIS checks without `makensis`, and 2 opt-in native foreground integration checks. Fixture writes used `%TEMP%` as the temporary `USERPROFILE`; the installed Python runtime was supplied through `PIXEL_PYTHON`.
+- Focused Workspace/task/architecture checks: **31 passed**. `git diff --check` passed.
+- Native Workspace screenshot acceptance at 1366×768 and 1920×1080 remains **unverified**. `npm run dev` could not produce a targetable window here: the standard Vite port 5199 was occupied, and the Electron child exited with `2147483651` (`0x80000003`). Vite did run on 5299, but the branch-local Electron launch still produced no branch window/startup log. The visible Pixel process belongs to `C:\dev\Pixel`, a different checkout; it was not used as evidence. No before/after screenshots were captured.
+- The existing GPU/renderer child-process issue remains separate. This UI change does not claim to resolve it. The regular development `--disable-gpu` diagnostic remains unchanged.
+
+Follow the new **Conversation-first Workspace acceptance** section in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for exact laptop screenshot and interaction steps. Earlier test counts and visual results below are historical.
+
+## Previous checkpoint — original dark floating UI restoration
 
 Current branch: `codex/ui-experience-2`. Restoration is based on `0da5b8b53c0bd8fe0ba38106c794456e0a9d50d1`; this change is the focused restoration commit.
 

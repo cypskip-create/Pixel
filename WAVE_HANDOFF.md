@@ -2,7 +2,17 @@
 
 Updated: 2026-11-18
 
-## Current handoff — original dark floating UI restoration
+## Current handoff — conversation-first Workspace
+
+- Branch: `codex/ui-experience-2`; base commit `1000f622157ebd50aec83cae35a92635c2009dbf`. The focused Workspace changes are local and have not been pushed.
+- The app opens to a compact conversation view. Recent chats and New Chat remain in the sidebar; secondary destinations are grouped under Library. Mode selection and web search are in the compact conversation header. The composer auto-expands. Emergency stop remains accessible in the title bar.
+- Activity is closed by default. Active work is summarized inline with an on-demand details panel. Permission cards are visible in the conversation. Terminal tasks no longer occupy the active-task panel; unresolved UI postconditions are labeled Awaiting verification.
+- Conversation history, rename/delete confirmation, project selection, tasks, skills/routines, memory, tools, Settings, voice, screenshot capture, attachments, Island synchronization, and existing IPC/security contracts are preserved.
+- `npm run verify`: passed (both TypeScript projects, all tests, preload/renderer production build and icon generation). Full tests: **732 passed, 0 failed, 26 skipped (758 total; 40 files)**. Skips: 17 Chromium-dependent browser checks (Chromium absent), 7 NSIS checks (`makensis` absent), 2 opt-in native foreground integration checks. Focused Workspace/task/architecture checks: **31 passed**.
+- Native screenshots at 1366×768 and 1920×1080 were not captured. The standard dev server port 5199 was occupied; `npm run dev`'s Electron child exited with `2147483651` (`0x80000003`). Vite started on 5299, but the current branch still did not produce a targetable Electron window. The visible Pixel window belongs to the separate `C:\dev\Pixel` checkout and was not treated as evidence.
+- GPU/renderer child-process reliability remains a separate issue and is not claimed fixed. See the new **Conversation-first Workspace acceptance** steps in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
+
+## Previous handoff — original dark floating UI restoration
 
 - Branch: `codex/ui-experience-2`; restoration is based on `0da5b8b53c0bd8fe0ba38106c794456e0a9d50d1`. This is the focused restoration commit.
 - The companion is back on its original navy colors (`0.88`/`0.95` fills), border and shadow stack, with no native system backdrop, no CSS backdrop blur, no redesign gradient highlight and an unboxed lower toolbar. Its transparent native shape, P logo and controls remain.

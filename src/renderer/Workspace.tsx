@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUp, Brain, Check, ChevronDown, Clock3, FolderKanban, ListTodo, Maximize2,
-  MessagesSquare, Mic, Minimize2, PanelLeftClose, PanelRightClose, Paperclip, Plus,
-  Search, Settings, ShieldAlert, Sparkles, Square, Wrench, X,
+  Check, FolderKanban, Maximize2, Minimize2, Plus, ShieldAlert, Wrench, X,
 } from 'lucide-react';
 import type {
   AuditEntry, ConversationSummary, DiagnosticsSnapshot, ImageAttachment, Mode, PermissionDecision,
@@ -10,39 +8,28 @@ import type {
 } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { AutomationPanel } from '@/components/AutomationPanel';
+import { WorkspaceConversationHeader } from '@/components/WorkspaceConversationHeader';
+import { WorkspaceComposer } from '@/components/WorkspaceComposer';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { MemoryPanel } from '@/components/MemoryPanel';
-import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
 import { SettingsPanel } from '@/components/SettingsPanel';
-import { TaskStrip } from '@/components/TaskStrip';
+import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
+import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
 import { safeSubscribe } from '@/lib/bridge';
-import { taskDisplayState } from '@/lib/task-presentation';
-import { IconButton } from '@/components/IconButton';
-
-type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'skills' | 'memory' | 'tools' | 'settings';
-
-const NAV: Array<{ id: WorkspaceView; label: string; icon: typeof MessagesSquare }> = [
-  { id: 'chat', label: 'Chats', icon: MessagesSquare },
-  { id: 'projects', label: 'Projects', icon: FolderKanban },
-  { id: 'tasks', label: 'Tasks & Activity', icon: ListTodo },
-  { id: 'skills', label: 'Skills & Routines', icon: Sparkles },
-  { id: 'memory', label: 'Memory', icon: Brain },
-  { id: 'tools', label: 'Tools', icon: Wrench },
-  { id: 'settings', label: 'Settings', icon: Settings },
-];
+import { taskDisplayState, selectActiveTask, isTaskActive } from '@/lib/task-presentation';
 
 export function Workspace(): React.JSX.Element {
   const bridge = useBridge();
   const { settings, hasApiKey, error: settingsError, saving, patch, setMode, saveApiKey, removeApiKey, testApiKeyConnection } = useSettings();
   const chat = useChat(settings.privacy.persistHistory);
   const [view, setView] = useState<WorkspaceView>('chat');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [contextOpen, setContextOpen] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [windowState, setWindowState] = useState<WorkspaceWindowState>({ maximized: true, fullscreen: false });
   const [displays, setDisplays] = useState<DiagnosticsSnapshot['displays']>([]);
   const [draft, setDraft] = useState('');
@@ -60,10 +47,12 @@ export function Workspace(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [listening, setListening] = useState(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [recentOutcome, setRecentOutcome] = useState<TaskRecord | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottom = useRef(true);
+  const knownTasks = useRef(new Map<string, TaskRecord>());
   const activeMode = settings.companion.mode;
-  const activeTask = useMemo(() => tasks.find((task) => ['running','planning','pause_requested','awaiting_approval','awaiting_user','paused','blocked','cancelling'].includes(task.status)) ?? tasks[0] ?? null, [tasks]);
+  const activeTask = useMemo(() => selectActiveTask(tasks), [tasks]);
   const title = chat.historyLoading ? 'Restoring conversation…' : history.find((item) => item.id === chat.conversationId)?.title ?? 'New conversation';
 
   useEffect(() => {
@@ -103,8 +92,23 @@ export function Workspace(): React.JSX.Element {
     if (bridge.kind !== 'ready') return;
     const api = bridge.bridge.tasks;
     let alive = true;
-    const unsubscribe = safeSubscribe<TaskRecord>(api.onUpdate, (next) => setTasks((current) => mergeTask(current, next)));
-    void api.list().then((items) => { if (alive) setTasks(items.sort((a,b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))); }).catch(() => undefined);
+    const unsubscribe = safeSubscribe<TaskRecord>(api.onUpdate, (next) => {
+      const previous = knownTasks.current.get(next.id);
+      knownTasks.current.set(next.id, next);
+      if (previous && isTaskActive(previous) && !isTaskActive(next)) setRecentOutcome(next);
+      else if (isTaskActive(next)) setRecentOutcome(null);
+      setTasks((current) => mergeTask(current, next));
+    });
+    void api.list().then((items) => {
+      if (!alive) return;
+      const merged = new Map(items.map((item) => [item.id, item]));
+      for (const [id, current] of knownTasks.current) {
+        const listed = merged.get(id);
+        if (!listed || taskTimestamp(current) >= taskTimestamp(listed)) merged.set(id, current);
+      }
+      knownTasks.current = merged;
+      setTasks([...merged.values()].sort((a, b) => taskTimestamp(b) - taskTimestamp(a)));
+    }).catch(() => undefined);
     return () => { alive = false; unsubscribe(); };
   }, [bridge]);
 
@@ -139,14 +143,25 @@ export function Workspace(): React.JSX.Element {
     return () => { alive = false; };
   }, [bridge]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = scrollRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [chat.messages.length, chat.content, chat.reasoning]);
+    if (node && shouldStickToBottom.current) node.scrollTop = node.scrollHeight;
+  }, [chat.messages.length, chat.content, chat.reasoning, recentOutcome]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'F11' || bridge.kind !== 'ready') return;
+      event.preventDefault();
+      void bridge.bridge.window.setWorkspaceFullscreen(!windowState.fullscreen);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [bridge, windowState.fullscreen]);
 
   const openNewChat = useCallback(async () => {
+    shouldStickToBottom.current = true;
     const created = await chat.newConversation();
-    if (created) { setDraft(''); setAttachments([]); setView('chat'); }
+    if (created) { setDraft(''); setAttachments([]); setRecentOutcome(null); setContextOpen(false); setView('chat'); }
   }, [chat.newConversation]);
 
   const chooseMode = useCallback((next: Mode) => {
@@ -157,11 +172,11 @@ export function Workspace(): React.JSX.Element {
   const submit = useCallback(async () => {
     if (chat.streaming || (draft.trim() === '' && attachments.length === 0) || bridge.kind !== 'ready') return;
     if (stopped) { setNotice('Emergency stop is active. Clear it before starting another task.'); return; }
+    shouldStickToBottom.current = true;
     const sent = await chat.send({ text: draft, images: attachments, mode: activeMode });
     if (sent) { setDraft(''); setAttachments([]); setView('chat'); }
   }, [activeMode, attachments, bridge, chat, draft, stopped]);
 
-  const attachImage = useCallback(() => fileRef.current?.click(), []);
   const attachScreenshot = useCallback(async () => {
     if (bridge.kind !== 'ready') return;
     try {
@@ -207,8 +222,36 @@ export function Workspace(): React.JSX.Element {
   }, [bridge, stopped]);
 
   const openConversation = useCallback(async (id: string) => {
-    if (await chat.openConversation(id)) setView('chat');
+    shouldStickToBottom.current = true;
+    if (await chat.openConversation(id)) { setRecentOutcome(null); setContextOpen(false); setView('chat'); }
   }, [chat.openConversation]);
+
+  const renameConversation = useCallback(async (id: string, nextTitle: string): Promise<boolean> => {
+    if (bridge.kind !== 'ready') return false;
+    try {
+      const updated = await bridge.bridge.history.rename(id, nextTitle);
+      if (!updated) return false;
+      setHistory((current) => current.map((item) => item.id === id ? updated : item));
+      return true;
+    } catch {
+      setNotice('Pixel could not rename that chat.');
+      return false;
+    }
+  }, [bridge]);
+
+  const deleteConversation = useCallback(async (id: string): Promise<boolean> => {
+    if (bridge.kind !== 'ready') return false;
+    try {
+      const deleted = await bridge.bridge.history.delete(id);
+      if (!deleted) return false;
+      setHistory((current) => current.filter((item) => item.id !== id));
+      if (chat.conversationId === id) await openNewChat();
+      return true;
+    } catch {
+      setNotice('Pixel could not delete that chat.');
+      return false;
+    }
+  }, [bridge, chat.conversationId, openNewChat]);
 
   const runSearch = useCallback((query: string) => {
     if (!query.trim() || bridge.kind !== 'ready' || !chat.conversationId) return;
@@ -217,16 +260,24 @@ export function Workspace(): React.JSX.Element {
 
   const currentProject = projects.find((project) => project.active);
 
+  const viewTitle: Record<WorkspaceView, string> = {
+    chat: 'Workspace', projects: 'Projects', tasks: 'Tasks & Activity', skills: 'Skills & Routines',
+    memory: 'Memory', tools: 'Tools', settings: 'Settings',
+  };
+  const pendingApproval = permission ? (
+    <div className="workspace-approval" aria-label="Approval required">
+      <PermissionCard request={permission} pending={permissionPending} onDecide={(decision) => void respondPermission(decision)} compact />
+    </div>
+  ) : null;
+
   return (
     <div className="workspace-shell" data-workspace>
       <header className="workspace-titlebar drag">
         <div className="flex min-w-0 items-center gap-2"><PixelMark size={22} /><span className="pixel-wordmark pixel-wordmark-large">PIXEL</span><span className="workspace-title-divider" />
-          <span className="truncate text-[13px] text-[var(--color-ink-soft)]">{view === 'chat' ? title : NAV.find((item) => item.id === view)?.label}</span>
+          <span className="truncate text-[13px] text-[var(--color-ink-soft)]">{viewTitle[view]}</span>
         </div>
         <div className="workspace-window-controls no-drag">
-          <button type="button" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setSidebarOpen((open) => !open)} title="Toggle navigation" className="workspace-window-button"><PanelLeftClose size={15} /></button>
-          <button type="button" aria-label={contextOpen ? 'Hide task panel' : 'Show task panel'} onClick={() => setContextOpen((open) => !open)} title="Toggle task panel" className="workspace-window-button"><PanelRightClose size={15} /></button>
-          <button type="button" aria-label={windowState.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.setWorkspaceFullscreen(!windowState.fullscreen); }} title="Fullscreen" className="workspace-window-button"><Maximize2 size={15} /></button>
+          <button type="button" aria-label={stopped ? 'Clear emergency stop' : 'Emergency stop'} aria-pressed={stopped} onClick={() => void toggleEmergency()} title={stopped ? 'Clear emergency stop' : 'Emergency stop'} className={`workspace-window-button workspace-emergency-control ${stopped ? 'is-active' : ''}`}><ShieldAlert size={15} /></button>
           <button type="button" aria-label={windowState.maximized ? 'Restore window' : 'Maximize window'} onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.toggleWorkspaceMaximize(); }} title={windowState.maximized ? 'Restore' : 'Maximize'} className="workspace-window-button">{windowState.maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
           <button type="button" aria-label="Minimize Pixel Workspace" onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.minimizeWorkspace(); }} className="workspace-window-button">—</button>
           <button type="button" aria-label="Close Pixel Workspace" onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.closeWorkspace(); }} className="workspace-window-button workspace-close-button"><X size={15} /></button>
@@ -234,45 +285,82 @@ export function Workspace(): React.JSX.Element {
       </header>
 
       <div className="workspace-body">
-        {sidebarOpen ? <aside className="workspace-sidebar">
-          <button type="button" className="workspace-new-chat" onClick={() => void openNewChat()} disabled={chat.streaming || chat.historyLoading}><Plus size={16} /> New chat</button>
-          <nav aria-label="Workspace navigation" className="mt-4 space-y-1">
-            {NAV.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setView(id)} className={`workspace-nav-item ${view === id ? 'is-active' : ''}`}><Icon size={16} /><span>{label}</span>{id === 'tasks' && tasks.some((task) => ['running','planning','awaiting_approval','paused'].includes(task.status)) ? <span className="workspace-nav-count">{tasks.filter((task) => ['running','planning','awaiting_approval','paused'].includes(task.status)).length}</span> : null}</button>)}
-          </nav>
-          <div className="mt-6 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-[.16em] text-[var(--color-ink-dim)]"><Clock3 size={12} /> Recent chats</div>
-          <label className="workspace-search mt-2"><Search size={13} /><input aria-label="Search chats" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Search chats" /></label>
-          <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
-            {history.length === 0 ? <p className="px-2 py-3 text-[11px] text-[var(--color-ink-dim)]">No matching conversations.</p> : history.map((item) => <button key={item.id} type="button" onClick={() => void openConversation(item.id)} className={`workspace-history-item ${chat.conversationId === item.id ? 'is-active' : ''}`}><span className="block truncate text-[12px]">{item.title}</span><span className="mt-1 block truncate text-[10px] text-[var(--color-ink-dim)]">{item.preview || 'No messages yet'}</span></button>)}
-          </div>
-          <div className="workspace-project-chip"><span className="h-1.5 w-1.5 rounded-full bg-cyan-300" /><span className="truncate">{currentProject?.name ?? 'Default project'}</span><button type="button" aria-label="Open project selector" onClick={() => setView('projects')}><ChevronDown size={13} /></button></div>
-        </aside> : null}
+        <WorkspaceSidebar
+          view={view}
+          onViewChange={setView}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          history={history}
+          selectedConversationId={chat.conversationId}
+          historySearch={historySearch}
+          onHistorySearchChange={setHistorySearch}
+          onOpenConversation={(id) => void openConversation(id)}
+          onNewChat={() => void openNewChat()}
+          onRenameConversation={renameConversation}
+          onDeleteConversation={deleteConversation}
+          currentProject={currentProject}
+          activeTaskCount={tasks.filter(isTaskActive).length}
+          disabled={chat.streaming || chat.historyLoading}
+        />
 
         <main className="workspace-main">
           {notice ? <div role="status" className="workspace-notice">{notice}<button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><X size={13} /></button></div> : null}
           {pendingMode ? <div className="workspace-mode-confirm" role="alertdialog" aria-label="Confirm agent mode"><div><strong>Switch to {getModeDescriptor(pendingMode).label}?</strong><p>{getModeDescriptor(pendingMode).summary} Pixel will still ask before every consequential action.</p></div><button type="button" onClick={() => setPendingMode(null)}>Cancel</button><button type="button" onClick={() => { setMode(pendingMode); setPendingMode(null); }}>Switch mode</button></div> : null}
+          {view !== 'chat' ? pendingApproval : null}
 
           {view === 'chat' ? <section className="workspace-conversation">
-            <div className="workspace-chat-heading"><div><h1>{title}</h1><p>{currentProject?.name ?? 'Default project'} · {chat.persistence === 'session' ? 'Session only' : 'Saved locally'}</p></div><div className="flex items-center gap-2"><ModeSwitcher current={activeMode} onRequestMode={chooseMode} variant="inline" /><button type="button" className="workspace-subtle-button" onClick={() => runSearch(window.prompt('Search the web for…') ?? '')}><Search size={14} /> Search web</button></div></div>
-            <div className="workspace-transcript selectable" ref={scrollRef} aria-label="Conversation">
-              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><div className="workspace-mark-halo"><PixelMark size={42} /></div><h2>What would you like to work on?</h2><p>Ask a question, explore an idea, or start an approved task.</p><div className="workspace-suggestions"><button type="button" onClick={() => setDraft('Summarize the key points of a topic for me.')}>Summarize a topic</button><button type="button" onClick={() => setDraft('Help me plan the next steps for my project.')}>Plan a project</button><button type="button" onClick={() => setDraft('Search the web for the latest information about ')}>Search the web</button></div></div> : null}
+            <WorkspaceConversationHeader
+              title={title}
+              projectName={currentProject?.name && currentProject.name !== 'Default project' ? currentProject.name : undefined}
+              currentMode={activeMode}
+              onRequestMode={chooseMode}
+              onSearchWeb={runSearch}
+              canSearch={bridge.kind === 'ready' && Boolean(chat.conversationId)}
+              hasTaskDetails={activeTask !== null}
+              onOpenTaskDetails={() => setContextOpen(true)}
+            />
+            {pendingApproval}
+            {activeTask ? <WorkspaceTaskActivity task={activeTask} onOpenDetails={() => setContextOpen(true)} /> : null}
+            {recentOutcome ? (() => {
+              const resultState = taskDisplayState(recentOutcome);
+              return <div className="workspace-recent-outcome" role="status">
+                <span>{resultState.verificationPending ? 'Awaiting verification' : resultState.label === 'failed' ? 'Task failed' : resultState.label === 'cancelled' ? 'Task stopped' : 'Task finished'}</span>
+                <span className="workspace-recent-outcome-title">{recentOutcome.result || recentOutcome.title}</span>
+                <button type="button" aria-label="Dismiss task result" onClick={() => setRecentOutcome(null)}><X size={14} /></button>
+              </div>;
+            })() : null}
+            <div
+              className="workspace-transcript selectable"
+              ref={scrollRef}
+              onScroll={(event) => {
+                const node = event.currentTarget;
+                shouldStickToBottom.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 96;
+              }}
+              aria-label="Conversation"
+            >
+              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><PixelMark size={35} /><h2>What can Pixel help with?</h2></div> : null}
               {chat.messages.map((message) => <article key={message.id} className={`workspace-message ${message.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
                 {message.role === 'assistant' ? <div className="workspace-message-mark"><PixelMark size={19} /></div> : null}
                 <div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>{message.role === 'user' ? 'You' : 'Pixel'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{message.aborted ? <span>Stopped</span> : null}</div>{message.error && !message.content ? <p role="alert" className="text-rose-200">{message.error}</p> : <MarkdownMessage text={message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')} />}{message.error && message.content ? <p role="alert" className="mt-2 text-rose-200">{message.error}</p> : null}</div>
               </article>)}
-              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="workspace-message-mark"><PixelMark size={19} /></div><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-cyan-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="mb-2 rounded-lg border border-violet-300/15 bg-violet-300/5 p-2"><summary className="cursor-pointer text-[12px] text-violet-200">Reasoning details</summary><p className="mt-2 whitespace-pre-wrap text-[12px] text-[var(--color-ink-dim)]">{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
+              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="workspace-message-mark"><PixelMark size={19} /></div><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-cyan-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
               {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
             </div>
-            <div className="workspace-composer">
-              {attachments.length ? <div className="flex flex-wrap gap-2 px-2 pt-2">{attachments.map((image,index) => <span key={`${image.label}-${index}`} className="workspace-attachment"><img src={image.dataUrl} alt="" /><span>{image.label ?? 'Image'}</span><button type="button" aria-label={`Remove ${image.label ?? 'image'}`} onClick={() => setAttachments((items) => items.filter((_,i) => i !== index))}><X size={12} /></button></span>)}</div> : null}
-              <textarea aria-label="Message Pixel" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder={bridge.kind === 'ready' ? 'Message Pixel…' : 'Desktop bridge unavailable'} disabled={bridge.kind !== 'ready' || chat.historyLoading} rows={1} className="workspace-composer-input selectable" />
-              <div className="workspace-composer-footer"><div className="flex items-center gap-1">
-                <IconButton label={listening ? 'Stop listening' : 'Voice input'} onClick={() => void toggleVoice()} active={listening}><Mic size={16} /></IconButton>
-                <IconButton label="Capture active window" onClick={() => void attachScreenshot()}><span className="text-xs">▣</span></IconButton>
-                <IconButton label="Attach images" onClick={attachImage}><Paperclip size={15} /></IconButton>
-                <span className="workspace-composer-hint">Enter to send · Shift+Enter for a new line</span>
-              </div><div className="flex items-center gap-2">{chat.streaming ? <button type="button" aria-label="Stop response" className="workspace-stop-button" onClick={chat.stop}><Square size={13} /> Stop</button> : <button type="button" aria-label="Send message" className="workspace-send-button" onClick={() => void submit()} disabled={!draft.trim() && attachments.length === 0}><ArrowUp size={17} /></button>}</div></div>
-              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="hidden" onChange={(event) => { const files = [...(event.target.files ?? [])].filter((file) => file.type.startsWith('image/')).slice(0, 4); for (const file of files) { const reader = new FileReader(); reader.onload = () => { if (typeof reader.result === 'string') setAttachments((items) => [...items, { dataUrl: reader.result as string, mimeType: file.type as ImageAttachment['mimeType'], width: 0, height: 0, source: 'upload' as const, label: file.name }].slice(0,4)); }; reader.readAsDataURL(file); } if (event.target.files?.length && !files.length) setNotice('Pixel can attach images in PNG, JPEG, WebP or GIF format.'); event.target.value = ''; }} />
-            </div>
+            <WorkspaceComposer
+              draft={draft}
+              onDraftChange={setDraft}
+              onSubmit={() => void submit()}
+              onStop={chat.stop}
+              streaming={chat.streaming}
+              disabled={bridge.kind !== 'ready' || chat.historyLoading}
+              attachments={attachments}
+              onAttach={(attachment) => setAttachments((items) => [...items, attachment].slice(0, 4))}
+              onRemoveAttachment={(index) => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+              onAttachScreenshot={() => void attachScreenshot()}
+              onToggleListening={() => void toggleVoice()}
+              listening={listening}
+              onNotice={setNotice}
+            />
           </section> : null}
 
           {view === 'projects' ? <ProjectsView projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /> : null}
@@ -283,19 +371,19 @@ export function Workspace(): React.JSX.Element {
           {view === 'settings' ? <div className="workspace-settings"><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={() => setView('chat')} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></div> : null}
         </main>
 
-        {contextOpen ? <aside className="workspace-context" aria-label="Task activity">
-          <div className="workspace-context-heading"><div><h2>Activity</h2><p>Shared with Pixel Island</p></div><button type="button" aria-label="Close activity panel" onClick={() => setContextOpen(false)}><PanelRightClose size={15} /></button></div>
-          {permission ? <div className="mb-3"><PermissionCard request={permission} pending={permissionPending} onDecide={(decision) => void respondPermission(decision)} compact /></div> : null}
-          {activeTask ? <div className="mb-3"><TaskStrip task={activeTask} compact onPause={() => taskAction('pause',activeTask.id)} onResume={() => taskAction('resume',activeTask.id)} onCancel={() => taskAction('cancel',activeTask.id)} onContinue={() => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(activeTask.id); }} /></div> : <div className="workspace-context-empty"><ListTodo size={18} /><p>No active task</p><span>Agent activity and approvals appear here.</span></div>}
-          {activeTask ? <div className="workspace-step-list"><h3>Execution steps</h3>{activeTask.steps.map((step) => <div className="workspace-step" key={step.id}><span className={`workspace-step-dot step-${step.status}`} /> <div><p>{step.title}</p><span>{step.detail ?? step.toolName ?? step.status}</span></div></div>)}</div> : null}
-          {stopped ? <button type="button" className="workspace-emergency is-active" onClick={() => void toggleEmergency()}><ShieldAlert size={15} /> Clear emergency stop</button> : <button type="button" className="workspace-emergency" onClick={() => void toggleEmergency()}><ShieldAlert size={15} /> Emergency stop</button>}
-        </aside> : null}
+        {contextOpen ? <WorkspaceTaskDetails
+          task={activeTask}
+          onClose={() => setContextOpen(false)}
+          onOpenTasks={() => { setView('tasks'); setContextOpen(false); }}
+          onPause={(id) => taskAction('pause', id)}
+          onResume={(id) => taskAction('resume', id)}
+          onCancel={(id) => taskAction('cancel', id)}
+          onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue this task.')); }}
+        /> : null}
       </div>
-      <footer className="workspace-statusbar"><span><i className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {bridge.kind === 'ready' ? 'Pixel is ready' : 'Desktop bridge unavailable'}</span><span>{settings.provider.primaryModel} · {getModeDescriptor(activeMode).label}{hasApiKey === false ? ' · API key not configured' : ''}</span></footer>
     </div>
   );
 }
-
 function ProjectsView({ projects, draft, setDraft, onSelect }: { projects: ProjectView[]; draft: string; setDraft: (value: string) => void; onSelect: (name: string) => void }): React.JSX.Element {
   return <section className="workspace-page"><div className="workspace-page-heading"><h1>Projects</h1><p>Each project has its own conversations and memory scope.</p></div><form className="workspace-create-project" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) onSelect(draft.trim()); }}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Create or open a project" aria-label="Project name" maxLength={80} /><button type="submit" disabled={!draft.trim()}><Plus size={15} /> Open project</button></form><div className="workspace-project-grid">{projects.map((project) => <button type="button" key={project.id} onClick={() => onSelect(project.name)} className={`workspace-project-card ${project.active ? 'is-active' : ''}`}><span className="workspace-project-icon"><FolderKanban size={18} /></span><span className="min-w-0 flex-1 text-left"><strong>{project.name}</strong><small>{project.description || (project.active ? 'Current project' : 'Project scope')}</small></span>{project.active ? <Check size={16} className="text-cyan-200" /> : null}</button>)}</div><p className="mt-4 text-[11px] text-[var(--color-ink-dim)]">Pixel stores project names and memory in its local SQLite database. Project deletion is not available in this build.</p></section>;
 }
@@ -303,13 +391,17 @@ function ProjectsView({ projects, draft, setDraft, onSelect }: { projects: Proje
 function TasksView({ tasks, audit, onAction, onContinue }: { tasks: TaskRecord[]; audit: AuditEntry[]; onAction: (action: 'pause'|'resume'|'cancel', id: string) => void; onContinue: (id: string) => void }): React.JSX.Element {
   const active = tasks.filter((task) => !['completed','failed','cancelled'].includes(task.status));
   const finished = tasks.filter((task) => ['completed','failed','cancelled'].includes(task.status));
-  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Tasks & Activity</h1><p>Durable task status, completed steps, approvals, and audit events.</p></div>{active.length ? <><h2 className="workspace-section-title">Active and waiting</h2><div className="workspace-task-grid">{active.map((task) => { const display = taskDisplayState(task); return <article className="workspace-task-card" key={task.id}><header><span className={`workspace-task-status status-${display.tone}`}>{display.verificationPending ? display.label : task.status.replaceAll('_',' ')}</span><time>{new Date(task.updatedAt ?? task.createdAt).toLocaleString()}</time></header><h3>{task.title}</h3>{task.request ? <p className="workspace-task-request">{task.request}</p> : null}<div className="workspace-task-steps">{task.steps.map((step) => <div key={step.id}><span className={`workspace-step-dot step-${step.status}`} /><span>{step.title}</span>{step.detail ? <small>{step.detail}</small> : null}</div>)}</div>{task.result ? <p className="workspace-task-result">{task.result}</p> : null}<footer>{task.status === 'running' || task.status === 'planning' ? <button type="button" onClick={() => onAction('pause',task.id)}>Pause</button> : null}{task.status === 'paused' ? <button type="button" onClick={() => onAction('resume',task.id)}>Resume</button> : null}{task.reobserveRequired ? <button type="button" onClick={() => onContinue(task.id)}>Continue after review</button> : null}{!['completed','failed','cancelled'].includes(task.status) ? <button className="danger" type="button" onClick={() => onAction('cancel',task.id)}>Cancel</button> : null}</footer></article>; })}</div></> : <div className="workspace-empty-card">No active tasks. Pixel will show approvals and agent execution here.</div>}{finished.length ? <><h2 className="workspace-section-title mt-6">Recent outcomes</h2><div className="workspace-task-grid">{finished.slice(0,12).map((task) => { const display = taskDisplayState(task); return <article className="workspace-task-card" key={task.id}><header><span className={`workspace-task-status status-${display.tone}`}>{display.verificationPending ? display.label : task.status}</span><time>{new Date(task.updatedAt ?? task.createdAt).toLocaleString()}</time></header><h3>{task.title}</h3>{display.verificationPending ? <p className="workspace-task-result">The action finished, but its postcondition still needs verification.</p> : task.result ? <p className="workspace-task-result">{task.result}</p> : <p className="text-[12px] text-[var(--color-ink-dim)]">No saved result.</p>}</article>; })}</div></> : null}<h2 className="workspace-section-title mt-6">Audit activity</h2><div className="workspace-audit-list">{audit.slice(0,30).map((entry) => <article key={entry.id}><span className={`audit-outcome outcome-${entry.outcome}`} /><div><p>{entry.summary}</p>{entry.detail ? <small>{entry.detail}</small> : null}</div><time>{new Date(entry.at).toLocaleTimeString()}</time></article>)}</div></section>;
+  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Tasks & Activity</h1><p>Task outcomes and audit activity.</p></div>{active.length ? <><h2 className="workspace-section-title">Active and waiting</h2><div className="workspace-task-grid">{active.map((task) => { const display = taskDisplayState(task); return <article className="workspace-task-card" key={task.id}><header><span className={`workspace-task-status status-${display.tone}`}>{display.verificationPending ? display.label : task.status.replaceAll('_',' ')}</span><time>{new Date(task.updatedAt ?? task.createdAt).toLocaleString()}</time></header><h3>{task.title}</h3>{task.request ? <p className="workspace-task-request">{task.request}</p> : null}<div className="workspace-task-steps">{task.steps.map((step) => <div key={step.id}><span className={`workspace-step-dot step-${step.status}`} /><span>{step.title}</span>{step.detail ? <small>{step.detail}</small> : null}</div>)}</div>{task.result ? <p className="workspace-task-result">{task.result}</p> : null}<footer>{task.status === 'running' || task.status === 'planning' ? <button type="button" onClick={() => onAction('pause',task.id)}>Pause</button> : null}{task.status === 'paused' ? <button type="button" onClick={() => onAction('resume',task.id)}>Resume</button> : null}{task.reobserveRequired ? <button type="button" onClick={() => onContinue(task.id)}>Continue after review</button> : null}{!['completed','failed','cancelled'].includes(task.status) ? <button className="danger" type="button" onClick={() => onAction('cancel',task.id)}>Cancel</button> : null}</footer></article>; })}</div></> : <div className="workspace-empty-card">No active tasks.</div>}{finished.length ? <><h2 className="workspace-section-title mt-6">Recent outcomes</h2><div className="workspace-task-grid">{finished.slice(0,12).map((task) => { const display = taskDisplayState(task); return <article className="workspace-task-card" key={task.id}><header><span className={`workspace-task-status status-${display.tone}`}>{display.verificationPending ? display.label : task.status}</span><time>{new Date(task.updatedAt ?? task.createdAt).toLocaleString()}</time></header><h3>{task.title}</h3>{display.verificationPending ? <p className="workspace-task-result">The action finished, but its postcondition still needs verification.</p> : task.result ? <p className="workspace-task-result">{task.result}</p> : <p className="text-[12px] text-[var(--color-ink-dim)]">No saved result.</p>}</article>; })}</div></> : null}<h2 className="workspace-section-title mt-6">Audit activity</h2><div className="workspace-audit-list">{audit.slice(0,30).map((entry) => <article key={entry.id}><span className={`audit-outcome outcome-${entry.outcome}`} /><div><p>{entry.summary}</p>{entry.detail ? <small>{entry.detail}</small> : null}</div><time>{new Date(entry.at).toLocaleTimeString()}</time></article>)}</div></section>;
 }
 
 function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element {
-  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Tools</h1><p>Capabilities currently registered with Pixel. Permission rules still apply to every run.</p></div><div className="workspace-tool-grid">{tools.map((tool) => <article key={tool.name} className="workspace-tool-card"><header><Wrench size={15} /><strong>{tool.name}</strong><span className={`risk risk-${tool.risk}`}>{tool.risk}</span></header><p>{tool.description}</p><footer>{tool.category}{tool.changesState ? ' · changes state' : ' · read only'}{tool.requiresApproval ? ' · approval required' : ''}</footer></article>)}</div></section>;
+  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Tools</h1><p>Available tools.</p></div><div className="workspace-tool-grid">{tools.map((tool) => <article key={tool.name} className="workspace-tool-card"><header><Wrench size={15} /><strong>{tool.name}</strong><span className={`risk risk-${tool.risk}`}>{tool.risk}</span></header><p>{tool.description}</p><footer>{tool.category}{tool.changesState ? ' · changes state' : ' · read only'}{tool.requiresApproval ? ' · approval required' : ''}</footer></article>)}</div></section>;
 }
 
 function mergeTask(current: TaskRecord[], next: TaskRecord): TaskRecord[] {
   return [next, ...current.filter((task) => task.id !== next.id)].sort((a,b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+}
+
+function taskTimestamp(task: TaskRecord): number {
+  return task.updatedAt ?? task.createdAt;
 }

@@ -378,6 +378,61 @@ that owns its visible top-level window.
 
 On a test profile, validate unpacked launch, portable launch, clean install, upgrade over the previous Pixel identity, uninstall and user-data preservation. Do not use the account's only data copy. Preserve the existing appId, NSIS GUID and legacy `%APPDATA%\cyps` migration behavior. Attach `scripts/diagnose-installer.ps1` output and startup logs when a case fails. SmartScreen reputation and signing status must be reported as observed; never promise them from a build artifact.
 
+## Conversation-first Workspace acceptance
+
+Run on the Windows laptop from the checkout under test. Close only that
+checkout's existing Pixel process before starting its dev build, so a
+single-instance handoff cannot send the test to a different installation.
+Do not use an already-open Pixel window from another checkout as evidence.
+
+1. Run `npm run typecheck`, `npm test`, and `npm run build`. Record the commit
+   SHA and the test totals from the output.
+2. Run `npm run dev`. Confirm the main startup log reaches `startup complete`,
+   the renderer and sandbox preload initialize, the floating Island appears,
+   and **Workspace** opens without a preload/native-bridge error.
+3. Confirm Workspace starts in a clean conversation with Recent Chats visible,
+   Library collapsed, no task-details side panel, a compact mode trigger, and a
+   one-line composer. Verify the emergency-stop control remains in the title
+   bar.
+4. At 1366×768 and 1920×1080, save a full Workspace screenshot to
+   `artifacts/windows-acceptance/workspace-1366x768.png` and
+   `artifacts/windows-acceptance/workspace-1920x1080.png`. If the monitor does
+   not support a requested mode, resize the Workspace window to that logical
+   size and record the actual display scale. Compare both images with the
+   supplied reference: the conversation should occupy most of the window, the
+   task panel should be absent by default, and no oversized mode selector or
+   stacked frosted rectangles should appear.
+5. Open and close Library; navigate to Projects, Tasks, Skills & Routines,
+   Memory, Tools and Settings. Collapse and expand the sidebar and verify each
+   destination remains reachable. Search recent chats, open one, start New
+   Chat, and restore the earlier conversation.
+6. Open the mode trigger. Confirm it shows only the current mode until clicked,
+   then displays all three choices in a viewport-bounded menu. Test arrows,
+   Home/End, Escape, outside click and focus return. Confirm a consequential
+   mode change still displays the existing confirmation.
+7. Type a long prompt. Verify the composer expands to its limit, then scrolls
+   internally. Confirm Enter sends, Shift+Enter inserts a line, attachments and
+   screenshot capture remain available, voice control responds, and Stop
+   cancels generation.
+8. Send one harmless Guide Mode conversation. Verify the response streams and
+   that a long transcript does not jump while you are reading above the bottom.
+   Use the header menu's Search the web flow and confirm it opens the configured
+   provider only after the user submits a query.
+9. Start a harmless task that requests approval. Confirm its action, target and
+   scope are readable inline with Allow/Deny controls. Deny it, then verify no
+   state change occurred. In a separate harmless task, approve once, confirm
+   inline status, open Details, and inspect the real step and postcondition.
+   Confirm that a pending verification is not labeled Completed. Cancel a
+   running task and confirm the emergency stop is immediately available.
+10. Close Workspace from its native close control. Confirm Pixel and the tray
+    continue running. Reopen Workspace and confirm conversation/task state is
+    synchronized. Repeat the same smoke against the unpacked app when available.
+
+Attach the two PNGs, startup log and a short result table to the release
+readiness report. Record Windows build, display scale, package type and pass/
+fail for every step. DOM tests and a browser preview do not substitute for this
+native Electron acceptance.
+
 ## UI Experience 2.0 — Checkpoint 1 panel-layout acceptance
 
 Run these steps in an interactive Windows session after building the current

@@ -11,6 +11,8 @@ interface ModeSwitcherProps {
   disabled?: boolean;
   /** Rendered as a popover under the bar rather than inline. */
   variant?: 'popover' | 'inline';
+  /** Anchors the popover to a compact Workspace header trigger. */
+  placement?: 'default' | 'anchored';
   onDismiss?: () => void;
   returnFocusRef?: RefObject<HTMLButtonElement | null>;
 }
@@ -29,6 +31,7 @@ export function ModeSwitcher({
   onRequestMode,
   disabled = false,
   variant = 'popover',
+  placement = 'default',
   onDismiss,
   returnFocusRef,
 }: ModeSwitcherProps) {
@@ -92,7 +95,9 @@ export function ModeSwitcher({
       data-layout-panel
       className={[
         isPopover
-          ? 'glass-raised animate-slide-down ml-11 mt-2 w-[288px] rounded-2xl p-2'
+          ? placement === 'anchored'
+            ? 'workspace-mode-popover w-[min(292px,calc(100vw-24px))] rounded-xl p-1.5'
+            : 'glass-raised animate-slide-down ml-11 mt-2 w-[288px] rounded-2xl p-2'
           : 'w-full rounded-2xl border border-[var(--color-glass-border)] bg-white/4 p-2',
       ].join(' ')}
     >

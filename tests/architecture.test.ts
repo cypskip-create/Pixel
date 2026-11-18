@@ -134,6 +134,24 @@ describe('shared Pixel Workspace', () => {
     expect(preload).toContain('workspaceSetFullscreen');
     expect(preload).not.toContain("contextBridge.exposeInMainWorld('electron'");
   });
+
+  it('starts in the conversation-first Workspace without exposing a stale activity panel', () => {
+    const workspace = readFileSync(join(SRC, 'renderer', 'Workspace.tsx'), 'utf8');
+    const header = readFileSync(join(SRC, 'renderer', 'components', 'WorkspaceConversationHeader.tsx'), 'utf8');
+    const styles = readFileSync(join(SRC, 'renderer', 'index.css'), 'utf8');
+    expect(workspace).toContain("useState<WorkspaceView>('chat')");
+    expect(workspace).toContain('useState(false)');
+    expect(workspace).toContain('selectActiveTask(tasks)');
+    expect(header).toContain('<CompactModeSelector');
+    expect(workspace).toContain('<WorkspaceComposer');
+    expect(workspace).toContain('<WorkspaceSidebar');
+    expect(workspace).toContain('onOpenTaskDetails={() => setContextOpen(true)}');
+    expect(workspace).toContain('system.emergencyStop');
+    expect(workspace).not.toContain('variant="inline"');
+    expect(workspace).not.toContain('window.prompt');
+    expect(styles).toContain('--workspace-surface: #0c1019');
+    expect(styles).toContain('background: var(--workspace-panel-solid)');
+  });
 });
 
 describe('chat history and browser search trust boundaries', () => {
