@@ -64,14 +64,26 @@ are used only once to infer their old display and are then cleared. If a saved
 display is unavailable, Pixel selects the primary display and persists that
 fallback. Display-add, removal and metrics events reapply the anchor.
 
-When enabled, the cursor companion is a separate 64×64 transparent BrowserWindow
-with the same sandboxed preload settings, `focusable: false`, `movable: false`,
-the ordinary `floating` always-on-top level and native click-through. Its
-renderer shows only the orb; the bridge has no new capabilities. The existing
-spring follower and work-area edge placement move this window at 30 Hz while
-the primary bar is idle. Opening the bar or an approval freezes the follower at
-its last point; disabling the setting closes the window and stops its timer.
-It does not capture screenshots or take a desktop-input lease.
+When enabled, the cursor companion is a separate 36×36 DIP transparent
+BrowserWindow containing 28×28 DIP pointer-character artwork. It uses the same
+sandboxed preload settings, `focusable: false`, `movable: false`, the ordinary
+`floating` always-on-top level and native click-through. The pointer hotspot is
+the placement anchor; its default visible gap is 8×8 DIP, capped at 12 DIP.
+Placement uses the current display's work area and flips horizontally or
+vertically near an edge with 8 DIP hysteresis. All positions use Electron's
+global logical-pixel coordinate space.
+
+The critically damped follower runs at 30 Hz only while the companion is
+visible, bounds native-window lag to 12 DIP, and skips native position writes
+while stationary. Pointer jumps of 160 DIP or more, monitor changes and pauses
+of 500 ms or more snap it to the current pointer target. Reduced motion also
+uses direct placement. The companion is visible only while the main Island is
+compact and idle. It is hidden while a Pixel Settings/Workspace window is open,
+the Island is expanded or hidden, or the session is locked/suspended. Returning
+to compact mode, closing Pixel windows or resuming the session repositions it
+at the current pointer before showing it. Disabling the feature closes the
+window and stops its timer. It does not capture screenshots or take a
+desktop-input lease.
 
 Settings exposes the pinned top-bar status, explicit display selection, a
 10–14 px top offset and the independent cursor-companion toggle with speed,
@@ -186,33 +198,35 @@ formats. Failed/completed task cards dismiss after four seconds without deleting
 their persisted task evidence. The Settings window is sized around its compact,
 internally scrolling panel.
 
-## Supplied P mark and dark surfaces
+## Supplied P mark and monochrome surfaces
 
 The user supplied the visual reference used for the Pixel mark. Its geometry is
 hand-traced once in [`src/shared/pixelMark.json`](../../src/shared/pixelMark.json):
-the block-built P, cyan upper-left tile, pale-aqua bowl, white inner square and
-the sparkle as a true negative-space cutout. [`PixelMark.tsx`](../../src/renderer/components/PixelMark.tsx)
-renders that same geometry in the collapsed island, toolbar wordmark lockup,
-composer, assistant responses, Settings and Workspace. `scripts/make-icon.mjs`
-uses it for the dark rounded Windows app tile; the native tray icon uses the
-mark alone with transparent surroundings so Windows can blend it with the tray.
-The cursor buddy stays a separate pointer character and uses the same cyan/aqua
-palette.
+the approved block-built P, original color master and sparkle as a true
+negative-space cutout. [`PixelMark.tsx`](../../src/renderer/components/PixelMark.tsx)
+renders the same master geometry in a grayscale variation for the collapsed
+Island, toolbar wordmark lockup, composer, assistant responses, Settings and
+Workspace. The master JSON is not recolored or recreated. Tray and Windows app
+icons continue to use that approved source asset. The cursor buddy stays a
+separate monochrome pointer character; it is not the Pixel P.
 
 The floating companion keeps a transparent native window so its rounded shape
-works over the desktop. On Windows both the companion and Workspace explicitly
-select the `none` system backdrop. The Island restores the reference navy panel
-fills (`0.88` primary and `0.95` raised), original borders and rounded corners.
-The companion and Workspace no longer apply CSS `backdrop-filter`. There is no
-blur or translucency-mode experiment to toggle. The lower companion toolbar is
-an unboxed row; the approved P mark and controls remain.
+works over the desktop; visible panels use opaque black/charcoal fills. The
+shared semantic palette is documented in
+[`PIXEL_DESIGN_TOKENS.md`](PIXEL_DESIGN_TOKENS.md). The Workspace and Island use
+the same grayscale tokens for surfaces, selected controls and state feedback.
+The companion and Workspace select the `none` system backdrop and do not apply
+CSS `backdrop-filter`, Mica or Acrylic. The lower companion toolbar remains an
+unboxed row; the approved P geometry and controls remain.
 
-The pre-rollback DWM readback showed Acrylic on Pixel and Mica on Workspace,
-which confirms that the previous system materials had been active. The restored
-build has not yet been visually checked on the target laptop. GPU acceleration
-is not disabled in production; `npm run dev:electron` retains `--disable-gpu`
-as the diagnostic launch, and `npm run dev:gpu` remains available for a
-separate normal-GPU check.
+The last observed development launch in this environment stopped before
+creating a Pixel window: Electron exited with `2147483651` (`0x80000003`) after
+the native helper compiled. The monochrome surfaces, cursor placement and
+GPU-enabled launch have not been visually verified here. GPU acceleration is
+not disabled in production; `npm run dev:electron` retains `--disable-gpu` as a
+diagnostic launch, and `npm run dev:gpu` remains available for a separate
+normal-GPU check. That earlier child-process failure has not been diagnosed
+and is not attributed to theme changes.
 
 ## Separate Pixel Workspace window
 

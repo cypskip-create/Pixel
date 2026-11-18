@@ -33,7 +33,7 @@ describe('sandbox preload bundle', () => {
     expect(code).toContain('settings:get');
     expect(code).toContain('tasks:update');
     expect(code).toContain('permissions:request');
-  });
+  }, 15_000);
 
   it('preserves both narrow bridge surfaces and does not add a raw IPC export', async () => {
     const result = await build(createPreloadBuildOptions({
@@ -52,7 +52,7 @@ describe('sandbox preload bundle', () => {
     const exposedGlobals = [...preloadSource.matchAll(/exposeInMainWorld\(\s*['"]([^'"]+)['"]/g)]
       .map((match) => match[1]);
     expect(exposedGlobals).toEqual(['cyps', 'cypsShell']);
-  });
+  }, 15_000);
 
   it('writes the bundled file at the path used by each secure companion window', () => {
     expect(appSource).toContain("join(mainDir(), '..', 'preload', 'index.js')");

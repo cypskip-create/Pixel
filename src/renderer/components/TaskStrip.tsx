@@ -36,16 +36,16 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 const STATUS_TONE: Record<TaskStatus, string> = {
-  planning: 'text-violet-200 border-violet-400/35 bg-violet-400/12',
-  running: 'text-amber-100 border-amber-400/35 bg-amber-400/12',
-  pause_requested: 'text-amber-100 border-amber-400/35 bg-amber-400/12',
-  awaiting_approval: 'text-amber-100 border-amber-400/45 bg-amber-400/18',
-  awaiting_user: 'text-sky-100 border-sky-300/45 bg-sky-400/14',
+  planning: 'text-neutral-200 border-neutral-400/35 bg-neutral-400/12',
+  running: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
+  pause_requested: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
+  awaiting_approval: 'text-neutral-100 border-neutral-400/45 bg-neutral-400/18',
+  awaiting_user: 'text-neutral-100 border-neutral-300/45 bg-neutral-400/14',
   paused: 'text-slate-200 border-slate-400/35 bg-slate-400/12',
-  blocked: 'text-rose-100 border-rose-400/40 bg-rose-400/14',
-  cancelling: 'text-amber-100 border-amber-400/35 bg-amber-400/12',
-  completed: 'text-emerald-100 border-emerald-400/35 bg-emerald-400/12',
-  failed: 'text-rose-100 border-rose-400/40 bg-rose-400/14',
+  blocked: 'text-neutral-100 border-neutral-400/40 bg-neutral-400/14',
+  cancelling: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
+  completed: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
+  failed: 'text-neutral-100 border-neutral-400/40 bg-neutral-400/14',
   cancelled: 'text-slate-300 border-slate-400/30 bg-slate-400/10',
 };
 
@@ -75,14 +75,14 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
     <section
       aria-label={`Task: ${task.title}`}
       data-layout-panel
-      className={`glass animate-slide-down flex ${compact ? 'w-full' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
+      className={`pixel-surface animate-slide-down flex ${compact ? 'w-full' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
     >
       <div
         aria-hidden="true"
         className="h-0.5 w-full bg-white/8"
       >
         <div
-          className="h-full bg-amber-300/80 transition-[width] duration-500 ease-out"
+          className="h-full bg-neutral-300/80 transition-[width] duration-500 ease-out"
           style={{ width: `${String(progress)}%` }}
         />
       </div>
@@ -136,12 +136,12 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
             ) : null}
           </span>
           {task.recoveryNote ? (
-            <span className="mt-0.5 block truncate text-[10px] text-amber-100/85" title={task.recoveryNote}>
+            <span className="mt-0.5 block truncate text-[10px] text-neutral-100/85" title={task.recoveryNote}>
               Interrupted after restart. Review the last step before continuing.
             </span>
           ) : null}
           {task.status === 'awaiting_user' && task.handoffReason ? (
-            <span className="mt-0.5 block truncate text-[10px] text-sky-100/85" title={task.handoffReason}>
+            <span className="mt-0.5 block truncate text-[10px] text-neutral-100/85" title={task.handoffReason}>
               {task.handoffReason}
             </span>
           ) : null}
@@ -158,7 +158,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
               onClick={onPause}
               aria-label="Pause task"
               title="Pause task"
-              className="rounded-full border border-[var(--color-glass-border)] bg-white/8 p-1.5 text-[var(--color-ink-soft)] hover:bg-white/16"
+              className="rounded-full border border-[var(--color-border)] bg-white/8 p-1.5 text-[var(--color-ink-soft)] hover:bg-white/16"
             >
               <Pause size={12} strokeWidth={2.6} aria-hidden="true" />
             </button>
@@ -167,7 +167,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
             <button
               type="button"
               onClick={onResume}
-              className="rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-1 text-[10.5px] font-semibold text-emerald-100 hover:bg-emerald-500/32"
+              className="rounded-full border border-neutral-400/40 bg-neutral-500/20 px-2 py-1 text-[10.5px] font-semibold text-neutral-100 hover:bg-neutral-500/32"
             >
               Resume
             </button>
@@ -176,7 +176,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
             <button
               type="button"
               onClick={onContinue}
-              className="rounded-full border border-sky-300/40 bg-sky-400/18 px-2 py-1 text-[10px] font-semibold text-sky-100 hover:bg-sky-400/28"
+              className="rounded-full border border-neutral-300/40 bg-neutral-400/18 px-2 py-1 text-[10px] font-semibold text-neutral-100 hover:bg-neutral-400/28"
             >
               Recheck and continue
             </button>
@@ -185,7 +185,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-full border border-rose-400/40 bg-rose-500/18 px-2 py-1 text-[10.5px] font-semibold text-rose-100 hover:bg-rose-500/32"
+              className="rounded-full border border-neutral-400/40 bg-neutral-500/18 px-2 py-1 text-[10.5px] font-semibold text-neutral-100 hover:bg-neutral-500/32"
             >
               Cancel
             </button>
@@ -208,7 +208,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
       </div>
 
       {open ? (
-        <ol className="selectable max-h-48 overflow-y-auto border-t border-[var(--color-glass-border)] px-2.5 py-2">
+        <ol className="selectable max-h-48 overflow-y-auto border-t border-[var(--color-border)] px-2.5 py-2">
           {task.steps.length === 0 ? (
             <li className="py-1 text-[11px] text-[var(--color-ink-dim)]">
               Pixel has not planned any steps yet.
@@ -233,7 +233,7 @@ export function TaskStrip({ task, onPause, onResume, onCancel, onContinue, compa
             </li>
           ) : null}
           {displayState.verificationPending ? (
-            <li className="pt-1 text-[10.5px] leading-relaxed text-amber-100/90">
+            <li className="pt-1 text-[10.5px] leading-relaxed text-neutral-100/90">
               The action finished, but its postcondition still needs verification.
             </li>
           ) : null}
@@ -248,13 +248,13 @@ function StepRow({ step, verificationPending }: { step: TaskStep; verificationPe
     <div className="flex items-start gap-2 py-1">
       <span aria-hidden="true" className="mt-0.5 text-[var(--color-ink-dim)]">
         {verificationPending ? (
-          <CircleDashed size={12} strokeWidth={2.2} className="text-amber-200" />
+          <CircleDashed size={12} strokeWidth={2.2} className="text-neutral-200" />
         ) : step.status === 'done' || step.status === 'verified' ? (
-          <Check size={12} strokeWidth={2.8} className={step.status === 'verified' ? 'text-emerald-300' : 'text-amber-200'} />
+          <Check size={12} strokeWidth={2.8} className={step.status === 'verified' ? 'text-neutral-300' : 'text-neutral-200'} />
         ) : step.status === 'running' ? (
-          <Loader2 size={12} strokeWidth={2.4} className="orb-spin text-amber-200" />
+          <Loader2 size={12} strokeWidth={2.4} className="orb-spin text-neutral-200" />
         ) : step.status === 'failed' ? (
-          <X size={12} strokeWidth={2.8} className="text-rose-300" />
+          <X size={12} strokeWidth={2.8} className="text-neutral-300" />
         ) : step.status === 'skipped' ? (
           <CircleSlash size={12} strokeWidth={2.4} className="text-slate-400" />
         ) : (
@@ -265,13 +265,13 @@ function StepRow({ step, verificationPending }: { step: TaskStep; verificationPe
         <span
           className={`block text-[11.5px] leading-snug ${
             verificationPending
-              ? 'text-amber-100'
+              ? 'text-neutral-100'
               : step.status === 'verified'
-              ? 'text-emerald-100'
+              ? 'text-neutral-100'
               : step.status === 'done'
               ? 'text-[var(--color-ink-dim)] line-through decoration-white/25'
               : step.status === 'failed'
-                ? 'text-rose-200'
+                ? 'text-neutral-200'
                 : 'text-[var(--color-ink-soft)]'
           }`}
         >
@@ -283,10 +283,10 @@ function StepRow({ step, verificationPending }: { step: TaskStep; verificationPe
           </span>
         ) : null}
         {verificationPending ? (
-          <span className="mt-0.5 block text-[9.5px] font-medium text-amber-200/90">Awaiting postcondition verification</span>
+          <span className="mt-0.5 block text-[9.5px] font-medium text-neutral-200/90">Awaiting postcondition verification</span>
         ) : null}
         {step.status === 'verified' ? (
-          <span className="mt-0.5 block text-[9.5px] font-medium text-emerald-200/85">Verified</span>
+          <span className="mt-0.5 block text-[9.5px] font-medium text-neutral-200/85">Verified</span>
         ) : null}
         {step.toolName !== undefined ? (
           <code className="mt-0.5 inline-block rounded bg-white/8 px-1 font-mono text-[9.5px] text-[var(--color-ink-dim)]">

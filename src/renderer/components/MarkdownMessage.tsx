@@ -54,7 +54,7 @@ function CodeBlock({ code, language }: { code: string; language: string }): Reac
     try { await navigator.clipboard.writeText(code); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
   };
   return (
-    <section className="overflow-hidden rounded-xl border border-white/10 bg-[#080c13]/90">
+    <section className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-app-bg)]">
       <header className="flex items-center gap-2 border-b border-white/8 px-3 py-1.5 text-[11px] text-[var(--color-ink-dim)]">
         <span className="flex-1">{language || 'Code'}</span>
         <IconButton label={copied ? 'Copied code' : 'Copy code'} onClick={() => void copy()}>{copied ? <Check size={13} /> : <Copy size={13} />}</IconButton>
@@ -73,12 +73,12 @@ function inline(value: string): React.ReactNode[] {
     const start = match.index ?? 0;
     if (start > last) result.push(value.slice(last, start));
     if (token.startsWith('**')) result.push(<strong key={start} className="font-semibold text-[var(--color-ink)]">{token.slice(2, -2)}</strong>);
-    else if (token.startsWith('`')) result.push(<code key={start} className="rounded bg-white/8 px-1 py-0.5 font-mono text-[0.92em] text-cyan-100">{token.slice(1, -1)}</code>);
+    else if (token.startsWith('`')) result.push(<code key={start} className="rounded bg-white/8 px-1 py-0.5 font-mono text-[0.92em] text-neutral-100">{token.slice(1, -1)}</code>);
     else if (token.startsWith('*')) result.push(<em key={start}>{token.slice(1, -1)}</em>);
     else {
       const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
       const href = safeExternalHttpUrl(link?.[2]);
-      result.push(href ? <a key={start} href={href} target="_blank" rel="noreferrer" className="text-cyan-200 underline decoration-cyan-300/40 underline-offset-2 hover:text-cyan-100">{link?.[1]}</a> : token);
+      result.push(href ? <a key={start} href={href} target="_blank" rel="noreferrer" className="text-neutral-200 underline decoration-neutral-300/40 underline-offset-2 hover:text-neutral-100">{link?.[1]}</a> : token);
     }
     last = start + token.length;
   }

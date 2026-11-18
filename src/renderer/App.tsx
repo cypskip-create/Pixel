@@ -106,7 +106,7 @@ function SettingsWindow(): React.JSX.Element {
   }, []);
 
   return (
-    <div className="flex min-h-screen w-full justify-center bg-[var(--color-glass-raised)] p-3 text-[var(--color-ink)]">
+    <div className="flex min-h-screen w-full justify-center bg-[var(--color-surface-raised)] p-3 text-[var(--color-ink)]">
       <SettingsPanel
         settings={settings}
         displays={displays}
@@ -127,23 +127,26 @@ function SettingsWindow(): React.JSX.Element {
 function CursorCompanionWindow(): React.JSX.Element {
   const bridge = readBridge();
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [orientation, setOrientation] = useState({ flipX: false, flipY: false });
 
   useEffect(() => {
     if (bridge.kind !== 'ready') return;
     let mounted = true;
     const unsubscribe = safeSubscribe<boolean>(bridge.bridge.window.onCursorMotion, setReducedMotion);
+    const unsubscribePlacement = safeSubscribe<{ flipX: boolean; flipY: boolean }>(bridge.bridge.window.onCursorPlacement, setOrientation);
     void bridge.bridge.settings.get().then((settings) => {
       if (mounted) setReducedMotion(settings.companion.reducedMotion);
     }).catch(() => undefined);
     return () => {
       mounted = false;
       unsubscribe();
+      unsubscribePlacement();
     };
   }, [bridge]);
 
   return (
     <div aria-hidden="true" className={`${reducedMotion ? 'reduce-motion' : 'motion-ok'} pointer-events-none grid h-screen w-screen place-items-center bg-transparent`}>
-      <CursorBuddy reducedMotion={reducedMotion} />
+      <CursorBuddy reducedMotion={reducedMotion} {...orientation} />
     </div>
   );
 }
@@ -928,7 +931,7 @@ function Companion(): React.JSX.Element {
       {bridge.kind === 'missing' ? (
         <div
           role="alert"
-          className="mx-3 flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-500/12 px-3 py-2 text-[12px] text-amber-100"
+          className="mx-3 flex items-start gap-2 rounded-xl border border-neutral-400/30 bg-neutral-500/12 px-3 py-2 text-[12px] text-neutral-100"
         >
           <WifiOff aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <span>
@@ -947,7 +950,7 @@ function Companion(): React.JSX.Element {
           aria-label={pushToTalkState !== 'idle' ? pushToTalkLabel
             : `Open Pixel. ${island.state === 'RESPONSE_AVAILABLE' ? 'A response is ready. ' : ''}Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className="glass group relative grid h-[38px] w-[138px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.025] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
+          className="pixel-surface group relative grid h-[38px] w-[138px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.025] focus-visible:ring-2 focus-visible:ring-neutral-400/70 cursor-pointer"
         >
           {pushToTalkState === 'recording' ? (
             <span className="island-ptt-indicator" aria-hidden="true">
@@ -960,7 +963,7 @@ function Companion(): React.JSX.Element {
           ) : (
             <>
               <PixelMark size={19} />
-              <span aria-hidden="true" className="absolute bottom-[7px] right-[48px] rounded-full border-2 border-[var(--color-glass)]"><Avatar state={compactAssistantState} size={9} /></span>
+              <span aria-hidden="true" className="absolute bottom-[7px] right-[48px] rounded-full border-2 border-[var(--color-surface)]"><Avatar state={compactAssistantState} size={9} /></span>
             </>
           )}
         </button>
@@ -974,7 +977,7 @@ function Companion(): React.JSX.Element {
             <div
               role="alert"
               data-layout-panel
-              className="flex w-full max-w-[460px] items-center justify-between gap-2 rounded-xl border border-rose-400/35 bg-rose-500/15 px-3 py-2 text-[12px] text-rose-100"
+              className="flex w-full max-w-[460px] items-center justify-between gap-2 rounded-xl border border-neutral-400/35 bg-neutral-500/15 px-3 py-2 text-[12px] text-neutral-100"
             >
               <span className="flex items-center gap-1.5">
                 <ShieldAlert aria-hidden="true" className="size-4" />
@@ -983,7 +986,7 @@ function Companion(): React.JSX.Element {
               <button
                 type="button"
                 onClick={clearStop}
-                className="rounded-md border border-rose-300/40 px-2 py-0.5 font-medium hover:bg-rose-400/20"
+                className="rounded-md border border-neutral-300/40 px-2 py-0.5 font-medium hover:bg-neutral-400/20"
               >
                 Clear
               </button>
@@ -1024,7 +1027,7 @@ function Companion(): React.JSX.Element {
               role="alertdialog"
               aria-label="Confirm mode change"
               data-layout-panel
-              className="w-full max-w-[460px] rounded-2xl border border-amber-400/35 bg-[var(--color-glass-raised)] p-3 text-[12px] text-[var(--color-ink)]"
+              className="w-full max-w-[460px] rounded-2xl border border-neutral-400/35 bg-[var(--color-surface-raised)] p-3 text-[12px] text-[var(--color-ink)]"
             >
               <p className="mb-1 font-semibold">
                 Switch to {getModeDescriptor(pendingMode).label}?
@@ -1044,7 +1047,7 @@ function Companion(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={confirmMode}
-                  className="rounded-md border border-amber-300/40 bg-amber-400/20 px-2.5 py-1 font-medium hover:bg-amber-400/30"
+                  className="rounded-md border border-neutral-300/40 bg-neutral-400/20 px-2.5 py-1 font-medium hover:bg-neutral-400/30"
                 >
                   Switch to {getModeDescriptor(pendingMode).label}
                 </button>
@@ -1122,7 +1125,7 @@ function Companion(): React.JSX.Element {
                 aria-label="Recent chats"
                 aria-expanded={historyOpen}
                 disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null || bridge.kind !== 'ready'}
-                className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-sky-400/70 disabled:opacity-40 ${historyOpen ? 'bg-sky-300/12 text-sky-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
+                className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-neutral-400/70 disabled:opacity-40 ${historyOpen ? 'bg-neutral-300/12 text-neutral-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
               >
                 <History aria-hidden="true" className="size-3.5" />
               </button>
@@ -1130,7 +1133,7 @@ function Companion(): React.JSX.Element {
                 type="button"
                 onClick={openWorkspace}
                 aria-label="Open Pixel Workspace"
-                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-sky-300/12 hover:text-sky-200 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-300/12 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
               >
                 <LayoutDashboard aria-hidden="true" className="size-3.5" />
               </button>
@@ -1138,7 +1141,7 @@ function Companion(): React.JSX.Element {
                 type="button"
                 onClick={openSettings}
                 aria-label="Pixel settings"
-                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)] focus-visible:ring-2 focus-visible:ring-sky-400/70"
+                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)] focus-visible:ring-2 focus-visible:ring-neutral-400/70"
               >
                 <Settings aria-hidden="true" className="size-3.5" />
               </button>
@@ -1147,7 +1150,7 @@ function Companion(): React.JSX.Element {
                   type="button"
                   onClick={chat.stop}
                   aria-label="Stop answering"
-                  className="grid size-6 place-items-center rounded-md text-rose-200 hover:bg-rose-500/20 focus-visible:ring-2 focus-visible:ring-rose-400/70"
+                  className="grid size-6 place-items-center rounded-md text-neutral-200 hover:bg-neutral-500/20 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
                 >
                   <Square aria-hidden="true" className="size-3" />
                 </button>
@@ -1156,7 +1159,7 @@ function Companion(): React.JSX.Element {
                 type="button"
                 onClick={emergencyStop}
                 aria-label="Emergency stop: block all further actions"
-                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-rose-500/20 hover:text-rose-200 focus-visible:ring-2 focus-visible:ring-rose-400/70"
+                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-500/20 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
               >
                 <ShieldAlert aria-hidden="true" className="size-3.5" />
               </button>

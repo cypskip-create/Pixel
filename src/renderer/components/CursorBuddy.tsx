@@ -1,18 +1,23 @@
-export function CursorBuddy({ reducedMotion = false }: { reducedMotion?: boolean }): React.JSX.Element {
+export function CursorBuddy({
+  reducedMotion = false,
+  flipX = false,
+  flipY = false,
+}: { reducedMotion?: boolean; flipX?: boolean; flipY?: boolean }): React.JSX.Element {
   return (
     <svg
       aria-hidden="true"
-      viewBox="0 0 64 64"
+      viewBox="0 0 32 32"
       className={reducedMotion ? 'cursor-buddy cursor-buddy-reduced' : 'cursor-buddy'}
-      width="54"
-      height="54"
+      width="28"
+      height="28"
       focusable="false"
     >
-      <path d="M10 5.5 54 34.4 34.4 37.7 43 54.5l-9.1 4.1-8.1-17.1-11.8 14.4Z" fill="#111927" stroke="#e8f7ff" strokeWidth="2.3" strokeLinejoin="round" />
-      <path d="m29.8 38.2 4.1-1.4 7.6 15.3-3.8 1.8Z" fill="#02F3FE" />
-      <circle cx="25.2" cy="26.1" r="2.2" fill="#b8f6ff" />
-      <circle cx="31.4" cy="29.4" r="1.6" fill="#b8f6ff" />
-      <path d="m18 18 2-4 2 4 4 2-4 2-2 4-2-4-4-2Z" fill="#73F9FD" />
+      <g transform={`translate(${flipX ? 32 : 0} ${flipY ? 32 : 0}) scale(${flipX ? -1 : 1} ${flipY ? -1 : 1})`}>
+        <path d="M2 2 28 18 17 20 22 30 16.5 32 12 22 5.5 29Z" fill="#0D0D0D" stroke="#0D0D0D" strokeWidth="3.2" strokeLinejoin="round" />
+        <path d="M2 2 28 18 17 20 22 30 16.5 32 12 22 5.5 29Z" fill="#0D0D0D" stroke="#F4F4F4" strokeWidth="1.25" strokeLinejoin="round" />
+        <circle cx="12.4" cy="13.4" r="1.05" fill="#D4D4D4" />
+        <circle cx="16.2" cy="15.6" r="0.8" fill="#D4D4D4" />
+      </g>
     </svg>
   );
 }

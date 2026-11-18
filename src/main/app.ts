@@ -335,12 +335,22 @@ export async function start(): Promise<void> {
   }, new PushToTalkReleaseWatcher({ executablePath: nativeHelperPath(), exists: existsSync }));
   shortcuts.apply(store.get());
   powerMonitor.on('suspend', () => {
+    windows?.setSessionLocked(true);
     shortcuts?.cancelPushToTalk();
     controller.cancelVoiceCapture();
   });
+  powerMonitor.on('resume', () => {
+    windows?.setSessionLocked(false);
+    windows?.refreshCursorCompanion();
+  });
   powerMonitor.on('lock-screen', () => {
+    windows?.setSessionLocked(true);
     shortcuts?.cancelPushToTalk();
     controller.cancelVoiceCapture();
+  });
+  powerMonitor.on('unlock-screen', () => {
+    windows?.setSessionLocked(false);
+    windows?.refreshCursorCompanion();
   });
 
   const mainWindow = windows.createMainWindow();

@@ -1,11 +1,49 @@
-# Interaction Engine 3.0 release-readiness report
+# Interaction Engine 3.0 release-readiness report (historical baseline)
+
+## Newer checkpoint — monochrome theme and cursor repair
+
+This report's Interaction Engine 3.0 measurements below predate the latest
+monochrome/cursor edits. The current working tree is on branch
+`codex/interaction-engine-3`, at local HEAD
+`7f10c058c70545f760923eb5b01b5da7764ca773`; these edits remain local and
+uncommitted. Its pre-edit tree matches reviewed `main` commit
+`fce3128f42dd540e15f85c13a300105727784e02` (tree
+`9ff6f70cd0b0dd92cfb22d50e89c7d6168460cf5`).
+
+- Current `npm run typecheck`: passed. Current full suite: **789 passed, 0
+  failed, 2 skipped (791 total; 46 files passed, 1 skipped)** with local browser
+  fixture access. The skipped cases are opt-in Windows foreground integration.
+  The NSIS preflight suite separately passed **9/9** in the Windows test
+  context.
+- Current `npm run build` and `npm run build:native`: passed. The latter
+  compiled `PixelNative.exe` and completed its protocol smoke.
+- Current `npm run test:preload-sandbox`: unverified because Electron 45.2.3
+  exited with `2147483651` (`0x80000003`) before creating its sandboxed smoke
+  window. A development launch in this host also exited before Pixel startup
+  logs or a visible window.
+- The new visual theme, cursor tracking/click-through, DPI behavior, Dynamic
+  Island focus/flicker, PTT, Settings, DeepSeek, task UI and packaged launch
+  remain **unverified on the target laptop**. The exact user-run procedure is
+  in [`PIXEL_WINDOWS_ACCEPTANCE.md`](PIXEL_WINDOWS_ACCEPTANCE.md).
+- Latest reviewed main (`fce3128f42dd540e15f85c13a300105727784e02`) passed
+  Windows CI run [#16](https://github.com/cypskip-create/Pixel/actions/runs/44328842235)
+  with its `windows` job successful. That run predates these local edits; no
+  CI run exists for the current uncommitted tree. The packaged
+  GPU/renderer-child-process issue remains a separate diagnosis.
+
+See [`PIXEL_DESIGN_TOKENS.md`](../architecture/PIXEL_DESIGN_TOKENS.md) for the
+palette and [`PROGRESS.md`](../../PROGRESS.md) for current detailed evidence.
+
+---
+
+## Historical Interaction Engine 3.0 baseline
 
 Date: 2026-11-18
 Branch: `codex/interaction-engine-3`
 Base commit: `b7ccac1fc17824317a1606f5b89bb61a13bbc52d`
 GitHub status: local-only; no push or release was made.
 
-## Readiness summary
+### Readiness summary at the time of the baseline
 
 The source implementation and automated regression suite are ready for laptop
 acceptance. This is **not yet a Windows release candidate that has passed GUI

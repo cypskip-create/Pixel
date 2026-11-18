@@ -315,7 +315,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     visualMode: 'stationary',
     cursorCompanionEnabled: false,
     followSpeed: 1,
-    cursorOffset: { x: 22, y: 20 },
+    cursorOffset: { x: 8, y: 8 },
     animations: 'full',
     transientMode: false,
     transientIdleMs: 2500,
@@ -405,10 +405,12 @@ export function sanitiseCompanion(c: CompanionSettings): void {
   c.followSpeed = finiteWithin(c.followSpeed, 0.25, 3, d.followSpeed);
   c.transientIdleMs = finiteWithin(c.transientIdleMs, 1000, 30_000, d.transientIdleMs);
   const offset = c.cursorOffset as { x?: unknown; y?: unknown } | null | undefined;
-  c.cursorOffset = {
-    x: finiteWithin(offset?.x, -200, 200, d.cursorOffset.x),
-    y: finiteWithin(offset?.y, -200, 200, d.cursorOffset.y),
-  };
+  const legacyDefaultOffset = offset?.x === 22 && offset?.y === 20;
+  const x = finiteWithin(legacyDefaultOffset ? undefined : offset?.x, -12, 12, d.cursorOffset.x);
+  const y = finiteWithin(legacyDefaultOffset ? undefined : offset?.y, -12, 12, d.cursorOffset.y);
+  const magnitude = Math.hypot(x, y);
+  const scale = magnitude > 12 ? 12 / magnitude : 1;
+  c.cursorOffset = { x: x * scale, y: y * scale };
   c.transientMode = c.transientMode === true;
 }
 
@@ -832,6 +834,7 @@ export interface CypsBridge {
     onFocusLost(handler: () => void): () => void;
     onSummon(handler: () => void): () => void;
     onCursorMotion(handler: (reducedMotion: boolean) => void): () => void;
+    onCursorPlacement(handler: (orientation: { flipX: boolean; flipY: boolean }) => void): () => void;
   };
   chat: {
     send(request: ChatRequest): Promise<{ requestId: string; persistence?: 'persistent' | 'session' }>;

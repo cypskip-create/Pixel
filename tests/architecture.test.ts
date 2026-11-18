@@ -149,10 +149,10 @@ describe('shared Pixel Workspace', () => {
     expect(workspace).toContain('system.emergencyStop');
     expect(workspace).not.toContain('variant="inline"');
     expect(workspace).not.toContain('window.prompt');
-    expect(styles).toContain('--workspace-surface: #151c28');
-    expect(styles).toContain('--workspace-panel: #1c2635');
-    expect(styles).toContain('--workspace-panel-solid: #243144');
-    expect(styles).toContain('--workspace-hover: #2c3b51');
+    expect(styles).toContain('--workspace-surface: var(--color-app-bg)');
+    expect(styles).toContain('--workspace-panel: var(--color-sidebar)');
+    expect(styles).toContain('--workspace-panel-solid: var(--color-surface-raised)');
+    expect(styles).toContain('--workspace-hover: var(--color-hover)');
     expect(styles).toContain('background: var(--workspace-panel-solid)');
   });
 });

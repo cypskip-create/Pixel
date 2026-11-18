@@ -48,7 +48,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
       aria-modal="false"
       aria-labelledby={`perm-title-${request.id}`}
       aria-describedby={`perm-body-${request.id}`}
-      className={`glass-raised animate-pop flex ${compact ? 'w-full' : 'w-[460px]'} flex-col gap-2.5 rounded-[var(--cyps-radius)] border-amber-300/25 p-3`}
+      className={`pixel-surface-raised animate-pop flex ${compact ? 'w-full' : 'w-[460px]'} flex-col gap-2.5 rounded-[var(--cyps-radius)] border-neutral-300/25 p-3`}
     >
       <header className="flex items-start gap-2.5">
         <span
@@ -78,14 +78,14 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
           <p className="mt-1 text-[11px] text-[var(--color-ink-dim)]">
             {RISK_SENTENCE[request.risk]}
             {request.changesData ? (
-              <span className="ml-1 font-medium text-amber-200">Changes saved data.</span>
+              <span className="ml-1 font-medium text-neutral-200">Changes saved data.</span>
             ) : null}
           </p>
         </div>
       </header>
 
       {argumentEntries.length > 0 ? (
-        <div className="rounded-xl border border-[var(--color-glass-border)] bg-black/15">
+        <div className="rounded-xl border border-[var(--color-border)] bg-black/15">
           <button
             type="button"
             onClick={() => setDetailsOpen((open) => !open)}
@@ -125,7 +125,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
           disabled={pending}
           onClick={() => decide(true, 'once')}
           autoFocus
-          className="no-drag flex-1 rounded-xl border border-sky-400/40 bg-sky-500/25 px-3 py-2 text-[12px] font-semibold text-sky-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-sky-500/40 disabled:opacity-50"
+          className="no-drag flex-1 rounded-xl border border-neutral-400/40 bg-neutral-500/25 px-3 py-2 text-[12px] font-semibold text-neutral-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/40 disabled:opacity-50"
         >
           Allow once
         </button>
@@ -135,7 +135,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
             disabled={pending}
             onClick={() => decide(true, 'session')}
             title="Approve for the rest of this app session, limited to the displayed scope"
-            className="no-drag flex-1 rounded-xl border border-[var(--color-glass-border)] bg-white/8 px-3 py-2 text-[12px] font-semibold text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/16 hover:text-[var(--color-ink)] disabled:opacity-50"
+            className="no-drag flex-1 rounded-xl border border-[var(--color-border)] bg-white/8 px-3 py-2 text-[12px] font-semibold text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/16 hover:text-[var(--color-ink)] disabled:opacity-50"
           >
             Allow for session
           </button>
@@ -144,7 +144,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
           type="button"
           disabled={pending}
           onClick={() => decide(false, 'once')}
-          className="no-drag rounded-xl border border-rose-400/40 bg-rose-500/18 px-3 py-2 text-[12px] font-semibold text-rose-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-rose-500/32 disabled:opacity-50"
+          className="no-drag rounded-xl border border-neutral-400/40 bg-neutral-500/18 px-3 py-2 text-[12px] font-semibold text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/32 disabled:opacity-50"
         >
           Deny
         </button>

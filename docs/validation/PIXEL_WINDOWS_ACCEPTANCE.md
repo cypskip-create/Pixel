@@ -2,7 +2,74 @@
 
 This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that Pixel now starts on the target Windows laptop and its sandbox preload smoke test passes. This procedure includes the focused foreground-context integration. Record only behavior observed directly on the tested machine; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local build and test evidence.
 
-## Latest checkpoint: Interaction Engine 3.0 (2026-11-18)
+## Latest checkpoint: monochrome theme and cursor companion (2026-11-18)
+
+The renderer now uses a shared grayscale palette and the optional cursor
+character targets 28 DIP inside a 36 DIP click-through window. Geometry, theme
+tokens, settings migration and visibility rules have automated coverage. This
+Codex desktop could not create a Pixel window: after compiling `PixelNative.exe`,
+the Electron development child exited with `2147483651` (`0x80000003`) before
+Pixel startup logging or a target window. Therefore every visual, motion,
+focus/click-through and real-window lifecycle item below is **unverified** in
+this environment. Do not infer success from screenshots of another checkout.
+
+Automated evidence for this local tree: `npm run typecheck` passed; the full
+suite completed with **789 passed, 0 failed, 2 skipped (791 total; 46 files
+passed, 1 skipped)**; the NSIS preflight was **9/9 passed**; `npm run build`
+and `npm run build:native` passed. The two full-suite skips are opt-in real
+desktop foreground integration cases. `npm run test:preload-sandbox` did not
+reach its renderer: Electron 45.2.3 exited with `2147483651` (`0x80000003`).
+This host failure prevents visual acceptance; it does not count as a pass.
+
+### Monochrome appearance
+
+1. Run the `npm run dev` build on the target laptop. Capture the idle Island,
+expanded conversation, streaming response, finished response, Recent Chats,
+mode menu, recording waveform, Settings and Workspace.
+2. Repeat the floating captures over a white webpage, a dark webpage and the
+   desktop. Confirm opaque black/charcoal fills, neutral borders, no Acrylic,
+   Mica, blur or decorative gradients, and no distracting desktop content
+   bleeding through the Island.
+3. Confirm the black/charcoal hierarchy is consistent across sidebar,
+   navigation, messages, composer, menus, Settings, task status, approvals,
+   errors, success states and emergency stop. Check keyboard focus and text
+   contrast in dark and configured light modes.
+4. Compare the in-app monochrome P against the approved source geometry and
+   negative-space sparkle. Confirm its grayscale treatment does not change the
+   master asset used by native icons.
+
+### Cursor companion size, tracking and lifecycle
+
+1. Enable **Show cursor companion**. Confirm the artwork is 28 DIP in a 36 DIP
+   native window, appears close to the real pointer and does not compete with
+   it. Record the desktop DPI/scaling and monitor arrangement.
+2. Move the pointer slowly and quickly, stop abruptly, jump across the display,
+   move to all four corners and cross left/above monitors with negative virtual
+   coordinates. Verify it remains within the current work area, flips sides
+   without edge chatter, stays within the bounded gap, settles near the target
+   and does not progressively trail. Repeat at 100%, 125% and 150% scaling.
+3. While another app is focused, click through the character onto harmless
+   underlying controls. Confirm Pixel does not take focus or intercept clicks.
+   Verify no screenshots are captured by cursor tracking.
+4. Expand Pixel, show a permission card, open Settings and Workspace, hide the
+   Island, lock/suspend and resume. Confirm the character hides in each
+   suppressed state and reappears snapped to the current pointer only after
+   returning to compact idle. Disable it and confirm the window and timer stop.
+5. Verify Dynamic Island position, hover/click/leave, streaming geometry,
+   Recent Chats, conversation history, DeepSeek, browser search, Workspace,
+   approvals, PTT waveform and emergency stop are unchanged.
+
+Save screenshots for the surfaces/backgrounds and a short cursor-motion capture
+where possible. A still screenshot cannot prove tracking distance or click
+through. Record pass/fail/unverified per item; automated tests do not replace
+this desktop evidence.
+
+The dev command retains `--disable-gpu` as a diagnostic. If startup works, test
+`npm run dev:gpu` separately and preserve both logs. The packaged GPU/renderer
+child-process failure is a separate diagnosis; do not attribute it to this
+theme or assume this change fixed it.
+
+## Previous checkpoint: Interaction Engine 3.0 (2026-11-18)
 
 The implementation is present and automated checks cover the presentation
 reducer, fixed geometry, stream scrolling, shortcut dispatch, watcher release,
@@ -105,7 +172,7 @@ uses harmless stub IPC handlers and a test-only API-key placeholder. It writes
 `preload-sandbox-smoke.log` on success. A failure before the Electron app starts
 is an environment failure, not a pass.
 
-## Restored dark floating UI
+## Previous checkpoint: restored dark floating UI
 
 Use the rebuilt app on the target laptop and record a screenshot for each
 background. Close Pixel normally before launching a different build so the
@@ -120,9 +187,10 @@ single-instance lock does not redirect the launch to an older process.
 
 2. Observe Pixel over a white webpage, a dark webpage, then the desktop with
    other windows minimized. Save a screenshot at each state.
-3. Confirm the original navy panels are back, no grey frosted surfaces or blur
-   remain, desktop text does not show through distractingly, and the P mark,
-   rounded shape, compact alignment and button contrast are intact.
+3. Confirm opaque black/charcoal panels are present, no grey frosted surfaces
+   or blur remain, desktop text does not show through distractingly, and the
+   approved monochrome P mark, rounded shape, compact alignment and button
+   contrast are intact.
 4. Click another application to confirm it receives focus and input normally.
    Check the Island's menus, Recent Chats, Settings and approval controls. Open
    Workspace and confirm its layout, projects, tools, memory and task activity
@@ -202,16 +270,27 @@ If the build host sets `ELECTRON_RUN_AS_NODE`, remove it in that shell before te
 1. Start Pixel. Confirm the main pill is centered on the selected display and its top edge is 10–14 logical pixels below the work-area top. Expand the bar, open the mode selector and show a response/task panel; verify the center and top edge remain fixed.
 2. In Settings, select **Move to display** for every connected monitor. Confirm the bar moves to that display's work-area center. Restart Pixel and confirm the selected display is retained.
 3. Move **Top offset** between 10 px and 14 px. Confirm the bar follows the value without changing its horizontal center.
-4. Enable **Show cursor companion**. Confirm a separate orb follows while the top bar stays fixed. Click through the orb onto a harmless underlying control and verify the cursor window did not receive focus or intercept the click.
-5. Move the pointer near each work-area edge and across mixed-DPI monitors, including one left of the primary display. Confirm the follower stays inside the pointer's current display work area.
-6. Expand the bar and open an approval card. Confirm the follower pauses at its last position. Collapse to idle and verify it resumes.
-7. Enable reduced motion and confirm the cursor orb moves directly to each safe target without spring animation. Disable the cursor companion and confirm its window disappears without moving the pinned bar.
+4. Enable **Show cursor companion**. Confirm a 28 DIP character in a 36 DIP
+   native window follows at the pointer's configured 8×8 DIP offset. Click
+   through it onto a harmless control and confirm it does not take focus or
+   intercept the click.
+5. Move the pointer near every work-area edge and across mixed-DPI monitors,
+   including monitors left of or above the primary display. Confirm stable
+   flipping, bounded lag and correct placement within the current work area.
+6. Expand the Island, show a permission card, open Settings and Workspace, and
+   hide the Island. Confirm the character disappears instead of freezing at an
+   old desktop point. Return to compact idle and verify it snaps near the
+   current pointer before appearing.
+7. Lock/suspend and resume, change reduced-motion settings, then disable the
+   cursor companion. Confirm motion snaps when requested and its window/timer
+   stop without moving the pinned bar.
 8. Unplug the selected monitor. Confirm Pixel moves to the primary display and persists that fallback. Reconnect it, select it again and confirm restart behavior.
 
 Do not use old drag-position or **Follow cursor** steps: those controls were
 replaced by display anchoring and a separate passive cursor window. Automated
-geometry and settings tests do not prove native click-through or mixed-DPI
-behavior on a real desktop.
+geometry and settings tests do not prove artwork size, tracking distance,
+native click-through, visibility lifecycle or mixed-DPI behavior on a real
+desktop.
 
 The repository's previous environment report explains why a sandboxed Electron/Chromium process may fail before Pixel code runs: [Electron constraints](../ELECTRON-CONSTRAINTS.md). Treat that report as environment-specific; verify on the target laptop.
 
@@ -220,11 +299,11 @@ The repository's previous environment report explains why a sandboxed Electron/C
 Use the interactive Windows app after the development launch, then repeat the
 relevant checks with the unpacked build:
 
-1. Confirm the geometric P appears in the collapsed island, toolbar lockup,
-   composer, assistant response, Settings, Workspace, tray icon and Windows
-   app icon. Compare the cyan/aqua/white blocks and central sparkle cutout with
-   the supplied logo reference. The tray and app icon may use different
-   backgrounds, but must use the same P geometry.
+1. Confirm the grayscale geometric P appears in the Island, toolbar lockup,
+   composer, assistant response, Settings and Workspace. Compare the P geometry
+   and central sparkle cutout with the approved master; the renderer must not
+   reveal the cyan/aqua master colors. Tray and Windows app icons keep the
+   approved source geometry and platform asset treatment.
 2. Open **Pixel Workspace** from the island toolbar, the tray menu and the
    configured `CommandOrControl+Shift+P` shortcut. Confirm these open/focus the
    same Workspace window rather than creating duplicate assistant sessions.

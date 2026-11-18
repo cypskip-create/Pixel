@@ -17,6 +17,7 @@ import type { CompanionSettings, Surface } from '../shared/types';
 import type { WorkspaceWindowState } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { isTrustedRendererUrl } from './windowPolicy';
+import type { Point } from '../shared/companion/geometry';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
 import {
@@ -25,12 +26,18 @@ import {
   resolveAnchorDisplayId,
 } from '../shared/presentationLayout';
 import {
-  companionTarget,
+  CURSOR_WINDOW_SIZE,
   createFollower,
   DEFAULT_FOLLOW_CONFIG,
+  DEFAULT_PLACE_OPTIONS,
   isSettled,
+  placeCursorCompanion,
   settle,
-  stepFollower,
+  stepFollowerBounded,
+  shouldShowCursorCompanion,
+  shouldSnapCursorFollower,
+  type CursorPlacement,
+  type CursorOrientation,
 } from '../shared/companion/cursorFollow';
 import type { FollowState } from '../shared/companion/cursorFollow';
 
@@ -53,8 +60,6 @@ type PresentationSettings = Pick<
   'monitorId' | 'position' | 'topOffset' | 'cursorCompanionEnabled' | 'followSpeed' | 'cursorOffset' | 'reducedMotion'
 >;
 
-const CURSOR_WINDOW_SIZE = 64;
-
 export class WindowManager {
   private main: BrowserWindow | null = null;
   private settings: BrowserWindow | null = null;
@@ -63,16 +68,21 @@ export class WindowManager {
   private workspaceFocused = false;
   private mainVisibleRequested = true;
   private cursorWindow: BrowserWindow | null = null;
+  private cursorWindowReady = false;
   private surface: Surface = 'idle';
   private anchorDisplayId: string | null = null;
   private topOffset = DEFAULT_OFFSET_FROM_TOP;
   private cursorCompanionEnabled = false;
   private followSpeed = 1;
-  private cursorOffset = { x: 22, y: 20 };
+  private cursorOffset = { x: 8, y: 8 };
   private reducedMotion = false;
   private followTimer: ReturnType<typeof setInterval> | null = null;
   private follower: FollowState | null = null;
   private followTickAt = 0;
+  private previousCursor: Point | null = null;
+  private cursorDisplayId: number | null = null;
+  private cursorPlacement: CursorPlacement | null = null;
+  private sessionLocked = false;
   /** True while the UI asked for click-through (guidance overlay). */
   private ignoringMouse = false;
   private pendingSummon = false;
@@ -139,6 +149,7 @@ export class WindowManager {
         win.showInactive();
         this.deps.onVisibilityChange(true);
       }
+      this.syncCursorWindow();
     });
 
     win.on('blur', () => {
@@ -154,6 +165,7 @@ export class WindowManager {
     win.on('closed', () => {
       this.main = null;
       this.mainReady = false;
+      this.syncCursorWindow();
     });
 
     this.loadRenderer(win);
@@ -175,7 +187,7 @@ export class WindowManager {
       resizable: true,
       minimizable: true,
       maximizable: false,
-      backgroundColor: '#0b0d12',
+      backgroundColor: '#1b1b1b',
       autoHideMenuBar: true,
       webPreferences: {
         preload: this.deps.preloadPath,
@@ -186,9 +198,13 @@ export class WindowManager {
       },
     });
 
-    win.once('ready-to-show', () => win.show());
+    win.once('ready-to-show', () => {
+      win.show();
+      this.syncCursorWindow();
+    });
     win.on('closed', () => {
       this.settings = null;
+      this.syncCursorWindow(true);
     });
 
     this.loadRenderer(win, '?window=settings');
@@ -234,7 +250,7 @@ export class WindowManager {
       maximizable: true,
       fullscreenable: true,
       autoHideMenuBar: true,
-      backgroundColor: '#10141d',
+      backgroundColor: '#0d0d0d',
       ...(process.platform === 'win32' ? { backgroundMaterial: 'none' as const } : {}),
       webPreferences: {
         preload: this.deps.preloadPath,
@@ -370,6 +386,7 @@ export class WindowManager {
       win.hide();
       this.deps.onVisibilityChange(false);
     }
+    this.syncCursorWindow();
   }
 
   private restoreIslandAfterWorkspace(): void {
@@ -379,6 +396,7 @@ export class WindowManager {
       win.showInactive();
       this.deps.onVisibilityChange(true);
     }
+    this.syncCursorWindow(true);
   }
 
   private loadRenderer(win: BrowserWindow, query = ''): void {
@@ -414,14 +432,14 @@ export class WindowManager {
     this.surface = surface;
     const win = this.main;
     if (!win || win.isDestroyed()) {
-      this.syncCursorFollow();
+      this.syncCursorWindow();
       return;
     }
 
     if (surface === 'hidden') {
       win.hide();
       this.deps.onVisibilityChange(false);
-      this.syncCursorFollow();
+      this.syncCursorWindow();
       return;
     }
 
@@ -436,11 +454,12 @@ export class WindowManager {
       win.showInactive();
       this.deps.onVisibilityChange(true);
     }
-    this.syncCursorFollow();
+    this.syncCursorWindow();
   }
 
   /** Apply pinned-bar and independent cursor-companion settings. */
   setPresentationSettings(settings: PresentationSettings): void {
+    const offsetChanged = this.cursorOffset.x !== settings.cursorOffset.x || this.cursorOffset.y !== settings.cursorOffset.y;
     this.topOffset = settings.topOffset;
     this.followSpeed = settings.followSpeed;
     this.cursorOffset = settings.cursorOffset;
@@ -463,8 +482,7 @@ export class WindowManager {
       const target = anchoredTopCenterBounds(display.workArea, bounds, this.topOffset);
       if (!sameBounds(bounds, target)) win.setBounds(target, false);
     }
-    this.syncCursorWindow();
-    this.syncCursorFollow();
+    this.syncCursorWindow(offsetChanged);
   }
 
   /* ---------------------------- visibility ---------------------------- */
@@ -482,16 +500,17 @@ export class WindowManager {
       this.pendingSummon = false;
       win.webContents.send(CHANNELS.windowSummon);
     }
-    this.syncCursorWindow();
-    this.syncCursorFollow();
+    this.syncCursorWindow(true);
   }
 
   hide(): void {
     const win = this.main;
     this.mainVisibleRequested = false;
-    if (!win || win.isDestroyed()) return;
-    win.hide();
-    this.deps.onVisibilityChange(false);
+    if (win && !win.isDestroyed()) {
+      win.hide();
+      this.deps.onVisibilityChange(false);
+    }
+    this.syncCursorWindow();
   }
 
   toggle(): void {
@@ -534,30 +553,73 @@ export class WindowManager {
     if (this.settings && !this.settings.isDestroyed()) this.settings.close();
   }
 
-  private syncCursorWindow(): void {
+  private canShowCursorCompanion(): boolean {
+    const main = this.main;
+    return shouldShowCursorCompanion({
+      enabled: this.cursorCompanionEnabled,
+      surface: this.surface,
+      mainVisible: this.mainVisibleRequested && Boolean(main && !main.isDestroyed() && main.isVisible()),
+      workspaceFocused: this.workspaceFocused || Boolean(this.settings && !this.settings.isDestroyed() && this.settings.isVisible()),
+      sessionLocked: this.sessionLocked,
+    });
+  }
+
+  /** Refreshes cursor tracking after a power/display transition or settings change. */
+  refreshCursorCompanion(): void {
+    this.syncCursorWindow(true);
+  }
+
+  setSessionLocked(locked: boolean): void {
+    if (this.sessionLocked === locked) return;
+    this.sessionLocked = locked;
+    this.syncCursorWindow(true);
+  }
+
+  private syncCursorWindow(forceSnap = false): void {
     if (!this.cursorCompanionEnabled) {
       this.stopCursorFollow();
       if (this.cursorWindow && !this.cursorWindow.isDestroyed()) this.cursorWindow.close();
       this.cursorWindow = null;
+      this.cursorWindowReady = false;
+      this.cursorPlacement = null;
+      this.previousCursor = null;
+      this.cursorDisplayId = null;
       return;
     }
-    if (this.cursorWindow && !this.cursorWindow.isDestroyed()) return;
+
+    if (!this.canShowCursorCompanion()) {
+      this.stopCursorFollow();
+      if (this.cursorWindow && !this.cursorWindow.isDestroyed() && this.cursorWindow.isVisible()) {
+        this.cursorWindow.hide();
+      }
+      this.previousCursor = null;
+      this.cursorDisplayId = null;
+      return;
+    }
+
+    if (this.cursorWindow && !this.cursorWindow.isDestroyed()) {
+      if (!this.cursorWindowReady) return;
+      if (!this.cursorWindow.isVisible() || forceSnap) this.positionCursorCompanion(true);
+      if (!this.cursorWindow.isVisible()) this.cursorWindow.showInactive();
+      this.startCursorFollow();
+      return;
+    }
 
     const cursor = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(cursor);
-    const initial = companionTarget(cursor, display.workArea, {
+    const initial = placeCursorCompanion(cursor, display.workArea, {
+      ...DEFAULT_PLACE_OPTIONS,
       offset: this.cursorOffset,
-      size: { width: CURSOR_WINDOW_SIZE, height: CURSOR_WINDOW_SIZE },
-      margin: 8,
     });
     const win = new BrowserWindow({
-      x: Math.round(initial.x),
-      y: Math.round(initial.y),
+      x: Math.round(initial.position.x),
+      y: Math.round(initial.position.y),
       width: CURSOR_WINDOW_SIZE,
       height: CURSOR_WINDOW_SIZE,
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
+      ...(process.platform === 'win32' ? { backgroundMaterial: 'none' as const } : {}),
       resizable: false,
       movable: false,
       focusable: false,
@@ -581,16 +643,22 @@ export class WindowManager {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
     win.setIgnoreMouseEvents(true, { forward: true });
     win.once('ready-to-show', () => {
-      if (!win.isDestroyed() && this.cursorCompanionEnabled) {
-        win.showInactive();
-        this.cursorWindow = win;
-        this.startCursorFollow();
+      if (!win.isDestroyed()) {
+        this.cursorWindowReady = true;
+        this.syncCursorWindow(true);
       }
+    });
+    win.webContents.on('did-finish-load', () => {
+      if (this.cursorWindow === win) this.sendCursorPlacement();
     });
     win.on('closed', () => {
       if (this.cursorWindow === win) {
         this.cursorWindow = null;
+        this.cursorWindowReady = false;
         this.stopCursorFollow();
+        this.cursorPlacement = null;
+        this.previousCursor = null;
+        this.cursorDisplayId = null;
       }
     });
     this.loadRenderer(win, '?window=cursor');
@@ -598,13 +666,13 @@ export class WindowManager {
   }
 
   private startCursorFollow(): void {
-    if (!this.cursorCompanionEnabled || this.surface !== 'idle' || this.followTimer) return;
+    if (!this.canShowCursorCompanion() || this.followTimer) return;
     const win = this.cursorWindow;
-    if (!win || win.isDestroyed() || !win.isVisible()) return;
-    const [x, y] = win.getPosition();
-    this.follower = createFollower({ x, y });
+    if (!win || win.isDestroyed() || !win.isVisible() || !this.cursorWindowReady) return;
+    if (!this.follower) this.positionCursorCompanion(true);
     this.followTickAt = Date.now();
     // Poll only while the explicitly enabled click-through buddy is visible.
+    // Native position writes are skipped while stationary.
     this.followTimer = setInterval(() => this.tickCursorFollow(), 33);
     this.followTimer.unref?.();
   }
@@ -613,43 +681,85 @@ export class WindowManager {
     if (this.followTimer) clearInterval(this.followTimer);
     this.followTimer = null;
     this.follower = null;
+    this.followTickAt = 0;
   }
 
   private tickCursorFollow(): void {
     const win = this.cursorWindow;
-    if (!this.cursorCompanionEnabled || this.surface !== 'idle' || !win || win.isDestroyed() || !win.isVisible()) {
-      this.stopCursorFollow();
+    if (!this.canShowCursorCompanion() || !win || win.isDestroyed() || !win.isVisible()) {
+      this.syncCursorWindow();
       return;
     }
     const cursor = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(cursor);
-    const target = companionTarget(cursor, display.workArea, {
+    const placement = placeCursorCompanion(cursor, display.workArea, {
+      ...DEFAULT_PLACE_OPTIONS,
       offset: this.cursorOffset,
-      size: { width: CURSOR_WINDOW_SIZE, height: CURSOR_WINDOW_SIZE },
-      margin: 8,
-    });
+    }, this.cursorPlacement ?? undefined);
     const now = Date.now();
-    if (this.reducedMotion || !this.follower) {
-      this.follower = createFollower(target);
+    const displayChanged = this.cursorDisplayId !== null && this.cursorDisplayId !== display.id;
+    const snap = this.reducedMotion || shouldSnapCursorFollower({
+      cursor,
+      previousCursor: this.previousCursor,
+      elapsedMs: this.followTickAt === 0 ? Number.POSITIVE_INFINITY : now - this.followTickAt,
+      displayChanged,
+    });
+    if (snap || !this.follower) {
+      this.follower = createFollower(placement.position);
     } else {
-      this.follower = stepFollower(
+      this.follower = stepFollowerBounded(
         this.follower,
-        target,
+        placement.position,
         Math.min(0.1, Math.max(0, (now - this.followTickAt) / 1000)),
         { ...DEFAULT_FOLLOW_CONFIG, speed: this.followSpeed },
       );
-      if (isSettled(this.follower, target)) this.follower = settle(target);
+      if (isSettled(this.follower, placement.position)) this.follower = settle(placement.position);
     }
     this.followTickAt = now;
+    this.previousCursor = cursor;
+    this.cursorDisplayId = display.id;
+    this.updateCursorPlacement(placement);
     const nextX = Math.round(this.follower.position.x);
     const nextY = Math.round(this.follower.position.y);
     const [currentX, currentY] = win.getPosition();
-    if (Math.abs(nextX - currentX) > 1 || Math.abs(nextY - currentY) > 1) win.setPosition(nextX, nextY);
+    if (nextX !== currentX || nextY !== currentY) win.setPosition(nextX, nextY);
   }
 
-  private syncCursorFollow(): void {
-    if (this.cursorCompanionEnabled && this.surface === 'idle') this.startCursorFollow();
-    else this.stopCursorFollow();
+  private positionCursorCompanion(snap: boolean): void {
+    const win = this.cursorWindow;
+    if (!win || win.isDestroyed()) return;
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    const placement = placeCursorCompanion(cursor, display.workArea, {
+      ...DEFAULT_PLACE_OPTIONS,
+      offset: this.cursorOffset,
+    }, this.cursorPlacement ?? undefined);
+    const x = Math.round(placement.position.x);
+    const y = Math.round(placement.position.y);
+    const bounds = win.getBounds();
+    if (bounds.x !== x || bounds.y !== y) win.setPosition(x, y);
+    this.previousCursor = cursor;
+    this.cursorDisplayId = display.id;
+    if (snap || !this.follower) this.follower = createFollower(placement.position);
+    this.followTickAt = Date.now();
+    this.updateCursorPlacement(placement);
+  }
+
+  private updateCursorPlacement(placement: CursorPlacement): void {
+    if (this.cursorPlacement?.flipX === placement.flipX && this.cursorPlacement?.flipY === placement.flipY) return;
+    this.cursorPlacement = { ...placement, position: { ...placement.position } };
+    this.sendCursorPlacement();
+  }
+
+  private sendCursorPlacement(): void {
+    const win = this.cursorWindow;
+    if (!this.cursorPlacement || !win || win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isLoading()) return;
+    try {
+      const orientation: CursorOrientation = { flipX: this.cursorPlacement.flipX, flipY: this.cursorPlacement.flipY };
+      win.webContents.send(CHANNELS.windowCursorPlacement, orientation);
+    } catch {
+      // The renderer may be shutting down while the pointer is moving.
+    }
   }
 
   /* ------------------------------ displays ---------------------------- */
@@ -662,7 +772,7 @@ export class WindowManager {
         const bounds = win.getBounds();
         win.setBounds(anchoredTopCenterBounds(this.anchorDisplay().workArea, bounds, this.topOffset));
       }
-      this.syncCursorFollow();
+      this.syncCursorWindow(true);
     };
 
     // Re-anchor to the selected display; if it was removed, safely fall back.
@@ -710,6 +820,7 @@ export class WindowManager {
   }
 
   dispose(): void {
+    this.sessionLocked = true;
     this.stopCursorFollow();
     this.workspace?.close();
     this.workspace = null;
@@ -719,6 +830,7 @@ export class WindowManager {
     this.main = null;
     this.cursorWindow?.close();
     this.cursorWindow = null;
+    this.cursorWindowReady = false;
     for (const listener of this.displayListeners) {
       screen.removeListener('display-removed', listener);
       screen.removeListener('display-added', listener);

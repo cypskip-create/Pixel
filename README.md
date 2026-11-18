@@ -44,21 +44,23 @@ The separate Pixel Workspace opens from the island toolbar, tray menu or its
 configurable global shortcut. It shares the same main-process conversation,
 tasks, project memory, tools, permissions, settings and emergency stop; it does
 not start a second assistant engine. Its window size, maximized state and
-position are saved locally. The supplied cyan, aqua and white P mark is defined
-once in `src/shared/pixelMark.json` and reused by the renderer, tray and Windows
-app icon.
+position are saved locally. The approved P geometry and original color master
+are defined once in `src/shared/pixelMark.json`; the renderer uses a monochrome
+variation while tray and Windows app assets retain the master artwork.
 
 Workspace opens directly into the conversation. Recent chats stay in the
 sidebar, secondary areas live under Library, and execution details appear only
 when requested. Approval cards remain visible with the conversation; the mode
 selector and message composer stay compact until needed.
 
-Pixel uses the original dark navy panel colors inside its transparent floating
-window. Windows system backdrops and CSS backdrop blur are disabled; the rounded
-shape still comes from the transparent native window. The Workspace layout,
-controls, dark surfaces and all application features remain. `npm run dev:gpu`
-is available for separate GPU diagnostics; regular `npm run dev` continues to
-pass `--disable-gpu`.
+Pixel uses a shared black-and-charcoal monochrome design system across the
+Workspace and floating Island. Visible surfaces are opaque; Windows Acrylic,
+Mica and CSS backdrop blur are not used. The approved P geometry is rendered in
+grayscale within the app. `npm run dev:gpu` is available for separate GPU
+diagnostics; regular `npm run dev` continues to pass `--disable-gpu`. See the
+[design token reference](docs/architecture/PIXEL_DESIGN_TOKENS.md) and the
+[current validation report](docs/validation/INTERACTION_ENGINE_3_READINESS.md)
+for verified and unverified behavior.
 
 Type checks, automated tests and production builds do not prove the restored UI
 over real desktop content. The Windows visual comparison and packaged startup
