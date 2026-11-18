@@ -31,14 +31,6 @@ import { readBridge, safeSubscribe } from '@/lib/bridge';
 import { resolveSurface } from '@/lib/surface';
 import { Workspace } from '@/Workspace';
 
-// The main process selects the native backdrop and passes the matching visual
-// token with the trusted window URL. Other Pixel windows keep their own solid
-// or Mica surfaces.
-const pixelGlassMode = new URLSearchParams(window.location.search).get('pixel-glass');
-if (pixelGlassMode === 'acrylic' || pixelGlassMode === 'fallback') {
-  document.documentElement.dataset.pixelGlass = pixelGlassMode;
-}
-
 /** True when the renderer was opened as the settings window by the shell. */
 function isSettingsWindow(): boolean {
   return new URLSearchParams(window.location.search).get('window') === 'settings';
@@ -649,7 +641,7 @@ function Companion(): React.JSX.Element {
           }}
           aria-label={`Open Pixel. Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className="glass island-collapsed group relative grid h-[54px] w-[112px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
+          className="glass group relative grid h-[54px] w-[112px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.035] focus-visible:ring-2 focus-visible:ring-sky-400/70 cursor-pointer"
         >
           <PixelMark size={31} />
           <span aria-hidden="true" className="absolute bottom-[10px] right-[31px] rounded-full border-2 border-[var(--color-glass)]"><Avatar state={assistantState} size={12} /></span>
@@ -799,7 +791,7 @@ function Companion(): React.JSX.Element {
               disabled={bridge.kind !== 'ready' || chat.historyLoading || searchPending || historyOpen}
             />
 
-            <div className="glass-toolbar mt-1.5 flex items-center justify-center gap-1 rounded-full px-1.5 py-1">
+            <div className="mt-1.5 flex items-center justify-center gap-1">
               <span className="pixel-brand-lockup" aria-label="Pixel">
                 <PixelMark size={16} />
                 <span className="pixel-brand-divider" />

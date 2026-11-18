@@ -1,20 +1,22 @@
 # Pixel release readiness
 
-**Reviewed:** 2026-11-17 (glass and task verification repair)
+**Reviewed:** 2026-11-18 (original dark companion restoration)
 **Version:** 0.2.1
 **Branch:** `codex/ui-experience-2`
-**Current local HEAD:** `c090ec0cfe3d485fb234257e9ec2ccbaeffd72f3` (repair uncommitted)
-**Decision:** Type checks, the local production source build and automated tests pass, but Pixel is **not release-ready** because the edited UI has not been visually accepted on the laptop, the GPU-enabled package was not exercised, and GitHub Actions has not rerun with the local CI fixes. No commit or push was made.
+**Restoration base:** `0da5b8b53c0bd8fe0ba38106c794456e0a9d50d1` (this focused restoration change)
+**Decision:** Pixel is **not release-ready** until the restored floating UI is visually checked on Windows and the packaged GPU path is validated.
 
-## Current local evidence — glass repair and task verification status
+## Current local evidence — restored dark floating UI
 
-- `npm run typecheck`: passed.
-- `npm run build`: passed; main/preload, Vite production renderer and supplied P app icon generated.
-- Full Vitest suite: **722 passed, 0 failed, 26 skipped across 37 passed files and 1 skipped file (748 tests total)**. Skips: 17 Playwright Chromium cases, 7 NSIS cases, and 2 opt-in native foreground cases. Python document extraction ran and passed. The successful run used a disposable temporary `USERPROFILE` because this sandbox denies fixture writes to the real home directory. JUnit: [`artifacts/test-results/glass-repair-vitest.xml`](../../artifacts/test-results/glass-repair-vitest.xml).
-- The latest observed GitHub Windows run is run 7, id `44159366265` (PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`, containing the previous local head). It failed at tests: 10 document tests selected a hard-coded Python path from one developer machine, and one cancellation test checked worker startup after a fixed 50 ms sleep. Native-helper compilation and packaging were skipped after the suite failed. Local repair: provision Python 3.12 in CI, resolve an available test interpreter, and poll worker readiness to a bounded deadline. The workflow has not rerun because these changes are unpushed.
-- Windows readback before the CSS edit reported DWM Acrylic (type 3) for Pixel and Mica (type 2) for Workspace on build `26300.9974`; Windows transparency was enabled. The supplied image is a pre-fix screenshot showing near-opaque separated surfaces. This edited build has not been launched or captured on the laptop, so its visual acceptance is **unverified**.
-- Existing environment diagnostics show Electron/Chromium child-process and Crashpad “not connected” failures. They suggest an environment-level process-coordination constraint but do not establish the packaged GPU failure's cause on the target laptop. The GPU-enabled dev launcher and existing diagnostic `--disable-gpu` launcher are provided for a separate comparison. No GPU driver report or post-change package run is available.
-- No package, installer, native helper build, or interactive GUI acceptance was produced in this repair. Follow [`PIXEL_WINDOWS_ACCEPTANCE.md`](PIXEL_WINDOWS_ACCEPTANCE.md) for the laptop steps. The current Git SHA is `c090ec0cfe3d485fb234257e9ec2ccbaeffd72f3`; no commit or push was made.
+- The floating companion restores the reference commit's navy fills (`0.88` primary, `0.95` raised), border colors and shadow stack. Both native windows use system backdrop `none` on Windows. All CSS backdrop filters, Acrylic/Mica settings and Acrylic-specific variables/query mode are removed. The redesign-only Island gradient and toolbar capsule are removed. P logo, controls, layout, Workspace layout and dark colors are retained.
+- `npm run typecheck`: passed. `npm test -- --reporter=default`: **721 passed, 0 failed, 26 skipped (747 total; 39 files: 38 passed, 1 skipped)**. The skips are 17 browser tests without Playwright Chromium, 7 NSIS tests without `makensis`, and 2 opt-in native foreground tests.
+- `npm run build`: passed (main TypeScript, bundled preload, Vite renderer and icon). `git diff --check`: passed.
+- `npm run test:preload-sandbox`: **unverified**. Electron 45.2.3 exits with `2147483651` (`0x80000003`) before a smoke report is created. See `artifacts/windows-acceptance/preload-sandbox-smoke.log`.
+- The branch contains CI fixes for the observed run 7 (`44159366265`, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`): Python 3.12 is provisioned for the document tests, and worker startup uses bounded polling. The old run had 10 document tests fail on a hard-coded developer interpreter path and one fixed-sleep cancellation race; native compilation and packaging were skipped. The workflow needs a push to rerun these changes.
+- Before this rollback, DWM readback showed Pixel Acrylic (type 3) and Workspace Mica (type 2) on build `26300.9974`. The restored build has not been visually launched or read back. Both window configurations now request no system backdrop.
+- White-page, dark-page and desktop screenshots were not captured. The existing visible Pixel process belongs to inaccessible `C:\dev\Pixel`; port 5199 was occupied, and this environment's Electron child process exited before startup when run from the writable checkout. The visual acceptance procedure remains outstanding; do not describe this rollback as visually accepted yet.
+- Existing Electron/Chromium Crashpad child-process failures remain separate and do not prove the GPU issue's cause on the user's laptop. No GPU driver report or post-restoration packaged launch is available.
+- Follow [`PIXEL_WINDOWS_ACCEPTANCE.md`](PIXEL_WINDOWS_ACCEPTANCE.md) for white webpage, dark webpage, desktop, interaction and packaged checks. No installer or native helper build was part of this visual restoration.
 
 Historical checkpoint results later in this report refer to earlier repository states; their test totals and package evidence are superseded by this current section.
 

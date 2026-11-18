@@ -48,21 +48,18 @@ position are saved locally. The supplied cyan, aqua and white P mark is defined
 once in `src/shared/pixelMark.json` and reused by the renderer, tray and Windows
 app icon.
 
-The latest local validation for the glass and task-status repair passed
-TypeScript validation, the production source build and **722 tests**. Another
-26 tests were skipped because this environment lacks Playwright Chromium and
-NSIS, and the native foreground fixture is opt-in. The actual post-change
-companion appearance, GPU-enabled packaged startup and installer acceptance
-still need laptop validation. See the [current release-readiness
+Pixel uses the original dark navy panel colors inside its transparent floating
+window. Windows system backdrops and CSS backdrop blur are disabled; the rounded
+shape still comes from the transparent native window. The Workspace layout,
+controls, dark surfaces and all application features remain. `npm run dev:gpu`
+is available for separate GPU diagnostics; regular `npm run dev` continues to
+pass `--disable-gpu`.
+
+Type checks, automated tests and production builds do not prove the restored UI
+over real desktop content. The Windows visual comparison and packaged startup
+remain acceptance steps. See the [current release-readiness
 report](docs/validation/PIXEL_RELEASE_READINESS.md) before treating this tree
 as a release candidate.
-
-On supported Windows 11 builds, the floating companion uses the native DWM
-Acrylic backdrop. Its CSS surfaces are translucent tints; CSS
-`backdrop-filter` does not blur other desktop applications. Use
-`PIXEL_GLASS_MODE=fallback` for an opaque comparison, and `npm run dev:gpu` to
-launch the development build with GPU acceleration enabled. The existing
-`npm run dev` continues to pass `--disable-gpu` for diagnostics.
 
 The current architecture and security boundaries are in
 [`docs/architecture/PIXEL_AGENT_RUNTIME.md`](docs/architecture/PIXEL_AGENT_RUNTIME.md)
