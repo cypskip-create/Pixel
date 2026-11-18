@@ -1,7 +1,17 @@
 import { useId } from 'react';
 import mark from '@shared/pixelMark.json';
 
-export function PixelMark({ size = 28, className = '' }: { size?: number; className?: string }): React.JSX.Element {
+const MONOCHROME_PALETTE: Record<string, string> = {
+  cyan: 'var(--color-brand-foreground)',
+  aqua: 'var(--color-ink-soft)',
+  white: 'var(--color-ink)',
+};
+
+export function PixelMark({ size = 28, className = '', monochrome = true }: {
+  size?: number;
+  className?: string;
+  monochrome?: boolean;
+}): React.JSX.Element {
   const maskId = `pixel-mark-cutout-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const viewBox = (mark.viewBox as number[]).join(' ');
   const sparkle = (mark.sparkle as number[][]).map(([x, y]) => `${String(x)},${String(y)}`).join(' ');
@@ -15,13 +25,15 @@ export function PixelMark({ size = 28, className = '' }: { size?: number; classN
       fill="none"
       focusable="false"
     >
-      <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="90" height="90">
-        <rect width="90" height="90" fill="white" />
+      <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="262" height="324">
+        <rect width="262" height="324" fill="white" />
         <polygon points={sparkle} fill="black" />
       </mask>
       <g mask={`url(#${maskId})`}>
         {(mark.shapes as Array<Record<string, unknown>>).map((shape, index) => {
-          const fill = mark.palette[shape.color as keyof typeof mark.palette];
+          const fill = monochrome
+            ? MONOCHROME_PALETTE[shape.color as string] ?? 'var(--color-brand-foreground)'
+            : mark.palette[shape.color as keyof typeof mark.palette];
           if (shape.kind === 'rect') {
             return <rect key={index} x={shape.x as number} y={shape.y as number} width={shape.width as number} height={shape.height as number} fill={fill} />;
           }

@@ -31,9 +31,9 @@ export function riskLabel(risk: RiskLevel): string {
 /** Tailwind classes per risk level, paired with a distinct icon in the UI. */
 export const RISK_CLASSES: Record<RiskLevel, string> = {
   safe: 'border-slate-400/30 bg-slate-400/10 text-slate-200',
-  low: 'border-sky-400/30 bg-sky-400/10 text-sky-200',
-  medium: 'border-amber-400/40 bg-amber-400/10 text-amber-200',
-  high: 'border-rose-400/45 bg-rose-400/10 text-rose-200',
+  low: 'border-neutral-400/30 bg-neutral-400/10 text-neutral-200',
+  medium: 'border-neutral-400/40 bg-neutral-400/10 text-neutral-200',
+  high: 'border-neutral-400/45 bg-neutral-400/10 text-neutral-200',
 };
 
 /** Truncate for compact chips without breaking surrogate pairs. */

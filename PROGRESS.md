@@ -2,7 +2,26 @@
 
 Updated: 2026-11-18. Version: 0.2.1.
 
-## Current checkpoint — Interaction Engine 3.0
+## Current checkpoint — Monochrome design and cursor companion repair
+
+Branch: `codex/interaction-engine-3`. Current local HEAD: `7f10c058c70545f760923eb5b01b5da7764ca773`. Its tree (`9ff6f70cd0b0dd92cfb22d50e89c7d6168460cf5`) matches latest reviewed `main` commit `fce3128f42dd540e15f85c13a300105727784e02` before these local edits. This checkpoint is implemented in the working tree and remains uncommitted; the user will commit and push. No files, settings, history or credentials were reset.
+
+- Replaced the renderer's navy/chromatic palette with the black/charcoal semantic system in `src/renderer/index.css`: app `#0D0D0D`, sidebar `#141414`, panel `#1B1B1B`, raised `#222222`, hover `#292929`, selected `#303030`, border `#333333`, text `#F4F4F4`/`#B8B8B8`/`#888888`, and brand/icon `#D4D4D4`. Approval, error, success, recording and working tokens are grayscale; their labels and icons remain explicit. The light theme stays grayscale. Workspace palette names now alias shared tokens.
+- Replaced the previous glass tokens (`rgb(13 17 28 / .88)`, `rgb(22 28 43 / .95)`, `rgb(20 26 40 / .97)`) and Workspace values (`#151c28`, `#1c2635`, `#243144`, `#2c3b51`, `#49c5de`) with opaque neutral fills. No Acrylic, Mica, backdrop blur or decorative gradient was added. The transparent native frame remains for shaped edges.
+- Preserved the approved P geometry in `src/shared/pixelMark.json`; `PixelMark.tsx` uses semantic monochrome foreground tokens for the in-app rendering. The workspace character and cursor character retain their original roles and silhouettes, now in grayscale.
+- Reduced the cursor companion from a 64×64 DIP native window with a 54×54 SVG on a 64-unit viewBox to a 36×36 DIP window with a 28×28 SVG on a 32-unit viewBox. Placement now aligns the SVG pointer tip (hotspot) with the configured cursor-relative offset, capped to a 12 DIP radial gap. A critically damped follower has a 12 DIP position bound; large pointer jumps (160 DIP), monitor changes, reduced motion and resumes after 500 ms snap to the current target.
+- The cursor companion is shown only for enabled, visible, idle Island state. It hides and stops its timer while the Island is expanded, Settings/Workspace is visible, Pixel is hidden, the session is locked or the setting is disabled. On reappearance it snaps near the current pointer. Its native window remains non-focusable and click-through. It reads pointer position only while enabled and visible; it does not capture screenshots or persist pointer movement.
+- Updated cursor lifecycle, edge/hotspot, bounded-motion, settings migration and grayscale regression tests. The architecture regression now checks the shared palette aliases; preload-bundle build tests use a bounded 15-second timeout in isolated workers.
+- `npm run typecheck`: passed.
+- `npm test -- --reporter=dot`: **789 passed, 0 failed, 2 skipped (791 total; 46 files passed, 1 skipped)**. This run had local Playwright fixture access. The 2 skips are the opt-in real-desktop foreground integration cases. Separate elevated NSIS run: **9/9 passed**.
+- `npm run build`: passed (main TypeScript, bundled sandbox preload, Vite renderer and icon generation). `npm run build:native`: passed; `PixelNative.exe` compiled and the build script's protocol smoke exited successfully.
+- `npm run test:preload-sandbox`: **unverified/blocked in this host**. Electron 45.2.3 exits `2147483651` (`0x80000003`) before its smoke renderer starts. The preload bundle itself is produced and covered by tests, but runtime bridge checks were not observed in Electron during this checkpoint. An earlier current-tree `npm run dev` attempt exited with the same code before Pixel startup logging or a visible window.
+- Consequently the monochrome screenshots, Windows cursor motion/click-through, DPI and monitor transitions, Dynamic Island focus/flicker behavior, PTT, permissions, DeepSeek UI, and actual Workspace/Settings runtime are **unverified here**. No visual pass is claimed. Exact target-laptop steps are in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
+- The latest reviewed main commit is `fce3128f42dd540e15f85c13a300105727784e02`; Windows CI run [#16 passed](https://github.com/cypskip-create/Pixel/actions/runs/44328842235) on that SHA (`windows` job: success). This is the pre-change baseline, not CI evidence for the current uncommitted working tree. No release was published.
+
+See [`docs/architecture/PIXEL_DESIGN_TOKENS.md`](docs/architecture/PIXEL_DESIGN_TOKENS.md) for the old-to-new token map and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md) for exact visual, motion and functionality checks. The prior Interaction Engine section is retained as historical baseline.
+
+## Previous checkpoint — Interaction Engine 3.0
 
 Branch: `codex/interaction-engine-3`. Started from `b7ccac1fc17824317a1606f5b89bb61a13bbc52d`. The implementation and this validation entry are committed together locally; nothing was pushed or published.
 

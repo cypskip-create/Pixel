@@ -106,6 +106,8 @@ const bridge: CypsBridge = {
     onSummon: (handler: () => void) => subscribe(CH.windowSummon, handler),
     onCursorMotion: (handler: (reducedMotion: boolean) => void) =>
       subscribe(CH.windowCursorMotion, handler),
+    onCursorPlacement: (handler: (orientation: { flipX: boolean; flipY: boolean }) => void) =>
+      subscribe(CH.windowCursorPlacement, handler),
   },
 
   chat: {

@@ -69,32 +69,32 @@ export function MemoryPanel({ onBack, returnLabel = 'Back to settings' }: Memory
         <p className="flex-1 text-[10.5px] leading-snug text-[var(--color-ink-dim)]">Only this project’s local memories are shown. Credential-like text is rejected when saving or editing.</p>
         <button type="button" onClick={() => void exportMemory()} className="no-drag flex shrink-0 items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[9.5px] text-[var(--color-ink-soft)] hover:bg-white/8"><Download size={10} /> Export</button>
       </div>
-      {error ? <p role="alert" className="mb-2 rounded-lg border border-rose-400/35 bg-rose-500/12 px-2 py-1.5 text-[10.5px] text-rose-100">{error}</p> : null}
+      {error ? <p role="alert" className="mb-2 rounded-lg border border-neutral-400/35 bg-neutral-500/12 px-2 py-1.5 text-[10.5px] text-neutral-100">{error}</p> : null}
       {memories.length === 0 ? <p className="rounded-xl border border-white/8 bg-white/4 px-2.5 py-3 text-[10.5px] text-[var(--color-ink-dim)]">This project has no saved memories.</p> : memories.map((memory) => (
-        <article key={memory.id} className="mb-1.5 rounded-xl border border-[var(--color-glass-border)] bg-white/4 p-2">
+        <article key={memory.id} className="mb-1.5 rounded-xl border border-[var(--color-border)] bg-white/4 p-2">
           <div className="flex items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-[9px] font-semibold uppercase tracking-wide text-sky-200/90">{memory.kind} · {memory.confidence}</span>
+            <span className="min-w-0 flex-1 truncate text-[9px] font-semibold uppercase tracking-wide text-neutral-200/90">{memory.kind} · {memory.confidence}</span>
             <span className="shrink-0 text-[9px] text-[var(--color-ink-dim)]">{new Date(memory.updatedAt).toLocaleDateString()}</span>
           </div>
           {editingId === memory.id ? (
             <>
-              <textarea aria-label="Edit memory content" value={editText} onChange={(event) => setEditText(event.target.value)} maxLength={4_000} className="no-drag selectable mt-1 min-h-14 w-full resize-y rounded-lg border border-white/10 bg-black/20 p-1.5 text-[10px] text-[var(--color-ink-soft)] outline-none focus:border-sky-300/50" />
+              <textarea aria-label="Edit memory content" value={editText} onChange={(event) => setEditText(event.target.value)} maxLength={4_000} className="no-drag selectable mt-1 min-h-14 w-full resize-y rounded-lg border border-white/10 bg-black/20 p-1.5 text-[10px] text-[var(--color-ink-soft)] outline-none focus:border-neutral-300/50" />
               <div className="mt-1 flex gap-1.5">
-                <button type="button" onClick={() => void saveEdit(memory.id)} className="flex items-center gap-1 rounded-md bg-emerald-500/20 px-2 py-1 text-[9.5px] text-emerald-100"><Save size={10} /> Save correction</button>
+                <button type="button" onClick={() => void saveEdit(memory.id)} className="flex items-center gap-1 rounded-md bg-neutral-500/20 px-2 py-1 text-[9.5px] text-neutral-100"><Save size={10} /> Save correction</button>
                 <button type="button" onClick={() => setEditingId(null)} className="rounded-md px-2 py-1 text-[9.5px] text-[var(--color-ink-dim)]">Cancel</button>
               </div>
             </>
           ) : <p className="selectable mt-1 text-[10.5px] leading-relaxed text-[var(--color-ink-soft)]">{memory.content}</p>}
           <p className="mt-1 truncate text-[9px] text-[var(--color-ink-dim)]" title={memory.source}>Source: {memory.source}</p>
           <div className="mt-1 flex items-center gap-2">
-            {editingId !== memory.id ? <button type="button" onClick={() => { setError(null); setEditingId(memory.id); setEditText(memory.content); }} className="text-[9px] text-sky-200/80 hover:text-sky-100">Correct</button> : null}
+            {editingId !== memory.id ? <button type="button" onClick={() => { setError(null); setEditingId(memory.id); setEditText(memory.content); }} className="text-[9px] text-neutral-200/80 hover:text-neutral-100">Correct</button> : null}
             {confirmDeleteId === memory.id ? (
               <>
-                <span className="text-[9px] text-rose-200">Delete permanently?</span>
-                <button type="button" onClick={() => void deleteMemory(memory.id)} className="text-[9px] font-semibold text-rose-100">Confirm</button>
+                <span className="text-[9px] text-neutral-200">Delete permanently?</span>
+                <button type="button" onClick={() => void deleteMemory(memory.id)} className="text-[9px] font-semibold text-neutral-100">Confirm</button>
                 <button type="button" onClick={() => setConfirmDeleteId(null)} className="text-[9px] text-[var(--color-ink-dim)]">Keep</button>
               </>
-            ) : <button type="button" onClick={() => { setError(null); setConfirmDeleteId(memory.id); }} aria-label={`Delete memory ${memory.id}`} className="flex items-center gap-1 text-[9px] text-rose-200/80 hover:text-rose-100"><Trash2 size={10} /> Delete</button>}
+            ) : <button type="button" onClick={() => { setError(null); setConfirmDeleteId(memory.id); }} aria-label={`Delete memory ${memory.id}`} className="flex items-center gap-1 text-[9px] text-neutral-200/80 hover:text-neutral-100"><Trash2 size={10} /> Delete</button>}
           </div>
         </article>
       ))}

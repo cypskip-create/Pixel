@@ -21,6 +21,7 @@ export const CHANNELS = {
   windowFocusLost: 'window:focusLost',
   windowSummon: 'window:summon',
   windowCursorMotion: 'window:cursorMotion',
+  windowCursorPlacement: 'window:cursorPlacement',
   windowSetExpanded: 'window:setExpanded',
   windowHide: 'window:hide',
   windowShow: 'window:show',

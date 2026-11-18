@@ -97,8 +97,8 @@ export function ModeSwitcher({
         isPopover
           ? placement === 'anchored'
             ? 'workspace-mode-popover w-[min(292px,calc(100vw-24px))] rounded-xl p-1.5'
-            : 'glass-raised animate-slide-down ml-11 mt-2 w-[288px] rounded-2xl p-2'
-          : 'w-full rounded-2xl border border-[var(--color-glass-border)] bg-white/4 p-2',
+            : 'pixel-surface-raised animate-slide-down ml-11 mt-2 w-[288px] rounded-2xl p-2'
+          : 'w-full rounded-2xl border border-[var(--color-border)] bg-white/4 p-2',
       ].join(' ')}
     >
       {isPopover ? (
@@ -152,7 +152,7 @@ function ModeRow({
         'transition-colors duration-[var(--cyps-duration-fast)]',
         'disabled:cursor-not-allowed disabled:opacity-50',
         selected
-          ? 'bg-sky-500/18 ring-1 ring-inset ring-sky-400/40'
+          ? 'bg-neutral-500/18 ring-1 ring-inset ring-neutral-400/40'
           : 'hover:bg-white/8',
       ].join(' ')}
     >
@@ -160,10 +160,10 @@ function ModeRow({
         aria-hidden="true"
         className={[
           'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
-          selected ? 'border-sky-300 bg-sky-400/25' : 'border-[var(--color-ink-dim)]',
+          selected ? 'border-neutral-300 bg-neutral-400/25' : 'border-[var(--color-ink-dim)]',
         ].join(' ')}
       >
-        {selected ? <Check size={11} strokeWidth={3} className="text-sky-100" /> : null}
+        {selected ? <Check size={11} strokeWidth={3} className="text-neutral-100" /> : null}
       </span>
 
       <span className="min-w-0 flex-1">
@@ -173,7 +173,7 @@ function ModeRow({
           </span>
           {descriptor.allowsStateChange ? (
             <span
-              className="inline-flex items-center gap-1 rounded-full border border-amber-400/35 bg-amber-400/10 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-200"
+              className="inline-flex items-center gap-1 rounded-full border border-neutral-400/35 bg-neutral-400/10 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-neutral-200"
               title="This mode can change things on your computer"
             >
               <AlertTriangle size={9} strokeWidth={2.6} aria-hidden="true" />

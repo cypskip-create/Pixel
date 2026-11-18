@@ -94,12 +94,12 @@ export function ResponseBubble(props: ResponseBubbleProps) {
     <section
       aria-label="Pixel response"
       data-layout-panel
-      className="glass animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
+      className="pixel-surface animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
       style={{ maxHeight: 'min(46vh, 320px)' }}
     >
-      <header className="flex items-center gap-1.5 border-b border-[var(--color-glass-border)] px-3 py-1.5 text-[10px] font-semibold tracking-wide text-[var(--color-ink-dim)]"><PixelMark size={14} /><span>PIXEL</span>{streaming ? <span className="ml-auto text-cyan-200">Responding…</span> : null}</header>
+      <header className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-semibold tracking-wide text-[var(--color-ink-dim)]"><PixelMark size={14} /><span>PIXEL</span>{streaming ? <span className="ml-auto text-neutral-200">Responding…</span> : null}</header>
       {hasReasoning ? (
-        <div className="border-b border-[var(--color-glass-border)]">
+        <div className="border-b border-[var(--color-border)]">
           <button
             type="button"
             onClick={() => setReasoningOpen((open) => !open)}
@@ -118,7 +118,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
             {streaming ? (
               <span
                 aria-hidden="true"
-                className="ml-1 h-1 w-1 animate-pulse rounded-full bg-violet-300"
+                className="ml-1 h-1 w-1 animate-pulse rounded-full bg-neutral-300"
               />
             ) : (
               <span className="ml-auto text-[10px] opacity-70">
@@ -140,7 +140,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
         className="selectable flex-1 overflow-y-auto px-3 py-2.5"
       >
         {error !== null ? (
-          <p className="flex items-start gap-2 text-[12.5px] leading-relaxed text-rose-200">
+          <p className="flex items-start gap-2 text-[12.5px] leading-relaxed text-neutral-200">
             <AlertTriangle size={14} strokeWidth={2.3} aria-hidden="true" className="mt-0.5 shrink-0" />
             <span>{error}</span>
           </p>
@@ -157,7 +157,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
         )}
       </div>
 
-      <footer className="flex items-center justify-between gap-2 border-t border-[var(--color-glass-border)] px-2 py-1.5">
+      <footer className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] px-2 py-1.5">
         <div className="flex items-center gap-1">
           <IconButton label={copied ? 'Copied' : 'Copy answer'} onClick={() => void copy()} disabled={content.length === 0}>
             {copied ? (
@@ -178,7 +178,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
           <button
             type="button"
             onClick={onStop}
-            className="no-drag rounded-full border border-rose-400/40 bg-rose-500/20 px-2.5 py-1 text-[11px] font-medium text-rose-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-rose-500/32"
+            className="no-drag rounded-full border border-neutral-400/40 bg-neutral-500/20 px-2.5 py-1 text-[11px] font-medium text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/32"
           >
             Stop
           </button>

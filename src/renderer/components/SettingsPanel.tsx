@@ -157,10 +157,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
   return (
     <section
       aria-label="Pixel settings"
-      className={`glass-raised animate-slide-down flex ${workspaceLayout ? 'w-full max-w-[720px]' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
+      className={`pixel-surface-raised animate-slide-down flex ${workspaceLayout ? 'w-full max-w-[720px]' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
       style={workspaceLayout ? { minHeight: 0, height: '100%' } : { maxHeight: 'min(calc(100vh - 24px), 520px)' }}
     >
-      <header className="flex items-center gap-2 border-b border-[var(--color-glass-border)] px-3 py-2">
+      <header className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
         <PixelMark size={16} />
         <h2 className="flex-1 text-[12.5px] font-semibold text-[var(--color-ink)]">{workspaceLayout ? 'Pixel Settings' : 'Companion'}</h2>
         {saving ? (
@@ -177,7 +177,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         {error !== null ? (
           <p
             role="alert"
-            className="mb-2.5 rounded-xl border border-rose-400/35 bg-rose-500/12 px-2.5 py-1.5 text-[11px] text-rose-100"
+            className="mb-2.5 rounded-xl border border-neutral-400/35 bg-neutral-500/12 px-2.5 py-1.5 text-[11px] text-neutral-100"
           >
             {error}
           </p>
@@ -201,7 +201,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </div>
 
           <Row label="Pinned top bar">
-            <span className="text-[10.5px] font-medium text-emerald-200">Always on</span>
+            <span className="text-[10.5px] font-medium text-neutral-200">Always on</span>
           </Row>
           <Row label="Move to display">
             <select
@@ -231,7 +231,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 step={1}
                 value={settings.companion.topOffset}
                 onChange={(event) => onPatch({ companion: { topOffset: Number(event.target.value) } })}
-                className="no-drag w-24 accent-sky-300"
+                className="no-drag w-24 accent-neutral-300"
               />
               {settings.companion.topOffset}px
             </label>
@@ -254,7 +254,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     step={0.25}
                     value={settings.companion.followSpeed}
                     onChange={(event) => onPatch({ companion: { followSpeed: Number(event.target.value) } })}
-                    className="no-drag w-24 accent-sky-300"
+                    className="no-drag w-24 accent-neutral-300"
                   />
                   {settings.companion.followSpeed.toFixed(2)}×
                 </label>
@@ -266,8 +266,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     <input
                       aria-label="Cursor companion horizontal offset"
                       type="number"
-                      min={-200}
-                      max={200}
+                      min={-12}
+                      max={12}
                       value={settings.companion.cursorOffset.x}
                       onChange={(event) => onPatch({ companion: { cursorOffset: { ...settings.companion.cursorOffset, x: Number(event.target.value) } } })}
                       className="no-drag w-12 rounded-md border border-white/10 bg-black/20 px-1 py-0.5"
@@ -278,8 +278,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     <input
                       aria-label="Cursor companion vertical offset"
                       type="number"
-                      min={-200}
-                      max={200}
+                      min={-12}
+                      max={12}
                       value={settings.companion.cursorOffset.y}
                       onChange={(event) => onPatch({ companion: { cursorOffset: { ...settings.companion.cursorOffset, x: settings.companion.cursorOffset.x, y: Number(event.target.value) } } })}
                       className="no-drag w-12 rounded-md border border-white/10 bg-black/20 px-1 py-0.5"
@@ -328,11 +328,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
             />
           </Row>
           {pushToTalkStatus && !pushToTalkStatus.ok ? (
-            <p role="status" className="px-1 pb-1 text-[10px] leading-snug text-amber-200">
+            <p role="status" className="px-1 pb-1 text-[10px] leading-snug text-neutral-200">
               Push-to-talk unavailable: {pushToTalkStatus.reason ?? 'Windows could not register this shortcut.'}
             </p>
           ) : pushToTalkStatus?.ok ? (
-            <p role="status" className="px-1 pb-1 text-[10px] text-emerald-200">Push-to-talk shortcut is registered.</p>
+            <p role="status" className="px-1 pb-1 text-[10px] text-neutral-200">Push-to-talk shortcut is registered.</p>
           ) : null}
           <p className="mt-1 px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
             Workspace uses the configured accelerator above. Global shortcuts must be unique;
@@ -396,7 +396,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
               {microphoneTest ? 'Stop microphone test' : 'Test microphone'}
             </button>
             <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-white/10" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(microphoneLevel * 100)}>
-              <div className="h-full rounded-full bg-cyan-300 transition-[width] duration-100" style={{ width: `${Math.round(microphoneLevel * 100)}%` }} />
+              <div className="h-full rounded-full bg-neutral-300 transition-[width] duration-100" style={{ width: `${Math.round(microphoneLevel * 100)}%` }} />
             </div>
           </div>
           {microphoneError ? <p role={microphoneError.includes('stopped') ? 'status' : 'alert'} className="px-1 text-[10px] text-[var(--color-ink-dim)]">{microphoneError}</p> : null}
@@ -409,7 +409,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
         <Group icon={ShieldCheck} title="Privacy">
           <Row label="Screenshots need approval">
-            <span className="text-[11px] font-medium text-emerald-200">Always on</span>
+            <span className="text-[11px] font-medium text-neutral-200">Always on</span>
           </Row>
           <Toggle
             label="Keep conversation history"
@@ -437,7 +437,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <button
           type="button"
           onClick={() => setAutomationOpen(true)}
-          className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-sky-300/20 bg-sky-300/8 px-2.5 py-2 text-left text-[10.5px] font-medium text-sky-100 hover:bg-sky-300/14"
+          className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-neutral-300/20 bg-neutral-300/8 px-2.5 py-2 text-left text-[10.5px] font-medium text-neutral-100 hover:bg-neutral-300/14"
         >
           <ListChecks size={12} aria-hidden="true" />
           Skills and routines
@@ -453,7 +453,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </button>
 
         {advanced ? (
-          <div className="mt-1 rounded-xl border border-[var(--color-glass-border)] bg-black/15 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-[var(--color-ink-dim)]">
+          <div className="mt-1 rounded-xl border border-[var(--color-border)] bg-black/15 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-[var(--color-ink-dim)]">
             <p>provider: {settings.provider.provider}</p>
             <p>primary: {settings.provider.primaryModel}</p>
             <p>reasoning: {settings.provider.reasoningModel}</p>
@@ -578,8 +578,8 @@ function ApiKeyManager({
               hasApiKey === null
                 ? 'text-[var(--color-ink-dim)]'
                 : hasApiKey
-                  ? 'text-emerald-200'
-                  : 'text-amber-200'
+                  ? 'text-neutral-200'
+                  : 'text-neutral-200'
             }`}
             role="status"
             aria-live="polite"
@@ -628,7 +628,7 @@ function ApiKeyManager({
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Enter API key"
               disabled={savingKey || removingKey}
-              className="no-drag min-w-0 flex-1 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-dim)] focus:border-sky-300/50"
+              className="no-drag min-w-0 flex-1 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-dim)] focus:border-neutral-300/50"
             />
             <button
               type="button"
@@ -651,7 +651,7 @@ function ApiKeyManager({
       ) : null}
 
       {confirmRemoval ? (
-        <div role="alertdialog" aria-modal="true" aria-labelledby="remove-key-title" className="mt-2 rounded-xl border border-rose-300/25 bg-rose-500/8 p-2">
+        <div role="alertdialog" aria-modal="true" aria-labelledby="remove-key-title" className="mt-2 rounded-xl border border-neutral-300/25 bg-neutral-500/8 p-2">
           <p id="remove-key-title" className="text-[11px] font-medium text-[var(--color-ink)]">Remove the saved DeepSeek API key?</p>
           <p className="mt-0.5 text-[10px] text-[var(--color-ink-dim)]">Pixel will no longer be able to connect to DeepSeek until you add a key again.</p>
           <div className="mt-1.5 flex gap-1.5">
@@ -667,7 +667,7 @@ function ApiKeyManager({
         <p
           role={feedback.kind === 'error' ? 'alert' : 'status'}
           aria-live="polite"
-          className={`mt-1.5 text-[10.5px] ${feedback.kind === 'success' ? 'text-emerald-200' : 'text-rose-200'}`}
+          className={`mt-1.5 text-[10.5px] ${feedback.kind === 'success' ? 'text-neutral-200' : 'text-neutral-200'}`}
         >
           {feedback.message}
         </p>
@@ -697,10 +697,10 @@ function SmallButton({
       className={`no-drag rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         primary
           ? tone === 'danger'
-            ? 'border-rose-300/30 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30'
-            : 'border-sky-300/30 bg-sky-400/15 text-sky-100 hover:bg-sky-400/25'
+            ? 'border-neutral-300/30 bg-neutral-500/20 text-neutral-100 hover:bg-neutral-500/30'
+            : 'border-neutral-300/30 bg-neutral-400/15 text-neutral-100 hover:bg-neutral-400/25'
           : tone === 'danger'
-            ? 'border-rose-300/20 text-rose-200 hover:bg-rose-500/12'
+            ? 'border-neutral-300/20 text-neutral-200 hover:bg-neutral-500/12'
             : 'border-white/10 text-[var(--color-ink-soft)] hover:bg-white/8'
       }`}
     >
@@ -750,7 +750,7 @@ function Group({
         <Icon size={11} strokeWidth={2.5} aria-hidden="true" />
         {title}
       </h3>
-      <div className="rounded-2xl border border-[var(--color-glass-border)] bg-white/4 p-1.5">
+      <div className="rounded-2xl border border-[var(--color-border)] bg-white/4 p-1.5">
         {children}
       </div>
     </div>
@@ -769,7 +769,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function Accelerator({ value }: { value: string }) {
   const pretty = value.replace(/CommandOrControl/gi, 'Ctrl').replace(/\+/g, ' + ');
   return (
-    <kbd className="rounded-md border border-[var(--color-glass-border)] bg-white/8 px-1.5 py-0.5 font-sans text-[10px] text-[var(--color-ink-soft)]">
+    <kbd className="rounded-md border border-[var(--color-border)] bg-white/8 px-1.5 py-0.5 font-sans text-[10px] text-[var(--color-ink-soft)]">
       {pretty}
     </kbd>
   );
@@ -787,7 +787,7 @@ function ShortcutEditor({ value, onCommit, ariaLabel = 'Open Workspace shortcut'
       onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
       onBlur={() => { const next = draft.trim(); if (next && next !== value) onCommit(next); else setDraft(value); }}
       placeholder="CommandOrControl+Shift+P"
-      className="no-drag w-[180px] rounded-md border border-[var(--color-glass-border)] bg-black/20 px-2 py-1 font-mono text-[10px] text-[var(--color-ink-soft)] outline-none focus:border-sky-300/60"
+      className="no-drag w-[180px] rounded-md border border-[var(--color-border)] bg-black/20 px-2 py-1 font-mono text-[10px] text-[var(--color-ink-soft)] outline-none focus:border-neutral-300/60"
     />
   );
 }
@@ -814,8 +814,8 @@ function Toggle({
         aria-hidden="true"
         className={`mt-0.5 flex h-4 w-7 shrink-0 items-center rounded-full border p-px transition-colors duration-[var(--cyps-duration-fast)] ${
           checked
-            ? 'justify-end border-sky-400/50 bg-sky-500/40'
-            : 'justify-start border-[var(--color-glass-border)] bg-white/8'
+            ? 'justify-end border-neutral-400/50 bg-neutral-500/40'
+            : 'justify-start border-[var(--color-border)] bg-white/8'
         }`}
       >
         <span className="h-2.5 w-2.5 rounded-full bg-white shadow-sm" />

@@ -2,12 +2,26 @@
 
 Updated: 2026-11-18
 
-## Current handoff — Interaction Engine 3.0
+## Current handoff — Monochrome design and cursor companion
+
+- Branch: `codex/interaction-engine-3`; current local HEAD `7f10c058c70545f760923eb5b01b5da7764ca773`. Its tree matches latest reviewed `main` commit `fce3128f42dd540e15f85c13a300105727784e02` before these local edits. The repair is local and uncommitted; the user will commit and push; nothing was published.
+- The floating Island, Workspace, Settings, menus, task states, status indicators, and characters now use the black/charcoal semantic theme. Navy, cyan and colored renderer accents were replaced by neutral grayscale tokens. The Pixel P master geometry remains intact; in-app artwork uses semantic gray foreground values. Visible panels are opaque, with no Acrylic, Mica, blur or decorative gradients.
+- The cursor character is now 28×28 DIP in a 36×36 DIP native window (previously a 54×54 SVG in a 64×64 DIP window). Its pointer hotspot, small cursor-relative offset and work-area placement are calculated together. The critically damped follower is bounded to 12 DIP, snaps after large jumps/resume/display changes, skips unchanged native position writes, and hides/stops while Pixel is expanded, hidden, locked or disabled. The window remains focusless and click-through.
+- `npm run typecheck`: passed. Full suite: **789 passed, 0 failed, 2 skipped (791 total; 46 files passed, 1 skipped)** with local Playwright fixture access. The skipped checks are the opt-in real desktop foreground integration tests. Separate NSIS preflight: **9/9 passed**.
+- `npm run build`: passed (main, bundled secure preload, renderer and app icon). `npm run build:native`: passed (helper compiled and protocol smoke returned successfully).
+- `npm run test:preload-sandbox` remains **unverified**: Electron 45.2.3 exited `0x80000003` before its smoke window or renderer started. A development launch in this host exited before Pixel startup logs/window as well. This does not show whether the local UI looks or behaves correctly on the user's laptop.
+- Windows visual/motion acceptance remains outstanding: monochrome appearance, DPI and multiple displays, cursor tracking/click-through, Island focus/flicker, PTT, Settings, DeepSeek, history, permissions and emergency stop. No screenshots or cursor-motion recording were available. See the current Windows acceptance section in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
+- The latest reviewed `main` commit is `fce3128f42dd540e15f85c13a300105727784e02`; Windows CI run [#16 passed](https://github.com/cypskip-create/Pixel/actions/runs/44328842235) with its `windows` job successful. That run predates these local edits; no CI run is associated with the current uncommitted working tree.
+- The separate packaged GPU/renderer-child-process report remains unresolved and is not attributed to this visual/cursor work. The standard development command keeps `--disable-gpu`; the GPU-enabled comparison command remains available. No security flags were weakened.
+
+See [`docs/architecture/PIXEL_DESIGN_TOKENS.md`](docs/architecture/PIXEL_DESIGN_TOKENS.md) for the palette migration and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md) for the exact laptop procedure.
+
+## Previous handoff — Interaction Engine 3.0 baseline
 
 - Branch: `codex/interaction-engine-3`, based on `b7ccac1fc17824317a1606f5b89bb61a13bbc52d`. The complete interaction checkpoint is committed locally only; nothing was pushed or released.
 - Dynamic Island uses fixed 144×52 idle bounds with a 138×38 visible pill. Hover/click/leave/idle transitions are reducer-driven; token streaming never controls native window geometry. Response scrolling preserves the user's position.
 - Global PTT uses the configured accelerator plus a short-lived native release watcher that samples only that chord, cancels on helper failure and times out at 20 seconds. Microphone capture is explicit and audio-only. Release submits one valid local transcript; manual dictation stays in the draft. Shared state drives the Island and Workspace character.
-- The Workspace keeps its existing conversation-first structure, uses the cool blue-charcoal surfaces and shows the original geometric reactive character. No Acrylic, Mica or backdrop blur was introduced.
+- The Workspace keeps its existing conversation-first structure and original geometric reactive character. This earlier checkpoint used cool blue-charcoal surfaces; the current monochrome checkpoint above replaces them.
 - TypeScript passed. Full suite: **781 passed, 0 failed, 2 skipped (783 total; 45 files passed, 1 skipped)** with Chromium/local fixture access. NSIS preflight: **9/9**. Native helper compiled and its configured PTT chord smoke returned `released` with exit 0. Production build passed.
 - An isolated unpacked artifact is at `artifacts/interaction-engine-3-rc-20261118/win-unpacked`. The archived preload was inspected: it contains no local CommonJS imports and keeps Electron as its only runtime require. The helper is packaged beside it.
 - Real app/sandbox smoke remains blocked: Electron 45.2.3 exits `0x80000003` before app code, including for `--version`; the current branch did not create a targetable window. Microphone, dictation accuracy, PTT focus, GPU behavior, visual/DPI, portable and installer flows remain unverified. No CPU/memory benchmark or GitHub run was produced. CI remains configured in `.github/workflows/windows-ci.yml`; this branch is local and was not pushed.
@@ -125,6 +139,6 @@ Updated: 2026-11-18
 - Browser private-network checks detect some unsafe connections after the connection begins; preventing the network request itself requires a controlled egress proxy.
 - The current release readiness decision and exact artifact sizes are in [docs/validation/PIXEL_RELEASE_READINESS.md](docs/validation/PIXEL_RELEASE_READINESS.md).
 
-## Current branch Git status
+## Historical branch status — conversation-first Workspace
 
-Branch: `codex/ui-experience-2`. No commit or push was made; the user will commit the finished changes.
+Branch: `codex/ui-experience-2`. This describes the earlier Workspace checkpoint, not the current `codex/interaction-engine-3` working tree above.
