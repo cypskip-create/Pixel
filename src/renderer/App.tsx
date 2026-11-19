@@ -132,6 +132,7 @@ function SettingsWindow(): React.JSX.Element {
 function CursorCompanionWindow(): React.JSX.Element {
   const bridge = readBridge();
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [assistantState, setAssistantState] = useState<AssistantState>('idle');
   const [orientation, setOrientation] = useState({ flipX: false, flipY: false });
 
   useEffect(() => {
@@ -139,6 +140,8 @@ function CursorCompanionWindow(): React.JSX.Element {
     let mounted = true;
     const unsubscribe = safeSubscribe<boolean>(bridge.bridge.window.onCursorMotion, setReducedMotion);
     const unsubscribePlacement = safeSubscribe<{ flipX: boolean; flipY: boolean }>(bridge.bridge.window.onCursorPlacement, setOrientation);
+    const unsubscribeState = safeSubscribe<AssistantState>(bridge.bridge.window.onCursorAssistantState, setAssistantState);
+    void bridge.bridge.window.cursorRendererReady().catch(() => undefined);
     void bridge.bridge.settings.get().then((settings) => {
       if (mounted) setReducedMotion(settings.companion.reducedMotion);
     }).catch(() => undefined);
@@ -146,12 +149,13 @@ function CursorCompanionWindow(): React.JSX.Element {
       mounted = false;
       unsubscribe();
       unsubscribePlacement();
+      unsubscribeState();
     };
   }, [bridge]);
 
   return (
     <div aria-hidden="true" className={`${reducedMotion ? 'reduce-motion' : 'motion-ok'} pointer-events-none grid h-screen w-screen place-items-center bg-transparent`}>
-      <CursorBuddy reducedMotion={reducedMotion} {...orientation} />
+      <CursorBuddy reducedMotion={reducedMotion} state={assistantState} {...orientation} />
     </div>
   );
 }
@@ -906,6 +910,11 @@ function Companion(): React.JSX.Element {
       ? 'thinking'
       : assistantState;
 
+  useEffect(() => {
+    if (bridge.kind !== 'ready') return;
+    void bridge.bridge.window.setCursorAssistantState(compactAssistantState).catch(() => undefined);
+  }, [bridge, compactAssistantState]);
+
   const rootClass = reducedMotion ? 'reduce-motion' : 'motion-ok';
   const pushToTalkLabel = pushToTalkState === 'recording'
     ? `Pixel is listening. Release ${settings.voice.pushToTalkAccelerator.replace(/CommandOrControl/gi, 'Ctrl').replace(/\+/g, ' plus ')} to submit.`
@@ -1086,6 +1095,8 @@ function Companion(): React.JSX.Element {
               streaming={chat.streaming}
               error={chat.error}
               spoken={speechConfirmed && !chat.streaming}
+              assistantState={compactAssistantState}
+              reducedMotion={reducedMotion}
               onCollapse={collapse}
               onStop={chat.stop}
               onDismiss={collapse}

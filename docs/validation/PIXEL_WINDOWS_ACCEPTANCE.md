@@ -1,5 +1,24 @@
 # Pixel Windows acceptance procedure
 
+## Experience Polish 5.0 and official Pix — 2026-11-19
+
+Current source, test totals, CI diagnosis and local limitations are recorded in
+[`PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](PIXEL_EXPERIENCE_POLISH_5_READINESS.md).
+The latest local full suite passed **834 tests**, skipped **27** (17 Chromium,
+7 NSIS, 3 opt-in foreground integration), and failed **0** when test fixture
+homes were redirected to a writable temporary profile. Typecheck, production
+build, Python worker unit tests and native helper build passed. The current
+tree's Electron sandbox smoke, GUI, screenshots, packaged builds and new CI
+run are not verified. The separate GPU/renderer child-process issue remains
+unresolved and is not attributed to the voice JSONL fix.
+
+Run the exact laptop-side commands and perform mascot, Cursor Buddy, visual,
+filesystem and packaged-GPU acceptance from the readiness report before
+calling this checkpoint complete. Keep `npm run dev`'s `--disable-gpu` as a
+development diagnostic; compare `npm run dev:gpu` and packaged GPU startup
+separately. Do not use an existing Pixel process from another checkout as
+evidence for the current source tree.
+
 ## Tools 4.2 acceptance status — 2026-11-19
 
 This section supersedes earlier generic UIA-control acceptance text below for

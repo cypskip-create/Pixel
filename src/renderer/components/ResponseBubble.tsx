@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Brain, ChevronRight, Copy, Check, Volume2 } from 'lucide-react';
 import { IconButton } from '@/components/IconButton';
-import { PixelMark } from '@/components/PixelMark';
+import type { AssistantState } from '@shared/types';
+import { PixMascot } from '@/components/PixMascot';
 
 interface ResponseBubbleProps {
   /** Visible answer text, appended as deltas arrive. */
@@ -12,6 +13,8 @@ interface ResponseBubbleProps {
   error: string | null;
   /** True only after the native text-to-speech call has completed successfully. */
   spoken?: boolean;
+  assistantState?: AssistantState;
+  reducedMotion?: boolean;
   onCollapse: () => void;
   onStop: () => void;
   /** 0 disables the auto-dismiss countdown entirely. */
@@ -34,6 +37,8 @@ export function ResponseBubble(props: ResponseBubbleProps) {
     streaming,
     error,
     spoken = false,
+    assistantState,
+    reducedMotion = false,
     onCollapse,
     onStop,
     autoDismissMs = 0,
@@ -97,7 +102,7 @@ export function ResponseBubble(props: ResponseBubbleProps) {
       className="pixel-surface animate-slide-down flex w-[460px] flex-col overflow-hidden rounded-[var(--cyps-radius)]"
       style={{ maxHeight: 'min(46vh, 320px)' }}
     >
-      <header className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-semibold tracking-wide text-[var(--color-ink-dim)]"><PixelMark size={14} /><span>PIXEL</span>{streaming ? <span className="ml-auto text-neutral-200">Responding…</span> : null}</header>
+      <header className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5 text-[10px] font-semibold tracking-wide text-[var(--color-ink-dim)]"><PixMascot size={21} state={assistantState ?? (error ? 'error' : streaming ? 'thinking' : spoken ? 'success' : 'idle')} reducedMotion={reducedMotion} decorative /><span>PIXEL</span>{streaming ? <span className="ml-auto text-[var(--color-accent)]">Responding…</span> : null}</header>
       {hasReasoning ? (
         <div className="border-b border-[var(--color-border)]">
           <button

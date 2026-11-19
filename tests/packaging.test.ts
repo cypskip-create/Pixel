@@ -139,17 +139,22 @@ describe('package.json', () => {
 
   it('builds the self-contained voice worker for both Windows distribution commands', () => {
     expect(pkg.scripts.pack).toContain('build:voice-worker');
-    expect(pkg.scripts.dist).toContain('build:voice-worker');
+    expect(pkg.scripts.dist).toContain('npm run pack');
+    expect(pkg.scripts.dist).toContain('electron-builder --win --publish never');
   });
 
-  it('uses PowerShell-safe Python probes and smoke-tests the frozen native runtime', () => {
+  it('uses PowerShell-safe Python probes and a deterministic Node smoke test for the frozen runtime', () => {
     const script = readFileSync(join(root, 'scripts', 'build-voice-worker.ps1'), 'utf8');
+    const harness = readFileSync(join(root, 'scripts', 'smoke-frozen-voice-worker.mjs'), 'utf8');
     expect(script).toContain('sys.version_info[0] * 100 + sys.version_info[1]');
     expect(script).not.toContain('print(f"{sys.version_info');
     expect(script).toContain('Get-PythonRuntimeInfo');
-    expect(script).toContain("op = 'runtime_smoke_test'");
-    expect(script).toContain('onnxCpuProvider');
-    expect(script).toContain('espeakReady');
+    expect(script).toContain('smoke-frozen-voice-worker.mjs');
+    expect(script).not.toContain('ProcessStartInfo');
+    expect(harness).toContain("op: 'runtime_smoke_test'");
+    expect(harness).toContain('onnxCpuProvider');
+    expect(harness).toContain('espeakReady');
+    expect(harness).toContain('frameHex');
   });
 });
 

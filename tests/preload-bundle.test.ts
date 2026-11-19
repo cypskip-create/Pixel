@@ -72,7 +72,8 @@ describe('sandbox preload bundle', () => {
     expect(packageJson.scripts['dev:electron']).toContain('npm run build:main');
     expect(packageJson.scripts.build).toContain('npm run build:main');
     expect(packageJson.scripts.pack).toContain('npm run build');
-    expect(packageJson.scripts.dist).toContain('npm run build');
+    expect(packageJson.scripts.dist).toContain('npm run pack');
+    expect(packageJson.scripts.pack).toContain('build:voice-worker');
     expect(packageJson.scripts.build).toContain('node scripts/make-icon.mjs');
     expect(packageJson.scripts['ensure:electron-runtime']).toContain('ensure-electron-runtime.mjs');
     expect(electronRuntimeSource).toContain("process.versions.electron");

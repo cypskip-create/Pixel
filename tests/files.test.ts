@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FILE_TOOL_DEFINITIONS, FileTools, MAX_DIRECTORY_ENTRIES } from '../src/main/files/toolset';
+import { buildPermissionRequest } from '../src/main/agent/executor';
 import { ToolExecutors } from '../src/main/agent/executors';
 
 const roots: string[] = [];
@@ -18,10 +19,22 @@ afterEach(() => {
 });
 
 describe('local file tools', () => {
-  it('exposes list, read, and write as high-risk approved operations', () => {
-    expect(FILE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual(['file_list', 'file_read', 'file_write']);
+  it('exposes bounded file operations as high-risk approved operations', () => {
+    expect(FILE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([
+      'file_list', 'file_read', 'file_search', 'file_metadata', 'file_write',
+      'directory_create', 'file_copy', 'file_rename',
+    ]);
     expect(FILE_TOOL_DEFINITIONS.every((tool) => tool.requiresApproval && tool.risk === 'high')).toBe(true);
     expect(FILE_TOOL_DEFINITIONS.find((tool) => tool.name === 'file_write')?.changesState).toBe(true);
+  });
+
+  it('keeps new filesystem grants fresh and shows the exact approved source and destination', () => {
+    const tool = FILE_TOOL_DEFINITIONS.find((item) => item.name === 'file_copy');
+    expect(tool).toBeDefined();
+    const request = buildPermissionRequest(tool!, { source: 'C:\\Users\\person\\source.txt', destination: 'C:\\Users\\person\\copy.txt' });
+    expect(request).toMatchObject({ risk: 'high', allowPersistent: false, alwaysAllowed: false, scopeLabel: 'this exact action, one time' });
+    expect(request.action).toContain('source.txt');
+    expect(request.action).toContain('copy.txt');
   });
 
   it('lists only one directory and reports when results are capped', () => {
@@ -113,5 +126,57 @@ describe('local file tools', () => {
     writeFileSync(path, 'x');
     expect(tools.run('file_read', { path, offset: -1 }).ok).toBe(false);
     expect(tools.run('file_read', { path, offset: 2 }).ok).toBe(false);
+  });
+
+  it('searches a bounded tree by filename and extension without returning file contents', () => {
+    const root = tempHome();
+    mkdirSync(join(root, 'nested'));
+    writeFileSync(join(root, 'nested', 'Quarterly Plan.pdf'), 'private document body');
+    writeFileSync(join(root, 'nested', 'other.txt'), 'not a match');
+    const result = new FileTools().run('file_search', { directory: root, query: 'quarterly', extension: '.pdf' });
+    expect(result.ok).toBe(true);
+    expect(result.detail).toMatchObject({ matches: [{ path: join(root, 'nested', 'Quarterly Plan.pdf') }], truncated: false });
+    expect(result.content).not.toContain('private document body');
+    expect(result.verification?.source).toContain('filesystem enumeration');
+  });
+
+  it('reads metadata and creates only a new one-level directory with postcondition checks', () => {
+    const root = tempHome();
+    const source = join(root, 'ordinary.txt');
+    writeFileSync(source, 'hello');
+    const tools = new FileTools();
+    expect(tools.run('file_metadata', { path: source })).toMatchObject({ ok: true, detail: { type: 'file', sizeBytes: 5 } });
+    const created = tools.run('directory_create', { path: join(root, 'Project Notes') });
+    expect(created.ok).toBe(true);
+    expect(existsSync(join(root, 'Project Notes'))).toBe(true);
+    expect(tools.run('directory_create', { path: join(root, 'missing', 'child') }).ok).toBe(false);
+    expect(tools.run('directory_create', { path: join(root, 'Project Notes') }).errorCode).toBe('DENIED');
+  });
+
+  it('copies and renames files without overwriting and verifies the resulting data', () => {
+    const root = tempHome();
+    const source = join(root, 'source.txt');
+    const copy = join(root, 'copy.txt');
+    const renamed = join(root, 'renamed.txt');
+    writeFileSync(source, 'harmless fixture');
+    const tools = new FileTools();
+    expect(tools.run('file_copy', { source, destination: copy })).toMatchObject({ ok: true, verification: { source: 'filesystem read-back SHA-256' } });
+    expect(readFileSync(copy, 'utf8')).toBe('harmless fixture');
+    expect(tools.run('file_copy', { source, destination: copy }).errorCode).toBe('DENIED');
+    expect(tools.run('file_rename', { source: copy, destination: renamed }).ok).toBe(true);
+    expect(existsSync(copy)).toBe(false);
+    expect(readFileSync(renamed, 'utf8')).toBe('harmless fixture');
+    expect(tools.run('file_rename', { source, destination: renamed }).errorCode).toBe('DENIED');
+  });
+
+  it('refuses sensitive file names for search, metadata, copy and rename', () => {
+    const root = tempHome();
+    const secret = join(root, 'access-token.txt');
+    writeFileSync(secret, 'never returned');
+    const tools = new FileTools();
+    expect(tools.run('file_search', { directory: root, query: 'token' }).detail).toMatchObject({ matches: [] });
+    expect(tools.run('file_metadata', { path: secret }).errorCode).toBe('DENIED');
+    expect(tools.run('file_copy', { source: secret, destination: join(root, 'copy.txt') }).errorCode).toBe('DENIED');
+    expect(tools.run('file_rename', { source: secret, destination: join(root, 'ordinary.txt') }).errorCode).toBe('DENIED');
   });
 });

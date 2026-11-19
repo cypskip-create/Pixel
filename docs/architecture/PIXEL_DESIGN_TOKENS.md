@@ -1,41 +1,42 @@
-# Pixel monochrome design tokens
+# Pixel charcoal design tokens
 
-Updated: 2026-11-18. Pixel's dark UI uses a black and charcoal grayscale palette
-across the floating Island, Workspace, Settings, popovers, task states and
-characters. The optional light theme also remains grayscale.
+Updated: 2026-11-19. Pixel's UI uses black and charcoal surfaces across the
+floating Island, Workspace, Settings and popovers. Muted sage is reserved for
+selected interaction and verified/live states. Pix itself uses the approved
+silver-and-mint character palette. The optional light theme remains neutral.
 
 ## Dark palette
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--color-app-bg` | `#0D0D0D` | Main Workspace canvas |
-| `--color-sidebar` | `#141414` | Sidebar and secondary panel |
-| `--color-surface` | `#1B1B1B` | Standard/primary panel |
-| `--color-surface-raised` | `#222222` | Elevated panels and controls |
-| `--color-hover` | `#292929` | Hover surface |
-| `--color-selected` | `#303030` | Selected/active surface |
-| `--color-border` | `#333333` | Border and divider |
-| `--color-border-strong` | `#4A4A4A` | Emphasized border |
-| `--color-popover` | `#1B1B1B` | Menus and popovers |
-| `--color-ink` | `#F4F4F4` | Primary text |
-| `--color-ink-soft` | `#B8B8B8` | Secondary text |
-| `--color-ink-dim` | `#888888` | Muted text |
-| `--color-brand-foreground` | `#D4D4D4` | Pixel mark and brand foreground; aliases `--color-icon` |
-| `--color-focus` | `#D4D4D4` | Keyboard focus outline |
-| `--color-disabled` | `#777777` | Disabled controls |
-| `--color-approval` | `#D4D4D4` | Approval attention; paired with explicit label/icon |
-| `--color-error` | `#F4F4F4` | Error foreground; paired with explicit label/icon |
-| `--color-success` | `#D4D4D4` | Success foreground; paired with explicit label/icon |
-| `--color-recording` | `#F4F4F4` | Recording and waveform |
-| `--color-working` | `#B8B8B8` | Working state |
-| `--color-state-idle` | `#B8B8B8` | Idle character state |
-| `--color-state-listening` | `#F4F4F4` | Listening character state |
-| `--color-state-thinking` | `#D4D4D4` | Thinking character state |
-| `--color-state-speaking` | `#D4D4D4` | Speaking character state |
-| `--color-state-working` | `#B8B8B8` | Working character state |
-| `--color-state-success` | `#D4D4D4` | Completed character state |
-| `--color-state-error` | `#F4F4F4` | Error character state |
-| `--color-state-paused` | `#888888` | Paused character state |
+| `--color-app-bg` | `#0E1013` | Main Workspace canvas |
+| `--color-sidebar` | `#1A1E23` | Sidebar and secondary panel |
+| `--color-surface` | `#20252A` | Standard/primary panel |
+| `--color-surface-raised` | `#2A3138` | Elevated panels and controls |
+| `--color-hover` | `#333A40` | Hover surface |
+| `--color-selected` | `#394147` | Selected/active surface |
+| `--color-border` | `#3A4147` | Border and divider |
+| `--color-border-strong` | `#515A61` | Emphasized border |
+| `--color-popover` | `#20252A` | Menus and popovers |
+| `--color-ink` | `#E6E9ED` | Primary text |
+| `--color-ink-soft` | `#C6CACD` | Secondary text |
+| `--color-ink-dim` | `#9AA1A6` | Muted text |
+| `--color-icon` / `--color-brand-foreground` | `#D2D7DB` | Pixel mark and general icon foreground |
+| `--color-accent` | `#A7D7C2` | Selected controls, focus and live/success details |
+| `--color-accent-hover` | `#D6EDE3` | Interactive accent hover |
+| `--color-accent-foreground` | `#101113` | Foreground on sage controls |
+| `--color-warning` / `--color-approval` | `#D5AB72` | Warning/approval cue with label/icon |
+| `--color-destructive` / `--color-error` | `#D88B83` | Error, recording and destructive cue |
+| `--color-disabled` | `#777E82` | Disabled controls |
+| `--color-working` | `#A7D7C2` | Active work indication |
+| `--color-state-idle` | `#B8BEC2` | Idle character state |
+| `--color-state-listening` | `#A7D7C2` | Listening state |
+| `--color-state-thinking` | `#A7D7C2` | Thinking state |
+| `--color-state-speaking` | `#A7D7C2` | Speaking state |
+| `--color-state-working` | `#A7D7C2` | Working state |
+| `--color-state-success` | `#A7D7C2` | Completed state |
+| `--color-state-error` | `#D88B83` | Error state |
+| `--color-state-paused` | `#D5AB72` | Paused state |
 
 ## Replaced palette
 
@@ -72,9 +73,11 @@ The old light-theme values (`rgb(248 250 253 / 0.9)`,
 and `#5b6779`) are replaced by the neutral light overrides in
 `src/renderer/index.css`.
 
-Status colors are deliberately grayscale. Approval, errors, success and
-recording remain identifiable through their labels, icons, outlines, shape and
-motion as well as contrast; color is never their only signal.
+Most status colors remain grayscale. Sage marks selected/live and verified
+success states; errors and warnings use their distinct semantic treatment.
+Approval, errors, success and recording remain identifiable through labels,
+icons, outlines, shape and motion as well as color; color is never their only
+signal.
 
 ## Surfaces and marks
 
@@ -93,3 +96,21 @@ motion as well as contrast; color is never their only signal.
 Theme tests inspect renderer source, semantic token values, actual rendered P
 markup, removal of glass/gradient styling and cursor dimensions. These checks
 do not replace screenshots or motion review on the target Windows laptop.
+
+## Approved Pix mascot accents
+
+The 2026-11-19 Pix character reference adds character-only silver/mint colors;
+it does not change the charcoal application surface palette. In the current
+renderer, `--pix-face` is `#0E1013`, `--pix-shell` is `#E6E9ED`,
+`--pix-shell-shadow` is `#AEB5BC`, `--pix-fold` is `#A7D7C2`,
+`--pix-fold-highlight` and `--pix-eye-highlight` are `#D6EDE3`, and
+`--pix-eye` is `#9BE5C7`. These values are scoped to the SVG character and its
+small state details. The application interaction accent is `#A7D7C2` in the
+dark theme; its hover is `#D6EDE3`, with `#101113` foreground. The light theme
+uses a darker sage for contrast.
+
+Settings switches use the accent only when enabled. Disabled tracks remain
+charcoal with a light thumb; both states expose native checkbox behavior,
+`role="switch"`, `aria-checked`, keyboard operation and a visible focus ring.
+Automated tests cover semantics and selected theme rules; actual display
+contrast and screenshots at Windows 100% and 125% scaling remain pending.

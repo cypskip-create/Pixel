@@ -15,6 +15,7 @@ import type { Display, WebContents, WebFrameMain } from 'electron';
 import { join } from 'node:path';
 import type {
   CompanionSettings,
+  AssistantState,
   ScreenWindowTarget,
   Surface,
   VisualGuidanceAnnotation,
@@ -58,6 +59,7 @@ export interface WindowManagerDeps {
   rendererIndexPath: string;
   onAnchorChange: (anchor: { monitorId: string; position: null }) => void;
   onVisibilityChange: (visible: boolean) => void;
+  onCursorDiagnostic?: (message: string, error?: boolean) => void;
   workspaceWindow?: { x: number | null; y: number | null; width: number; height: number; maximized: boolean };
   onWorkspaceBoundsChange?: (state: { x: number; y: number; width: number; height: number; maximized: boolean }) => void;
 }
@@ -76,6 +78,9 @@ export class WindowManager {
   private mainVisibleRequested = true;
   private cursorWindow: BrowserWindow | null = null;
   private cursorWindowReady = false;
+  private cursorReadyTimer: ReturnType<typeof setTimeout> | null = null;
+  private cursorAssistantState: AssistantState = 'idle';
+  private cursorVisibilityStatus = '';
   private guidanceWindow: BrowserWindow | null = null;
   private guidanceWindowReady = false;
   private guidanceTimer: ReturnType<typeof setInterval> | null = null;
@@ -619,6 +624,27 @@ export class WindowManager {
     return Boolean(this.main && !this.main.isDestroyed() && this.main.webContents === sender);
   }
 
+  isCursorSender(sender: WebContents): boolean {
+    return Boolean(this.cursorWindow && !this.cursorWindow.isDestroyed() && this.cursorWindow.webContents === sender);
+  }
+
+  markCursorRendererReady(sender: WebContents): void {
+    if (!this.isCursorSender(sender) || this.cursorWindowReady) return;
+    this.cursorWindowReady = true;
+    if (this.cursorReadyTimer !== null) clearTimeout(this.cursorReadyTimer);
+    this.cursorReadyTimer = null;
+    this.reportCursorStatus(`renderer-ready; display=${screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id}; window=${CURSOR_WINDOW_SIZE}x${CURSOR_WINDOW_SIZE}`);
+    this.sendCursorState();
+    this.sendCursorPlacement();
+    this.syncCursorWindow(true);
+  }
+
+  setCursorAssistantState(state: AssistantState): void {
+    if (this.cursorAssistantState === state) return;
+    this.cursorAssistantState = state;
+    this.sendCursorState();
+  }
+
   isWorkspaceSender(sender: WebContents): boolean {
     return Boolean(this.workspace && !this.workspace.isDestroyed() && this.workspace.webContents === sender);
   }
@@ -809,14 +835,18 @@ export class WindowManager {
   }
 
   private canShowCursorCompanion(): boolean {
-    const main = this.main;
     return shouldShowCursorCompanion({
       enabled: this.cursorCompanionEnabled,
-      surface: this.surface,
-      mainVisible: this.mainVisibleRequested && Boolean(main && !main.isDestroyed() && main.isVisible()),
-      workspaceFocused: this.workspaceFocused || Boolean(this.settings && !this.settings.isDestroyed() && this.settings.isVisible()),
+      settingsOpen: Boolean(this.settings && !this.settings.isDestroyed() && this.settings.isVisible()),
+      workspaceFocused: this.workspaceFocused,
       sessionLocked: this.sessionLocked,
     });
+  }
+
+  private reportCursorStatus(status: string, error = false): void {
+    if (this.cursorVisibilityStatus === status) return;
+    this.cursorVisibilityStatus = status;
+    this.deps.onCursorDiagnostic?.(status, error);
   }
 
   /** Refreshes cursor tracking after a power/display transition or settings change. */
@@ -833,7 +863,10 @@ export class WindowManager {
 
   private syncCursorWindow(forceSnap = false): void {
     if (!this.cursorCompanionEnabled) {
+      this.reportCursorStatus('disabled');
       this.stopCursorFollow();
+      if (this.cursorReadyTimer !== null) clearTimeout(this.cursorReadyTimer);
+      this.cursorReadyTimer = null;
       if (this.cursorWindow && !this.cursorWindow.isDestroyed()) this.cursorWindow.close();
       this.cursorWindow = null;
       this.cursorWindowReady = false;
@@ -845,6 +878,10 @@ export class WindowManager {
 
     if (!this.canShowCursorCompanion()) {
       this.stopCursorFollow();
+      const reason = this.sessionLocked ? 'session-locked'
+        : this.settings && !this.settings.isDestroyed() && this.settings.isVisible() ? 'settings-open'
+          : 'visibility-policy';
+      this.reportCursorStatus(`hidden: ${reason}`);
       if (this.cursorWindow && !this.cursorWindow.isDestroyed() && this.cursorWindow.isVisible()) {
         this.cursorWindow.hide();
       }
@@ -854,9 +891,16 @@ export class WindowManager {
     }
 
     if (this.cursorWindow && !this.cursorWindow.isDestroyed()) {
-      if (!this.cursorWindowReady) return;
+      if (!this.cursorWindowReady) {
+        this.reportCursorStatus('waiting: renderer-ready-ack');
+        return;
+      }
       if (!this.cursorWindow.isVisible() || forceSnap) this.positionCursorCompanion(true);
-      if (!this.cursorWindow.isVisible()) this.cursorWindow.showInactive();
+      if (!this.cursorWindow.isVisible()) {
+        this.cursorWindow.showInactive();
+        const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+        this.reportCursorStatus(`visible; display=${display.id}; window=${CURSOR_WINDOW_SIZE}x${CURSOR_WINDOW_SIZE}`);
+      }
       this.startCursorFollow();
       return;
     }
@@ -898,27 +942,41 @@ export class WindowManager {
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
     win.setIgnoreMouseEvents(true, { forward: true });
-    win.once('ready-to-show', () => {
-      if (!win.isDestroyed()) {
-        this.cursorWindowReady = true;
-        this.syncCursorWindow(true);
-      }
-    });
     win.webContents.on('did-finish-load', () => {
-      if (this.cursorWindow === win) this.sendCursorPlacement();
+      if (this.cursorWindow !== win) return;
+      this.reportCursorStatus('renderer-loaded; awaiting-ready-ack');
     });
+    win.webContents.on('did-fail-load', (_event, code, description) => {
+      if (this.cursorWindow === win) this.reportCursorStatus(`renderer-load-failed: ${code} ${description}`, true);
+    });
+    win.webContents.on('preload-error', (_event, preload, error) => {
+      if (this.cursorWindow === win) this.reportCursorStatus(`preload-failed: ${preload} ${error.message}`, true);
+    });
+    win.webContents.on('render-process-gone', (_event, details) => {
+      if (this.cursorWindow === win) this.reportCursorStatus(`renderer-crashed: ${details.reason} exit=${details.exitCode}`, true);
+    });
+    this.cursorReadyTimer = setTimeout(() => {
+      if (this.cursorWindow === win && !this.cursorWindowReady) {
+        this.reportCursorStatus('renderer-ready-ack timed out after 8s; cursor window remains hidden. Toggle the setting to retry.', true);
+      }
+    }, 8_000);
+    this.cursorReadyTimer.unref?.();
     win.on('closed', () => {
       if (this.cursorWindow === win) {
+        if (this.cursorReadyTimer !== null) clearTimeout(this.cursorReadyTimer);
+        this.cursorReadyTimer = null;
         this.cursorWindow = null;
         this.cursorWindowReady = false;
         this.stopCursorFollow();
         this.cursorPlacement = null;
         this.previousCursor = null;
         this.cursorDisplayId = null;
+        this.reportCursorStatus('window-closed');
       }
     });
     this.loadRenderer(win, '?window=cursor');
     this.cursorWindow = win;
+    this.reportCursorStatus(`created; awaiting renderer; display=${display.id}; window=${CURSOR_WINDOW_SIZE}x${CURSOR_WINDOW_SIZE}`);
   }
 
   private startCursorFollow(): void {
@@ -1016,6 +1074,13 @@ export class WindowManager {
     } catch {
       // The renderer may be shutting down while the pointer is moving.
     }
+  }
+
+  private sendCursorState(): void {
+    const win = this.cursorWindow;
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isLoading()) return;
+    try { win.webContents.send(CHANNELS.windowCursorState, this.cursorAssistantState); }
+    catch { /* the passive renderer can be navigating or closing */ }
   }
 
   /* ------------------------------ displays ---------------------------- */

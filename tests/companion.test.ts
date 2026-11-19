@@ -565,18 +565,16 @@ describe('companion placement', () => {
     expect(rectContains(leftMonitor.bounds, position)).toBe(true);
   });
 
-  it('uses edge hysteresis and hides unless the Island is compact and visible', () => {
+  it('uses edge hysteresis and shows the follower independently from the hidden Island', () => {
     const nearEdge = placeCursorCompanion({ x: 1500, y: 300 }, area);
     const slightlyBack = placeCursorCompanion({ x: 1495, y: 300 }, area, DEFAULT_PLACE_OPTIONS, nearEdge);
     expect(nearEdge.flipX).toBe(true);
     expect(slightlyBack.flipX).toBe(true);
-    expect(shouldShowCursorCompanion({ enabled: true, surface: 'idle', mainVisible: true, workspaceFocused: false, sessionLocked: false })).toBe(true);
-    for (const surface of ['active', 'bubble', 'task', 'hidden'] as const) {
-      expect(shouldShowCursorCompanion({ enabled: true, surface, mainVisible: true, workspaceFocused: false, sessionLocked: false })).toBe(false);
-    }
-    expect(shouldShowCursorCompanion({ enabled: true, surface: 'idle', mainVisible: false, workspaceFocused: false, sessionLocked: false })).toBe(false);
-    expect(shouldShowCursorCompanion({ enabled: true, surface: 'idle', mainVisible: true, workspaceFocused: true, sessionLocked: false })).toBe(false);
-    expect(shouldShowCursorCompanion({ enabled: true, surface: 'idle', mainVisible: true, workspaceFocused: false, sessionLocked: true })).toBe(false);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: false, workspaceFocused: false, sessionLocked: false })).toBe(true);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: true, workspaceFocused: false, sessionLocked: false })).toBe(false);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: false, workspaceFocused: true, sessionLocked: false })).toBe(true);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: false, workspaceFocused: false, sessionLocked: true })).toBe(false);
+    expect(shouldShowCursorCompanion({ enabled: false, settingsOpen: false, workspaceFocused: false, sessionLocked: false })).toBe(false);
   });
 });
 

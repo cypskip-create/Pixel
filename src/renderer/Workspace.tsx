@@ -15,6 +15,7 @@ import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { MemoryPanel } from '@/components/MemoryPanel';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
+import { PixMascot } from '@/components/PixMascot';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
@@ -59,6 +60,12 @@ export function Workspace(): React.JSX.Element {
   const activeMode = settings.companion.mode;
   const activeTask = useMemo(() => selectActiveTask(tasks), [tasks]);
   const title = chat.historyLoading ? 'Restoring conversation…' : history.find((item) => item.id === chat.conversationId)?.title ?? 'New conversation';
+  const recentTaskDisplay = recentOutcome ? taskDisplayState(recentOutcome) : null;
+  const taskOutcome = recentOutcome && !activeTask
+    ? recentOutcome.status === 'completed' && !recentTaskDisplay?.verificationPending ? 'success'
+      : recentOutcome.status === 'failed' || recentOutcome.status === 'blocked' || recentTaskDisplay?.verificationPending ? 'error'
+        : null
+    : null;
   const assistantState: AssistantState = deriveAssistantState({
     stopped,
     permission: permission !== null,
@@ -68,6 +75,7 @@ export function Workspace(): React.JSX.Element {
     listening: listening || pushToTalkState === 'recording',
     transcribing: pushToTalkState === 'stopping' || pushToTalkState === 'transcribing',
     executing: activeTask !== null,
+    taskOutcome,
   });
 
   useEffect(() => () => {
@@ -146,6 +154,7 @@ export function Workspace(): React.JSX.Element {
       knownTasks.current.set(next.id, next);
       if (previous && isTaskActive(previous) && !isTaskActive(next)) setRecentOutcome(next);
       else if (isTaskActive(next)) setRecentOutcome(null);
+      else setRecentOutcome((current) => current?.id === next.id ? next : current);
       setTasks((current) => mergeTask(current, next));
     });
     void api.list().then((items) => {
@@ -426,6 +435,7 @@ export function Workspace(): React.JSX.Element {
               hasTaskDetails={activeTask !== null}
               onOpenTaskDetails={() => setContextOpen(true)}
               assistantState={assistantState}
+              reducedMotion={settings.companion.reducedMotion}
             />
             {pendingApproval}
             {activeTask ? <WorkspaceTaskActivity task={activeTask} onOpenDetails={() => setContextOpen(true)} /> : null}
@@ -446,12 +456,12 @@ export function Workspace(): React.JSX.Element {
               }}
               aria-label="Conversation"
             >
-              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><PixelMark size={35} /><h2>What can Pixel help with?</h2></div> : null}
+              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><PixMascot size={108} state="idle" reducedMotion={settings.companion.reducedMotion} decorative className="workspace-empty-mascot" /><h2>What can Pixel help with?</h2></div> : null}
               {chat.messages.map((message) => <article key={message.id} className={`workspace-message ${message.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
-                {message.role === 'assistant' ? <div className="workspace-message-mark"><PixelMark size={19} /></div> : null}
+                {message.role === 'assistant' ? <div className="workspace-message-mark"><PixMascot size={22} state="idle" animate={false} reducedMotion decorative /></div> : null}
                 <div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>{message.role === 'user' ? 'You' : 'Pixel'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{message.aborted ? <span>Stopped</span> : null}</div>{message.error && !message.content ? <p role="alert" className="text-neutral-200">{message.error}</p> : <MarkdownMessage text={message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')} />}{message.error && message.content ? <p role="alert" className="mt-2 text-neutral-200">{message.error}</p> : null}</div>
               </article>)}
-              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="workspace-message-mark"><PixelMark size={19} /></div><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
+              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="workspace-message-mark"><PixMascot size={22} state="thinking" animate={false} reducedMotion decorative /></div><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
               {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
             </div>
             <WorkspaceComposer

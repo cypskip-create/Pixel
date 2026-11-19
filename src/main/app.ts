@@ -106,6 +106,10 @@ function createWindowManager(store: SettingsStore): WindowManager {
       tray?.rebuild();
       void visible;
     },
+    onCursorDiagnostic: (message, error = false) => {
+      if (error) boot.error(`Cursor companion: ${message}`);
+      else boot.info(`Cursor companion: ${message}`);
+    },
     workspaceWindow: store.get().workspaceWindow,
     onWorkspaceBoundsChange: (state) => {
       try { store.set({ workspaceWindow: state }); } catch { /* window state is best-effort */ }

@@ -921,6 +921,11 @@ export interface CypsBridge {
     onSummon(handler: () => void): () => void;
     onCursorMotion(handler: (reducedMotion: boolean) => void): () => void;
     onCursorPlacement(handler: (orientation: { flipX: boolean; flipY: boolean }) => void): () => void;
+    /** Report the current assistant state so the passive desktop character can mirror it. */
+    setCursorAssistantState(state: AssistantState): Promise<void>;
+    /** Cursor window acknowledges its first completed renderer paint. */
+    cursorRendererReady(): Promise<void>;
+    onCursorAssistantState(handler: (state: AssistantState) => void): () => void;
   };
   chat: {
     send(request: ChatRequest): Promise<{ requestId: string; persistence?: 'persistent' | 'session' }>;

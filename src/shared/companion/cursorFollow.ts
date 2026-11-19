@@ -1,5 +1,4 @@
 import { clamp, clampPoint, rectBottom, rectRight, type Point, type Rect, type Size } from './geometry';
-import type { Surface } from '../types';
 
 /**
  * Spring-driven cursor following.
@@ -250,13 +249,14 @@ function chooseFlip(
 
 export function shouldShowCursorCompanion(input: {
   enabled: boolean;
-  surface: Surface;
-  mainVisible: boolean;
+  settingsOpen: boolean;
   workspaceFocused: boolean;
   sessionLocked: boolean;
 }): boolean {
-  return input.enabled && input.surface === 'idle' && input.mainVisible &&
-    !input.workspaceFocused && !input.sessionLocked;
+  // Cursor Buddy is its own desktop overlay; the focused Pixel Workspace is a
+  // valid place to show it. Settings remains hidden so its native preview is
+  // never confused with the real click-through desktop window.
+  return input.enabled && !input.settingsOpen && !input.sessionLocked;
 }
 
 export type BubbleSide = 'right' | 'left' | 'above' | 'below';

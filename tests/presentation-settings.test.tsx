@@ -21,6 +21,49 @@ afterEach(() => {
 });
 
 describe('pinned and cursor companion preferences', () => {
+  it('exposes accessible switch states and separate cursor/Pix previews', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.companion.cursorCompanionEnabled = true;
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => {
+      root?.render(createElement(SettingsPanel, {
+        settings,
+        displays: [],
+        onPatch: vi.fn(),
+        onRequestMode: vi.fn(),
+        onClose: vi.fn(),
+        hasApiKey: false,
+        onSaveApiKey: async () => ({ ok: true }),
+        onRemoveApiKey: async () => ({ ok: true }),
+        onTestConnection: async () => ({ ok: true }),
+        error: null,
+        saving: false,
+      }));
+    });
+
+    const toggle = host.querySelector<HTMLInputElement>('[role="switch"][aria-label="Show cursor companion"]');
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(host.querySelector('svg.cursor-buddy')).toBeNull();
+
+    const previewButton = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Preview companion');
+    expect(previewButton).not.toBeNull();
+    act(() => previewButton?.click());
+    expect(host.textContent).toContain('Settings preview only. The desktop window appears after Settings closes.');
+    expect(host.querySelector('svg.cursor-buddy')).not.toBeNull();
+    expect(host.querySelector('svg.cursor-buddy')?.classList.contains('pix-mascot')).toBe(false);
+
+    const expression = host.querySelector<HTMLSelectElement>('[aria-label="Preview Pix expression"]');
+    expect(expression).not.toBeNull();
+    act(() => {
+      if (!expression) throw new Error('Pix expression selector is missing.');
+      expression.value = 'thinking';
+      expression.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(host.querySelector('svg.pix-mascot')?.getAttribute('data-expression')).toBe('thinking');
+  });
+
   it('shows the pinned bar, selects a display, and toggles the independent cursor companion', () => {
     const onPatch = vi.fn();
     host = document.createElement('div');

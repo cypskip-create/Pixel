@@ -2,7 +2,67 @@
 
 Updated: 2026-11-19
 
-## Current handoff — Tools 4.2
+## Current handoff — Experience Polish 5.0 and official Pix
+
+Base SHA reviewed: `6ac637e2149872e112b78177b3dcda41c2c8c764`.
+Branch: `codex/interaction-engine-3`. All work below remains uncommitted for
+the user to inspect and commit. No release was published.
+
+- **CI repair:** the latest reviewed Windows Actions run
+  [44522917967](https://github.com/cypskip-create/Pixel/actions/runs/44522917967)
+  stopped at packaging: the frozen voice worker answered `BAD_JSON` before a
+  valid JSON request was available. The packaging smoke now uses
+  `scripts/smoke-frozen-voice-worker.mjs`, sends an explicitly encoded UTF-8
+  JSONL frame from Node, validates the response and bounds process lifetime.
+  Since the frozen Python 3.12 executable cannot be built in this environment
+  and the changes are unpushed, the repair has **no successful CI run yet**.
+- **Official mascot:** `src/renderer/components/PixMascot.tsx` contains the
+  single SVG geometry and expression mapping for the approved Pix: light-silver
+  rounded shell, dark face, folded mint top-right corner, expressive mint eyes,
+  small arms and feet. Workspace header, new-chat welcome, current assistant
+  messages and the expanded Island use appropriately sized variants; historic
+  message avatars are static. Settings has an optional expression preview.
+  Pix is not the cursor follower.
+- **Character activity:** `src/renderer/hooks/useCompanionAnimation.ts` uses
+  bounded idle blink timers, pauses when the document is hidden, cleans timers
+  up and respects the app setting plus Windows reduced-motion preference.
+  Existing assistant states drive expression. The behavior is covered by
+  component/state tests, but visual timing and performance have not been
+  measured on the laptop.
+- **Cursor Buddy:** retained as its own pointer-shaped component and native
+  window. Settings can show a clearly labeled artwork preview; the real native
+  follower stays hidden while Settings is open. Cursor visibility is no longer
+  coupled to Workspace focus or Island idle state. A typed ready message and
+  timeout/error diagnostics now describe native lifecycle. Actual Windows
+  visibility, click-through, focus and multi-monitor behavior remain
+  unverified.
+- **Theme and controls:** the existing black/charcoal design now has a
+  distinguishable sage enabled switch with keyboard/ARIA semantics and focus
+  ring. Approved Pix artwork uses reference mint. Screenshot comparison and
+  display-scaling review remain outstanding.
+- **Daily file operations:** added bounded home-only search and metadata, safe
+  one-level folder creation, exclusive copy and verify-before-source-removal
+  rename to the existing scoped filesystem tool system. Clipboard and new
+  broad app/browser workflows were not implemented; existing tool systems are
+  retained.
+- **Validation:** `npm run typecheck` passed; `npm run build` passed; Vitest
+  **834 passed, 27 skipped, 0 failed (861 total; 54 passed files, 1 skipped)**;
+  Python worker tests **11/11**; native-helper build/protocol ping passed; the
+  harmless WinForms UIA fixture passed with 3 verification records and 61
+  durable events. Full output/report details are in
+  `docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md`.
+- **Still unverified/blocked:** sandbox preload smoke exits `2147483651`
+  before output; Electron GUI could not launch a changed-code instance because
+  port 5199 belonged to another checkout; Chromium download fails DNS; no
+  Python 3.12 x64 or `makensis`; therefore frozen worker, package artifacts,
+  screenshots, visual matrix, GPU behavior and end-to-end real Pixel task UI
+  are not claimed as passed. No new GitHub Actions run exists.
+
+The exact Windows commands and acceptance sequence are in
+[`docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
+and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md).
+
+## Previous checkpoint — Tools 4.2
 
 Branch: `codex/interaction-engine-3`. Local HEAD before these uncommitted
 changes: `cbac143ec28b0b19669aa58a911b5f53af0f5b5e`. No commit, push or release
