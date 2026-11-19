@@ -37,6 +37,7 @@ import type {
   RoutineRunRecord,
   MemoryRecordView,
   MemoryExportView,
+  MemoryRevisionView,
   PixelMemoryKind,
   ProjectView,
   WorkspaceWindowState,
@@ -182,6 +183,8 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.permissionsRespond, decision) as Promise<void>,
     listActiveGrants: () =>
       ipcRenderer.invoke(CH.permissionsListActiveGrants) as Promise<PermissionGrant[]>,
+    revokeGrant: (grantId: string) => ipcRenderer.invoke(CH.permissionsRevokeGrant, grantId) as Promise<boolean>,
+    clearExpired: () => ipcRenderer.invoke(CH.permissionsClearExpired) as Promise<number>,
     revokeAll: () => ipcRenderer.invoke(CH.permissionsRevokeAll) as Promise<number>,
   },
 
@@ -223,6 +226,7 @@ const bridge: CypsBridge = {
     update: (id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }) =>
       ipcRenderer.invoke(CH.memoryUpdate, id, patch) as Promise<MemoryRecordView>,
     delete: (id: string) => ipcRenderer.invoke(CH.memoryDelete, id) as Promise<boolean>,
+    history: (id: string) => ipcRenderer.invoke(CH.memoryHistory, id) as Promise<MemoryRevisionView[]>,
     export: () => ipcRenderer.invoke(CH.memoryExport) as Promise<MemoryExportView>,
   },
 

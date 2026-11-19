@@ -284,6 +284,8 @@ export interface PrivacySettings {
   screenshotRequiresApproval: true;
   /** Retain conversation history locally. */
   persistHistory: boolean;
+  /** Save small, durable facts from trusted user messages into the active project. */
+  automaticMemory: boolean;
   /** Number of days to keep history; 0 = forever. */
   historyRetentionDays: number;
 }
@@ -354,6 +356,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   privacy: {
     screenshotRequiresApproval: true,
     persistHistory: true,
+    automaticMemory: true,
     historyRetentionDays: 0,
   },
   globalAccelerator: 'CommandOrControl+Shift+C',
@@ -393,6 +396,8 @@ export function mergeSettings(partial: unknown): AppSettings {
 
   // Never allow the screenshot-approval invariant to be turned off.
   base.privacy.screenshotRequiresApproval = true;
+  if (typeof base.privacy.persistHistory !== 'boolean') base.privacy.persistHistory = DEFAULT_SETTINGS.privacy.persistHistory;
+  if (typeof base.privacy.automaticMemory !== 'boolean') base.privacy.automaticMemory = DEFAULT_SETTINGS.privacy.automaticMemory;
   base.workspaceWindow.width = finiteWithin(base.workspaceWindow.width, 900, 3840, DEFAULT_SETTINGS.workspaceWindow.width);
   base.workspaceWindow.height = finiteWithin(base.workspaceWindow.height, 600, 2160, DEFAULT_SETTINGS.workspaceWindow.height);
   base.workspaceWindow.x = typeof base.workspaceWindow.x === 'number' && Number.isFinite(base.workspaceWindow.x) ? Math.min(Math.max(base.workspaceWindow.x, -20_000), 20_000) : null;
@@ -651,7 +656,7 @@ export interface TaskRecord {
   handoffReason?: string;
   /** Set after a handoff; cleared only after Pixel observes the environment again. */
   reobserveRequired?: boolean;
-  /** Successful state changes that still need an explicit postcondition check. */
+  /** State changes with missing or uncertain outcomes that still need verification. */
   pendingVerifications?: Array<{
     stepId: string;
     toolName: string;
@@ -757,6 +762,14 @@ export interface MemoryExportView {
   memories: MemoryRecordView[];
 }
 
+export interface MemoryRevisionView {
+  content: string;
+  source: string;
+  confidence: 'user_approved' | 'source_backed' | 'inferred';
+  updatedAt: number;
+  reason: string;
+}
+
 /* ------------------------------------------------------------------ *
  * Permission model
  * ------------------------------------------------------------------ */
@@ -779,9 +792,12 @@ export interface PermissionRequest {
   /** Raw arguments, shown in the expanded details view. */
   args: Record<string, unknown>;
   createdAt: number;
-  /** Whether this action has a narrow target suitable for a session grant. */
+  /** Whether the main-process capability policy allows a persistent grant. */
   allowPersistent?: boolean;
   scopeLabel?: string;
+  /** Main-process policy result; renderer hints are revalidated before use. */
+  alwaysAllowed?: boolean;
+  alwaysDisabledReason?: string;
 }
 
 export interface PermissionDecision {
@@ -953,6 +969,8 @@ export interface CypsBridge {
     onResolved(handler: (requestId: string) => void): () => void;
     respond(decision: PermissionDecision): Promise<void>;
     listActiveGrants(): Promise<PermissionGrant[]>;
+    revokeGrant(grantId: string): Promise<boolean>;
+    clearExpired(): Promise<number>;
     revokeAll(): Promise<number>;
   };
   tasks: {
@@ -985,6 +1003,7 @@ export interface CypsBridge {
     onProjectChanged(handler: (project: ProjectView) => void): () => void;
     update(id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }): Promise<MemoryRecordView>;
     delete(id: string): Promise<boolean>;
+    history(id: string): Promise<MemoryRevisionView[]>;
     export(): Promise<MemoryExportView>;
   };
   audit: {
@@ -1050,6 +1069,10 @@ export interface PermissionGrant {
   expiresAt?: number;
   /** Narrows the grant to one origin/application. Absent = tool-wide. */
   target?: GrantScope;
+  risk?: RiskLevel;
+  lastUsedAt?: number | null;
+  revokedAt?: number | null;
+  policyVersion?: number;
 }
 
 export interface AuditEntry {

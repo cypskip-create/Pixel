@@ -28,9 +28,8 @@ const RISK_SENTENCE: Record<RiskLevel, string> = {
 /**
  * The consent gate.
  *
- * Deliberately blocking: there is no auto-approve, no countdown, and no
- * "remember" default. Every control is a real button so the card is fully
- * keyboard operable, and the highest-risk affordance is styled as such.
+ * Deliberately blocking: every decision is explicit, keyboard operable and
+ * rendered the same in the floating Island and Workspace.
  */
 export function PermissionCard({ request, onDecide, pending = false, compact = false }: PermissionCardProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -122,24 +121,22 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
+          disabled={pending || request.alwaysAllowed !== true}
+          onClick={() => decide(true, 'always')}
+          title={request.alwaysAllowed ? `Allow future matching actions for ${request.scopeLabel ?? request.target}` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
+          className="no-drag flex-1 rounded-xl border border-neutral-400/35 bg-neutral-500/12 px-3 py-2 text-[12px] font-semibold text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/22 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Always Allow
+        </button>
+        <button
+          type="button"
           disabled={pending}
           onClick={() => decide(true, 'once')}
           autoFocus
-          className="no-drag flex-1 rounded-xl border border-neutral-400/40 bg-neutral-500/25 px-3 py-2 text-[12px] font-semibold text-neutral-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/40 disabled:opacity-50"
+          className="no-drag flex-1 rounded-xl border border-neutral-400/45 bg-neutral-500/25 px-3 py-2 text-[12px] font-semibold text-neutral-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/40 disabled:opacity-50"
         >
-          Allow once
+          Allow Once
         </button>
-        {request.allowPersistent === true ? (
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => decide(true, 'session')}
-            title="Approve for the rest of this app session, limited to the displayed scope"
-            className="no-drag flex-1 rounded-xl border border-[var(--color-border)] bg-white/8 px-3 py-2 text-[12px] font-semibold text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/16 hover:text-[var(--color-ink)] disabled:opacity-50"
-          >
-            Allow for session
-          </button>
-        ) : null}
         <button
           type="button"
           disabled={pending}
@@ -150,11 +147,9 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
         </button>
       </div>
 
-      {request.scopeLabel ? (
-        <p className="text-[10px] text-[var(--color-ink-dim)]">
-          {request.allowPersistent === true ? `Session approval is limited to ${request.scopeLabel}.` : 'This approval expires after one use.'}
-        </p>
-      ) : null}
+      <p className="text-[10px] text-[var(--color-ink-dim)]">
+        {request.alwaysAllowed ? `Always Allow is limited to ${request.scopeLabel ?? request.target}.` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
+      </p>
 
       <p className="text-[10px] leading-snug text-[var(--color-ink-dim)]">
         Pixel is paused until you choose. Nothing runs on its own.

@@ -196,7 +196,7 @@ describe('conversation-first Workspace controls', () => {
     expect(rendered.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(rendered.textContent).toContain('Activate the Save button');
     expect(rendered.textContent).toContain('Untitled - Notepad');
-    expect(rendered.textContent).toContain('Allow once');
+    expect(rendered.textContent).toContain('Allow Once');
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Deny'))?.click());
     expect(onDecide).toHaveBeenCalledWith({ requestId: 'approval-1', approved: false, duration: 'once' });
   });

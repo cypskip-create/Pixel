@@ -3,7 +3,6 @@ import type { ChatRequest, ToolCall } from '../src/shared/types';
 import { AgentExecutor, type ToolRunner, type TurnRunner } from '../src/main/agent/executor';
 import { clipToolResult, MAX_TOOL_RESULT_CHARS, SYSTEM_PROMPT } from '../src/main/agent/conversation';
 import type { RunTurnOptions, TurnOutcome } from '../src/main/agent/conversation';
-import { escapeSendKeys } from '../src/main/agent/executors';
 import { isPrivateHost, BrowserSession } from '../src/main/agent/browser';
 import { AuditLog, PermissionBroker, TaskManager } from '../src/main/agent/runtime';
 import { ToolRegistry } from '../src/main/agent/tools';
@@ -113,31 +112,6 @@ describe('clipToolResult', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * SendKeys escaping
- * ------------------------------------------------------------------ */
-
-describe('escapeSendKeys', () => {
-  it('leaves ordinary text alone', () => {
-    expect(escapeSendKeys('Hello world 123')).toBe('Hello world 123');
-  });
-
-  it('escapes every SendKeys metacharacter', () => {
-    expect(escapeSendKeys('+^%~(){}[]')).toBe('{+}{^}{%}{~}{(}{)}{{}{}}{[}{]}');
-  });
-
-  it('neutralises an Alt+F4 style injection', () => {
-    // Unescaped, "%{F4}" would press Alt+F4 in the focused window.
-    const out = escapeSendKeys('%{F4}');
-    expect(out).toBe('{%}{{}F4{}}');
-    expect(out).not.toContain('%{F4}');
-  });
-
-  it('turns line breaks into Enter and drops carriage returns', () => {
-    expect(escapeSendKeys('a\r\nb')).toBe('a{ENTER}b');
-  });
-});
-
-/* ------------------------------------------------------------------ *
  * Private network guard
  * ------------------------------------------------------------------ */
 
@@ -189,11 +163,11 @@ describe('isPrivateHost', () => {
  * ------------------------------------------------------------------ */
 
 describe('grants for high-risk tools', () => {
-  it('downgrades an always-grant on type_text to single use', () => {
+  it('rejects an ineligible always-grant on type_text instead of silently downgrading it', () => {
     const registry = new ToolRegistry();
-    registry.grant({ id: 'g', toolName: 'type_text', scope: 'always', grantedAt: Date.now() });
+    expect(registry.grant({ id: 'g', toolName: 'type_text', scope: 'always', grantedAt: Date.now(), target: {}, risk: 'high', policyVersion: 1 })).toBe(false);
     const stored = registry.activeGrants().find((g) => g.toolName === 'type_text');
-    expect(stored?.scope).toBe('once');
+    expect(stored).toBeUndefined();
   });
 
   it('keeps a session grant for a medium-risk tool', () => {

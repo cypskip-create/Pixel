@@ -26,6 +26,8 @@
     "diagnose": "node scripts/diagnose.mjs",
     "validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-windows.ps1 -Launch",
     "test:native-uia-e2e": "npm run build:main && npm run build:native && node scripts/test-native-uia-e2e.mjs",
+    "test:native-uia-fixture": "npm run build:native-uia-fixture && npm run build:main && npm run build:native && node scripts/test-native-uia-e2e.mjs --launch-fixture",
+    "build:native-uia-fixture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-uia-fixture.ps1",
     "test:native-foreground": "npm run build:native && cross-env PIXEL_FOREGROUND_INTEGRATION=1 vitest run tests/native-foreground.integration.test.ts",
     "test": "vitest run",
     "test:watch": "vitest",

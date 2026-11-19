@@ -2,6 +2,74 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
+## Current checkpoint — Tools 4.2 memory, persistent permissions and UI Automation
+
+Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Local HEAD before
+this uncommitted checkpoint: `cbac143ec28b0b19669aa58a911b5f53af0f5b5e`.
+Changes remain uncommitted for the user to review and commit; no checkpoint
+commit, push or release was made.
+
+- Automatic Memory defaults on, can be disabled in Settings, and saves a small
+  deterministic set of direct user preferences/project assertions without a
+  permission prompt. It excludes common credentials, copied page/document
+  instructions, injection-like text and oversized candidates. The main process
+  also stores concise outcomes only for completed tasks with verified steps.
+  Preference slots suppress near duplicates and record corrections in memory
+  revision history. Explicit corrections and scoped forget commands still work
+  when automatic capture is disabled. Memory is project-scoped, bounded to 250
+  automatic entries per project, searchable, editable, exportable and deletable.
+  General milestone/plan extraction, cross-project/global preferences and
+  source-aware external fact capture remain limited or unimplemented.
+- Permission cards now offer **Always Allow**, **Allow Once** and **Deny**.
+  Always Allow is available only for exact allow-listed app launches (Notepad,
+  Calculator, Paint) and an HTTPS browser origin. Grants persist in SQLite with
+  the target scope, risk, policy version, timestamps and revocation state;
+  startup revalidates them, and Settings lists/revokes them. High-risk and
+  unscoped operations remain one-time approvals. Emergency Stop revokes saved
+  grants and cancels pending work. The permission interface and backend are
+  unit-tested; actual on-screen card interaction has not been verified in the
+  Electron GUI in this environment.
+- UI Automation now has ValuePattern entry/read-back, plus select, toggle,
+  scroll and expand/collapse patterns with exact selector, enabled/visible and
+  process/window identity checks. Input actions keep the desktop-input lease
+  until helper termination is confirmed. High-risk actions require a fresh
+  approval and return verified state read-back. A harmless WinForms fixture was
+  added. Earlier real desktop attempts found controls and verified ValuePattern
+  entry, but UIA provider calls failed and the task stayed blocked. The latest
+  repeated runs passed text read-back, InvokePattern, separate
+  postcondition verification, TogglePattern desired-state read-back, and
+  durable task reload with 3 verification records and 61 task events. Its
+  latest report is `artifacts/windows-acceptance/pixel-native-uia-e2e-2026-11-19T12-11-25-948Z.json`.
+  Direct and documented `npm run test:native-uia-fixture` commands exited 0
+  after the cleanup fix confirmed helper/fixture termination. Pixel's actual
+  approval UI remains unverified. See
+  `docs/validation/PIXEL_TOOLS_4_2_UIA_FIXTURE_RESULT.md`.
+- Automatic task-outcome capture now rejects completed task records that have
+  any failed step, unresolved verification, or no verified step. The fixture
+  reported a completed task response despite failed controls; this additional
+  gate prevents that partial result from being saved as a durable project
+  outcome.
+- Focused suite: **172/172 passed** across 7 files. Final full suite:
+  **815 passed, 27 skipped, 0 failed (842 total)** across 52 passed files and
+  1 skipped file. Skips: 17 Chromium cases (Playwright browser missing), 7 NSIS
+  tests (`makensis` missing), and 3 opt-in native desktop tests. Final
+  typecheck, production build, native helper compilation and protocol ping
+  passed. Voice worker unit tests passed **11/11**.
+- Latest reviewed main in the brief: `f607621bdc2fe9503df722f410423f630c700db2`.
+  GitHub Actions run `44498305105` passed typecheck, worker unit tests, preload
+  smoke, full automated tests and native-helper compilation, then failed in
+  packaging at the pre-existing Voice 4.1 packaged worker protocol smoke:
+  `BAD_JSON` / “Expecting value: line 1 column 1” before a JSON request was
+  read. The packaging script was adjusted in this work to write explicit UTF-8
+  request bytes, but the packaged Python 3.12 runtime has not yet been rebuilt
+  to verify that fix. No new CI run exists for unpushed changes.
+
+See [`docs/architecture/PIXEL_MEMORY.md`](docs/architecture/PIXEL_MEMORY.md),
+[`docs/architecture/PIXEL_SECURITY_MODEL.md`](docs/architecture/PIXEL_SECURITY_MODEL.md),
+[`docs/architecture/PIXEL_SCREEN_INTELLIGENCE.md`](docs/architecture/PIXEL_SCREEN_INTELLIGENCE.md),
+and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+for implementation detail and exact laptop validation steps.
+
 ## Current checkpoint — Voice Engine 4.1 reliability and diagnostics
 
 Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Base commit:

@@ -80,7 +80,6 @@ export const SPECIALISTS: Record<SpecialistId, SpecialistDefinition> = {
       'documents_search',
       'documents_list',
       'documents_index',
-      'memory_save',
     ],
     limits: { maxSteps: 10, maxTokens: 18_000, timeoutMs: 120_000 },
   },

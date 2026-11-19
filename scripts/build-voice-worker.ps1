@@ -104,7 +104,14 @@ if (-not $smokeProcess.Start()) { throw 'Could not start the packaged voice work
 $stdoutTask = $smokeProcess.StandardOutput.ReadToEndAsync()
 $stderrTask = $smokeProcess.StandardError.ReadToEndAsync()
 $request = @{ id = 'pixel-runtime-smoke'; op = 'runtime_smoke_test'; protocol = 1; params = @{} } | ConvertTo-Json -Compress
-$smokeProcess.StandardInput.WriteLine($request)
+# Write UTF-8 bytes without a BOM. StreamWriter's default input encoding differs
+# between Windows PowerShell and PowerShell Core; a frozen CPython stdin parser
+# must receive the same exact protocol bytes on both runtimes and GitHub runners.
+if ($request -notmatch '^\s*\{.*\}\s*$') { throw "The packaged worker smoke request was not serialized as a JSON object: $request" }
+$utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+$requestBytes = $utf8NoBom.GetBytes($request + "`n")
+$smokeProcess.StandardInput.BaseStream.Write($requestBytes, 0, $requestBytes.Length)
+$smokeProcess.StandardInput.BaseStream.Flush()
 $smokeProcess.StandardInput.Close()
 if (-not $smokeProcess.WaitForExit(30000)) {
   $smokeProcess.Kill()

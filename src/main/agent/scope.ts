@@ -1,6 +1,49 @@
 import type { GrantScope } from '../../shared/types';
 import { resolve } from 'node:path';
 
+export interface StandingGrantEligibility {
+  allowed: boolean;
+  target: GrantScope;
+  reason: string;
+}
+
+const ALWAYS_LAUNCHABLE_APPS = new Set(['notepad', 'calculator', 'mspaint']);
+
+/** Explicit allow-list for repeatable operations that are safe to remember. */
+export function standingGrantEligibility(toolName: string, args: Record<string, unknown>): StandingGrantEligibility {
+  if (toolName === 'open_application') {
+    const app = normaliseApp(args.name);
+    if (!app) return { allowed: false, target: {}, reason: 'Pixel cannot identify one exact application.' };
+    if (!ALWAYS_LAUNCHABLE_APPS.has(app)) {
+      return { allowed: false, target: { app }, reason: 'Always Allow is available only for bounded, allow-listed applications such as Notepad.' };
+    }
+    return { allowed: true, target: { app }, reason: `Future launches are limited to ${app}.` };
+  }
+
+  if (toolName === 'browser_navigate') {
+    const origin = originOf(args.url);
+    if (!origin || !/^https:\/\//i.test(String(args.url ?? ''))) {
+      return { allowed: false, target: {}, reason: 'Always Allow requires a secure HTTPS website with an exact origin.' };
+    }
+    return { allowed: true, target: { origin }, reason: `Future navigation is limited to ${origin}.` };
+  }
+
+  return { allowed: false, target: deriveGrantScope(toolName, args), reason: 'This action requires approval each time because its target or effects are not safe to persist.' };
+}
+
+export const PERMISSION_POLICY_VERSION = 1;
+
+export function validateStandingGrant(toolName: string, target: GrantScope | undefined): boolean {
+  if (!target) return false;
+  if (toolName === 'open_application') {
+    return Object.keys(target).length === 1 && typeof target.app === 'string' && ALWAYS_LAUNCHABLE_APPS.has(target.app);
+  }
+  if (toolName === 'browser_navigate') {
+    return Object.keys(target).length === 1 && typeof target.origin === 'string' && /^https:\/\//i.test(target.origin) && originOf(target.origin) === target.origin;
+  }
+  return false;
+}
+
 /**
  * Work out what an invocation is aimed at, so an approval can be limited to it.
  *
@@ -54,8 +97,10 @@ export function originOf(value: unknown): string | null {
 
 export function normaliseApp(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const cleaned = value.trim().toLowerCase().replace(/\.exe$/, '');
-  return cleaned.length > 0 ? cleaned : null;
+  const cleaned = value.trim().toLowerCase().replace(/\.exe$/, '').replace(/\\/g, '/').split('/').pop() ?? '';
+  const aliases: Record<string, string> = { calc: 'calculator', 'mspaint.exe': 'mspaint', 'notepad.exe': 'notepad' };
+  const normalized = aliases[cleaned] ?? cleaned;
+  return normalized.length > 0 ? normalized : null;
 }
 
 function canonicalDirectory(value: unknown): string | null {
