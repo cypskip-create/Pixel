@@ -237,14 +237,27 @@ at different sizes; historical message avatars are static. The official P
 mark remains a separate brand asset elsewhere. Settings provides an
 independent preview of Pix expressions.
 
-Workspace Settings has a supported category rail for General, Voice,
-Privacy & Memory, and Tools & Integrations. The selected page is stored in
-renderer local storage and falls back to General if storage is unavailable.
-Its selected row remains neutral charcoal with a blue edge/icon cue. Pixel
-Board is an editable In-Workspace SVG scene with local draft recovery,
-`.pixelboard` import/export, and SVG/PNG export. Replacing the local draft
-prompts before import/new-board. The board is separate from the passive desktop
-guidance overlay and does not draw over other Windows applications.
+The Workspace follows a compact desktop three-region layout: a 48 DIP section
+rail, a 276 DIP independently scrolling chat/sidebar region, and the main
+conversation surface. The section rail routes to supported Pixel surfaces and
+keeps emergency stop available. Settings replaces the chat sidebar with its
+own category navigation, while its content scrolls independently. The selected
+Settings category is stored in renderer local storage and falls back to
+General if storage is unavailable. The main Workspace remains near-black;
+user messages use compact right-aligned blue bubbles and assistant replies are
+unboxed on the conversation canvas. Tool and task activity remain compact
+inline rows rather than dashboard cards.
+
+Pixel Board is an editable SVG scene whose authoritative document and revision
+are owned by the main-process `PixelBoardService`. Renderer edits and agent
+tools use the same typed IPC/service, persist a recovery draft and notify the
+Workspace renderer. Agent tools can create, inspect, edit, group, undo, redo,
+open, save and export the active document; diagram generation is one undoable
+change. `.pixelboard` and SVG saves use the main-process dialog and verify the
+result. PNG is a renderer export only. Existing local drafts are imported
+without deletion. Desktop guidance is a separate passive overlay: the current
+agent arrow tool uses one exact UIA control rectangle and does not click or
+type. It is not yet an interactive freehand drawing layer.
 
 `src/renderer/hooks/useCompanionAnimation.ts` owns the bounded idle blink
 scheduler. It pauses while the document is hidden, observes both Pixel's
@@ -256,10 +269,10 @@ no assistant events are synthesized. Screenshot and timing acceptance at 140,
 See [`PIXEL_COMPANIONS.md`](PIXEL_COMPANIONS.md) for state mapping and separate
 Pix/Cursor Buddy acceptance criteria.
 
-Cursor Buddy remains separate pointer-shaped artwork in its own transparent,
-click-through, focusless native window. Pix never follows pointer coordinates.
-Settings can preview Cursor Buddy's appearance but labels this as preview-only
-while the desktop window is hidden.
+Cursor Buddy remains separate rounded-rectangle artwork with a small cursor nib
+in its own transparent, click-through, focusless native window. Pix never
+follows pointer coordinates. Settings can preview Cursor Buddy's appearance
+but labels this as preview-only while the desktop window is hidden.
 
 The last observed development launch in this environment stopped before
 creating a Pixel window: Electron exited with `2147483651` (`0x80000003`) after

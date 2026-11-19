@@ -544,10 +544,14 @@ describe('companion placement', () => {
 
   it('flips vertically near the bottom edge and handles all four corners', () => {
     const bottom = placeCursorCompanion({ x: 500, y: 800 }, area);
-    expect(bottom.flipY).toBe(true);
+    // Cursor Buddy's nib is at the bottom of its rounded rectangle, so the
+    // default placement already keeps the body above a pointer near the edge.
+    expect(bottom.flipY).toBe(false);
+    const bottomTip = { x: bottom.position.x + CURSOR_WINDOW_HOTSPOT.x, y: bottom.position.y + CURSOR_WINDOW_HOTSPOT.y };
+    expect(Math.hypot(bottomTip.x - 500, bottomTip.y - 800)).toBeLessThanOrEqual(12);
     const corner = placeCursorCompanion({ x: 1500, y: 800 }, area);
     expect(corner.flipX).toBe(true);
-    expect(corner.flipY).toBe(true);
+    expect(corner.flipY).toBe(false);
     expect(corner.position.x + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.x + area.width);
     expect(corner.position.y + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.y + area.height);
   });

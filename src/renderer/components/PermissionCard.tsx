@@ -128,12 +128,23 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
         >
           Always Allow
         </button>
+        {request.allowSession ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => decide(true, 'session')}
+            title={`Allow only this exact live window for this Pixel run: ${request.sessionScopeLabel ?? request.target}`}
+            className="no-drag min-w-[108px] flex-1 rounded-xl border border-[var(--color-accent)]/35 bg-[var(--color-accent)]/10 px-2 py-2 text-[11px] font-semibold text-[var(--color-ink)] transition-colors hover:bg-[var(--color-accent)]/18 disabled:opacity-50"
+          >
+            This Window · Session
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={pending}
           onClick={() => decide(true, 'once')}
           autoFocus
-          className="no-drag flex-1 rounded-xl border border-transparent bg-[var(--color-accent)] px-3 py-2 text-[12px] font-semibold text-[var(--color-accent-foreground)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+          className="no-drag min-w-[88px] flex-1 rounded-xl border border-transparent bg-[var(--color-accent)] px-3 py-2 text-[12px] font-semibold text-[var(--color-accent-foreground)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
         >
           Allow Once
         </button>
@@ -148,7 +159,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
       </div>
 
       <p className="text-[10px] text-[var(--color-ink-dim)]">
-        {request.alwaysAllowed ? `Always Allow is limited to ${request.scopeLabel ?? request.target}.` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
+        {request.allowSession ? `Session access expires with this Pixel run and is limited to ${request.sessionScopeLabel ?? 'the exact selected window'}.` : request.alwaysAllowed ? `Always Allow is limited to ${request.scopeLabel ?? request.target}.` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
       </p>
 
       <p className="text-[10px] leading-snug text-[var(--color-ink-dim)]">

@@ -202,40 +202,33 @@ describe('agent loop - tool execution', () => {
  * ------------------------------------------------------------------ */
 
 describe('agent loop - approval', () => {
-  it('does not read the last external window when permission is denied', async () => {
+  it('reads last external window metadata without prompting for permission', async () => {
     const tools = fakeTools();
     const h = harness({
       outcomes: [toolStep('get_last_external_foreground_window', {}), plainAnswer('I could not inspect it.')],
       tools,
-      approve: false,
     });
 
     await run(h.agent);
 
-    expect(h.prompts).toHaveLength(1);
-    expect(h.prompts[0].toolName).toBe('get_last_external_foreground_window');
-    expect(tools.calls).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+    expect(h.broker.isPending()).toBe(false);
+    expect(tools.calls).toEqual(['get_last_external_foreground_window']);
   });
 
-  it('cancels a pending external-window observation approval without executing it', async () => {
+  it('does not create a pending approval for read-only foreground metadata', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('get_last_external_foreground_window', {}), plainAnswer('should not run')],
+      outcomes: [toolStep('get_foreground_window', {}), plainAnswer('Here is the active window.')],
       tools,
       deferApproval: true,
     });
-    const running = run(h.agent);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const taskId = h.tasks.list()[0]?.id;
-    expect(taskId).toBeDefined();
-    expect(h.broker.isPending()).toBe(true);
-    h.tasks.cancel(taskId!);
+    const result = await run(h.agent);
 
-    const result = await running;
-
-    expect(result.task.status).toBe('cancelled');
+    expect(result.task.status).toBe('completed');
+    expect(h.prompts).toHaveLength(0);
     expect(h.broker.isPending()).toBe(false);
-    expect(tools.calls).toEqual([]);
+    expect(tools.calls).toEqual(['get_foreground_window']);
   });
 
   it('suspends, asks, and executes once approved', async () => {

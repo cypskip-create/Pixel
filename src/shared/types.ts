@@ -10,6 +10,8 @@
  * boundary unchanged.
  */
 
+import type { BoardOperation, BoardSnapshot, PixelBoardDocument } from './drawingBoard';
+
 /* ------------------------------------------------------------------ *
  * Operating modes
  * ------------------------------------------------------------------ */
@@ -794,6 +796,10 @@ export interface PermissionRequest {
   createdAt: number;
   /** Whether the main-process capability policy allows a persistent grant. */
   allowPersistent?: boolean;
+  /** Main-process policy permits a volatile, exact-target grant for this Pixel run. */
+  allowSession?: boolean;
+  sessionDisabledReason?: string;
+  sessionScopeLabel?: string;
   scopeLabel?: string;
   /** Main-process policy result; renderer hints are revalidated before use. */
   alwaysAllowed?: boolean;
@@ -816,6 +822,7 @@ export type ToolCategory =
   | 'system'
   | 'browser'
   | 'memory'
+  | 'board'
   | 'code';
 
 export interface ToolDefinition {
@@ -962,6 +969,18 @@ export interface CypsBridge {
     }): Promise<CaptureResult>;
     onGuidanceUpdate(handler: (snapshot: VisualGuidanceSnapshot) => void): () => void;
   };
+  board: {
+    getState(): Promise<BoardSnapshot>;
+    apply(operations: BoardOperation[], expectedRevision?: number): Promise<BoardSnapshot>;
+    create(title: string, replace?: boolean, expectedRevision?: number): Promise<BoardSnapshot>;
+    importLegacyDraft(document: PixelBoardDocument): Promise<BoardSnapshot>;
+    undo(expectedRevision?: number): Promise<BoardSnapshot>;
+    redo(expectedRevision?: number): Promise<BoardSnapshot>;
+    open(): Promise<{ ok: boolean; cancelled?: boolean; snapshot?: BoardSnapshot; error?: string }>;
+    save(format: 'pixelboard' | 'svg'): Promise<{ ok: boolean; cancelled?: boolean; path?: string; bytes?: number; error?: string }>;
+    onChanged(handler: (snapshot: BoardSnapshot) => void): () => void;
+    onFocusRequested(handler: (payload: undefined) => void): () => void;
+  };
   system: {
     diagnostics(): Promise<DiagnosticsSnapshot>;
     isEmergencyStopped(): Promise<boolean>;
@@ -1066,6 +1085,11 @@ export interface GrantScope {
   directory?: string;
   /** Exact normalized query approved for a browser search. */
   query?: string;
+  /** Volatile exact window identity. Session grants only; never stored in the durable grant DB. */
+  windowId?: string;
+  processId?: number;
+  processName?: string;
+  windowTitle?: string;
 }
 
 export interface PermissionGrant {

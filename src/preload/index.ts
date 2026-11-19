@@ -48,6 +48,7 @@ import type {
   VoiceModelInfo,
   VoiceModelProgress,
 } from '../shared/types';
+import type { BoardOperation, BoardSnapshot, PixelBoardDocument } from '../shared/drawingBoard';
 
 export { CHANNELS } from '../shared/channels';
 import { CHANNELS as CH } from '../shared/channels';
@@ -168,6 +169,22 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.screenCaptureRegion, region) as Promise<CaptureResult>,
     onGuidanceUpdate: (handler: (snapshot: VisualGuidanceSnapshot) => void) =>
       subscribe(CH.screenGuidanceUpdate, handler),
+  },
+
+  board: {
+    getState: () => ipcRenderer.invoke(CH.boardGetState) as Promise<BoardSnapshot>,
+    apply: (operations: BoardOperation[], expectedRevision?: number) =>
+      ipcRenderer.invoke(CH.boardApply, operations, expectedRevision) as Promise<BoardSnapshot>,
+    create: (title: string, replace = false, expectedRevision?: number) =>
+      ipcRenderer.invoke(CH.boardCreate, title, replace, expectedRevision) as Promise<BoardSnapshot>,
+    importLegacyDraft: (document: PixelBoardDocument) =>
+      ipcRenderer.invoke(CH.boardImportLegacyDraft, document) as Promise<BoardSnapshot>,
+    undo: (expectedRevision?: number) => ipcRenderer.invoke(CH.boardUndo, expectedRevision) as Promise<BoardSnapshot>,
+    redo: (expectedRevision?: number) => ipcRenderer.invoke(CH.boardRedo, expectedRevision) as Promise<BoardSnapshot>,
+    open: () => ipcRenderer.invoke(CH.boardOpen) as Promise<{ ok: boolean; cancelled?: boolean; snapshot?: BoardSnapshot; error?: string }>,
+    save: (format: 'pixelboard' | 'svg') => ipcRenderer.invoke(CH.boardSave, format) as Promise<{ ok: boolean; cancelled?: boolean; path?: string; bytes?: number; error?: string }>,
+    onChanged: (handler: (snapshot: BoardSnapshot) => void) => subscribe(CH.boardChanged, handler),
+    onFocusRequested: (handler: (payload: undefined) => void) => subscribe<undefined>(CH.boardFocusRequested, handler),
   },
 
   system: {

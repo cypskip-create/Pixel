@@ -140,7 +140,7 @@ export class PermissionBroker {
       this.audit.record('permission', 'Ignored a stale approval response', 'denied');
       return;
     }
-    if (typeof decision.approved !== 'boolean' || !['once', 'always'].includes(decision.duration)) {
+    if (typeof decision.approved !== 'boolean' || !['once', 'session', 'always'].includes(decision.duration)) {
       this.audit.record('permission', 'Ignored an invalid approval response', 'denied');
       this.pending = null;
       pending.cleanup();
@@ -160,6 +160,13 @@ export class PermissionBroker {
       if (!eligibility.allowed || pending.request.risk === 'high') {
         effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
         this.audit.record('permission', 'Rejected an ineligible Always Allow decision', 'denied', eligibility.reason);
+      }
+    }
+    if (decision.approved && decision.duration === 'session') {
+      const eligibility = this.registry.canGrantSession(pending.request.toolName, pending.request.args);
+      if (!eligibility.allowed) {
+        effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
+        this.audit.record('permission', 'Rejected an ineligible session permission', 'denied', eligibility.reason);
       }
     }
 

@@ -14,7 +14,7 @@
 
 import { app, dialog, ipcMain, screen, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AppSettings,
@@ -46,6 +46,7 @@ import type {
   ToolCatalogEntry,
   ScreenWindowTarget,
 } from '../shared/types';
+import type { BoardOperation, PixelBoardDocument } from '../shared/drawingBoard';
 import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
@@ -94,6 +95,9 @@ import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../shared/browserSearc
 import { safeExternalHttpUrl } from '../shared/externalUrl';
 import { claimPushToTalkEnd } from '../shared/companion/pushToTalkSession';
 import { isCursorIpcChannelAllowed } from './windowPolicy';
+import { PixelBoardService } from './board/service';
+import type { BoardFileFormat } from './board/service';
+import { BOARD_TOOL_DEFINITIONS } from './board/tools';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -319,10 +323,63 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const memoryTools = new MemoryTools(memoryStore, projectId);
   const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
   const fileTools = new FileTools();
+  const boardService = new PixelBoardService(join(app.getPath('userData'), 'boards', 'active-board.json'));
+  boardService.subscribe((snapshot) => {
+    const workspace = windows.getWorkspaceWindow();
+    if (workspace && !workspace.isDestroyed()) workspace.webContents.send(CHANNELS.boardChanged, snapshot);
+  });
+
+  const chooseBoardFile = async (
+    action: 'open' | 'save',
+    format: BoardFileFormat,
+    title: string,
+  ): Promise<{ path: string; overwrite?: boolean; replace?: boolean } | null> => {
+    const parent = windows.getWorkspaceWindow();
+    const extension = format === 'pixelboard' ? 'pixelboard' : 'svg';
+    if (action === 'open') {
+      const options = { title: 'Open Pixel Board', properties: ['openFile'] as Array<'openFile'>, filters: [{ name: 'Pixel Board', extensions: ['pixelboard'] }] };
+      const result = parent && !parent.isDestroyed()
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      const path = result.filePaths[0];
+      if (result.canceled || !path) return null;
+      const current = boardService.getSnapshot().document;
+      const hasCurrentWork = current.objects.length > 0 || current.title !== 'Untitled board';
+      let replace = false;
+      if (hasCurrentWork) {
+        const message = { type: 'warning' as const, title: 'Replace the active Board?', message: 'The active Pixel Board will be replaced. Save it first if you need a separate copy.', buttons: ['Cancel', 'Open and replace'], defaultId: 0, cancelId: 0, noLink: true };
+        const answer = parent && !parent.isDestroyed()
+          ? await dialog.showMessageBox(parent, message)
+          : await dialog.showMessageBox(message);
+        if (answer.response !== 1) return null;
+        replace = true;
+      }
+      return { path, replace };
+    }
+
+    const defaultName = `${title.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').slice(0, 80) || 'pixel-board'}.${extension}`;
+    const options = { title: format === 'pixelboard' ? 'Save editable Pixel Board' : 'Export Pixel Board as SVG', defaultPath: defaultName, filters: [{ name: format === 'pixelboard' ? 'Pixel Board' : 'SVG image', extensions: [extension] }] };
+    const result = parent && !parent.isDestroyed()
+      ? await dialog.showSaveDialog(parent, options)
+      : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return null;
+    const path = result.filePath.toLowerCase().endsWith(`.${extension}`) ? result.filePath : `${result.filePath}.${extension}`;
+    let overwrite = false;
+    if (existsSync(path)) {
+      const message = { type: 'warning' as const, title: 'Replace existing file?', message: `A file already exists at ${path}. Replace it?`, buttons: ['Cancel', 'Replace'], defaultId: 0, cancelId: 0, noLink: true };
+      const answer = parent && !parent.isDestroyed()
+        ? await dialog.showMessageBox(parent, message)
+        : await dialog.showMessageBox(message);
+      if (answer.response !== 1) return null;
+      overwrite = true;
+    }
+    return { path, overwrite };
+  };
 
   const permissionGrantStore = new PermissionGrantStore(database);
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
+    ...BOARD_TOOL_DEFINITIONS,
     ...MEMORY_TOOL_DEFINITIONS.filter((definition) => definition.name !== 'memory_save'),
     ...DOCUMENT_TOOL_DEFINITIONS,
     ...FILE_TOOL_DEFINITIONS,
@@ -471,6 +528,12 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     memory: memoryTools,
     documents: documentTools,
     files: fileTools,
+    board: boardService,
+    chooseBoardFile,
+    focusBoard: () => {
+      const workspace = windows.getWorkspaceWindow();
+      if (workspace && !workspace.isDestroyed()) workspace.webContents.send(CHANNELS.boardFocusRequested);
+    },
     nativeHelper,
     toDipRect: (rect) => screen.screenToDipRect(null, rect),
     requestHumanTakeover: (taskId, reason, signal) =>
@@ -1138,6 +1201,59 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       captures.captureRegion(region),
   );
 
+  /* ------------------------------- board ----------------------------- */
+
+  const requireWorkspaceBoardSender = (event: IpcMainInvokeEvent): void => {
+    if (!windows.isWorkspaceSender(event.sender)) throw new Error('Pixel Board is available only from the trusted Workspace window.');
+  };
+
+  registerHandler(CHANNELS.boardGetState, (event) => {
+    requireWorkspaceBoardSender(event);
+    return boardService.getSnapshot();
+  });
+  registerHandler(CHANNELS.boardApply, (event, operations: BoardOperation[], expectedRevision?: number) => {
+    requireWorkspaceBoardSender(event);
+    return boardService.apply(operations, Number.isSafeInteger(expectedRevision) ? expectedRevision : undefined);
+  });
+  registerHandler(CHANNELS.boardCreate, (event, title: string, replace?: boolean, expectedRevision?: number) => {
+    requireWorkspaceBoardSender(event);
+    return boardService.create(title, replace === true, Number.isSafeInteger(expectedRevision) ? expectedRevision : undefined);
+  });
+  registerHandler(CHANNELS.boardImportLegacyDraft, (event, document: PixelBoardDocument) => {
+    requireWorkspaceBoardSender(event);
+    return boardService.importLegacyDraft(document);
+  });
+  registerHandler(CHANNELS.boardUndo, (event, expectedRevision?: number) => {
+    requireWorkspaceBoardSender(event);
+    return boardService.undo(Number.isSafeInteger(expectedRevision) ? expectedRevision : undefined);
+  });
+  registerHandler(CHANNELS.boardRedo, (event, expectedRevision?: number) => {
+    requireWorkspaceBoardSender(event);
+    return boardService.redo(Number.isSafeInteger(expectedRevision) ? expectedRevision : undefined);
+  });
+  registerHandler(CHANNELS.boardOpen, async (event) => {
+    requireWorkspaceBoardSender(event);
+    try {
+      const chosen = await chooseBoardFile('open', 'pixelboard', boardService.getSnapshot().document.title);
+      if (!chosen) return { ok: true, cancelled: true };
+      const snapshot = boardService.openFromFile(chosen.path, chosen.replace === true);
+      return { ok: true, snapshot };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Pixel could not open that Board.' };
+    }
+  });
+  registerHandler(CHANNELS.boardSave, async (event, format: BoardFileFormat) => {
+    requireWorkspaceBoardSender(event);
+    if (format !== 'pixelboard' && format !== 'svg') return { ok: false, error: 'Choose an editable Pixel Board or SVG export.' };
+    try {
+      const chosen = await chooseBoardFile('save', format, boardService.getSnapshot().document.title);
+      if (!chosen) return { ok: true, cancelled: true };
+      return { ok: true, ...boardService.saveToFile(chosen.path, format, chosen.overwrite === true) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Pixel could not save the Board.' };
+    }
+  });
+
   /* ------------------------------ system ----------------------------- */
 
   registerHandler(CHANNELS.systemDiagnostics, (): DiagnosticsSnapshot => {
@@ -1173,7 +1289,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.permissionsListPending, (): PermissionRequest[] => permissions.pendingRequests());
 
   registerHandler(CHANNELS.permissionsListActiveGrants, (): PermissionGrant[] =>
-    permissions.activeGrants().filter((grant) => grant.scope === 'always'),
+    permissions.activeGrants(),
   );
 
   registerHandler(CHANNELS.permissionsRevokeGrant, (_event, grantId: string): boolean =>

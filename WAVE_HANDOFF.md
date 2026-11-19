@@ -1,5 +1,56 @@
 # Pixel implementation handoff
 
+## Current local checkpoint — Experience 5.2
+
+Latest GitHub `main` reviewed: `d98fbe896c4893fadc506b7fd0783e570dfbd3f8`.
+The supplied successful Windows CI run
+[`44567448710`](https://github.com/cypskip-create/Pixel/actions/runs/44567448710)
+ran on `0a8f39f68bf54bc10ac3274521ef348b8289080a`, its parent. Current work is
+local and uncommitted; no commit, push or CI run was created.
+
+- **Board ownership:** `src/main/board/service.ts` owns the active validated
+  Board, document revision, undo/redo, profile draft and file import/export.
+  Renderer manual edits and agent tool calls share this service via typed IPC.
+  Legacy localStorage drafts are copied once and left in place.
+- **Agent tools:** 15 Board tools are in the model schema and actual dispatcher,
+  with strict contracts and mode policy. `board_create_diagram` adds a title,
+  nodes and optional edges as one verified, undoable service change. The
+  AgentExecutor integration test inspects the model-facing schema and confirms
+  the dispatcher changes the persisted Board and requests Workspace focus.
+- **Desktop guidance:** `screen_draw_arrow` uses exact accessible-control
+  bounds from one identified window and draws only a temporary passive arrow.
+  It does not perform input. Existing UIA-bound rectangle/circle/arrow guidance
+  remains. Freehand/editable desktop drawing and desktop save/export remain
+  incomplete.
+- **Permissions:** low-risk window metadata is automatic. A user may grant a
+  volatile session scope for screen observation/passive guidance on a selected
+  window; the main process matches opaque window reference, PID, process and
+  title on each call. This does not authorize state-changing computer input.
+  Agent/Hybrid Board editing is medium-risk and automatic; Guide blocks these
+  mutations. Critical-action generalization is not complete.
+- **Workspace:** separate 48-DIP app rail, 276-DIP chat sidebar and dark
+  conversation canvas; Settings uses its own category sidebar. User bubbles
+  are blue and right-aligned; Pixel replies stay unboxed. The current Settings
+  and Workspace layout changes require the final build and laptop comparison.
+- **Cursor Buddy:** distinct rounded rectangular grayscale cursor character;
+  Pix stays the silver/mint app mascot. Shape and hotspot logic have tests but
+  no post-change Windows screenshot.
+- **Evidence:** final local `npm run typecheck`, `npm run build:native` and
+  `npm run build` passed.
+  Final full Vitest: **856 passed, 0 failed, 27 skipped (883 total; 60 files
+  passed, 1 skipped)**, run with an isolated `USERPROFILE` under
+  `.pixel-test-profile`. Playwright Chromium and `makensis` are unavailable, so
+  the browser and NSIS-dependent tests skipped. The supplied Windows Actions
+  run is green on the parent commit, not this worktree. Windows UI launch was
+  attempted with isolated user data, but development launch stopped when Vite
+  reported fixed port 5199 occupied and direct built Electron launch exited
+  code 1 without a window/log. Actual UI, screenshot comparison, cursor
+  visibility, external-window annotation and native file dialogs still need
+  laptop acceptance.
+
+See [`docs/architecture/PIXEL_BOARD_AGENT.md`](docs/architecture/PIXEL_BOARD_AGENT.md)
+for the Board tool contract and remaining limits.
+
 ## Current local fix — Cursor Companion IPC trust
 
 Latest GitHub `main` reviewed: `0a8f39f68bf54bc10ac3274521ef348b8289080a`.

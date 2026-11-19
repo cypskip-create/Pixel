@@ -376,9 +376,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
       className={`pixel-surface-raised animate-slide-down flex ${workspaceLayout ? 'w-full max-w-[1120px]' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
       style={workspaceLayout ? { minHeight: 0, height: '100%' } : { maxHeight: 'min(calc(100vh - 24px), 520px)' }}
     >
-      <header className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
+      {!workspaceLayout ? <header className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
         <PixelMark size={16} />
-        <h2 className={`flex-1 font-semibold text-[var(--color-ink)] ${workspaceLayout ? 'text-[24px]' : 'text-[12.5px]'}`}>{workspaceLayout ? 'Settings' : 'Companion'}</h2>
+        <h2 className="flex-1 font-semibold text-[12.5px] text-[var(--color-ink)]">Companion</h2>
         {saving ? (
           <span role="status" aria-live="polite" className="text-[10px] text-[var(--color-ink-dim)]">
             Saving…
@@ -387,7 +387,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <IconButton label="Close settings" onClick={closeSettings}>
           <X size={14} strokeWidth={2.4} aria-hidden="true" />
         </IconButton>
-      </header>
+      </header> : null}
 
       <div className={workspaceLayout ? 'workspace-settings-layout' : 'flex-1 overflow-y-auto px-3 py-2.5'} data-settings-page={workspaceLayout ? settingsPage : undefined}>
         {workspaceLayout ? (
@@ -406,6 +406,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </nav>
         ) : null}
         <div className={workspaceLayout ? 'workspace-settings-content' : ''}>
+        {workspaceLayout ? <div className="workspace-settings-page-heading"><h1>{settingsPage === 'privacy' ? 'Privacy & Memory' : settingsPage === 'tools' ? 'Tools & Integrations' : settingsPage === 'voice' ? 'Voice' : 'General'}</h1>{saving ? <span role="status" aria-live="polite">Saving…</span> : null}</div> : null}
         {error !== null ? (
           <p
             role="alert"

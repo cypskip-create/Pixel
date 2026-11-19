@@ -41,7 +41,7 @@ import type { RunTurnOptions } from './conversation';
 import type { ToolResult } from './executors';
 import type { AuditLog, PermissionBroker, TaskManager } from './runtime';
 import { ToolRegistry } from './tools';
-import { describeScope, standingGrantEligibility } from './scope';
+import { describeScope, sessionGrantEligibility, standingGrantEligibility } from './scope';
 
 /** Hard ceiling on model turns per request. */
 export const MAX_STEPS = 8;
@@ -51,7 +51,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_list', 'file_read', 'file_search', 'file_metadata', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'screen_draw_arrow', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_list', 'file_read', 'file_search', 'file_metadata', 'documents_search', 'documents_list']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {
@@ -788,6 +788,36 @@ export function parseArgs(call: ToolCall): Record<string, unknown> {
 /** Human sentence for the task rail: what Pixel is about to do. */
 export function describeCall(name: string, args: Record<string, unknown>): string {
   switch (name) {
+    case 'board_get_state':
+      return 'Read the active Pixel Board';
+    case 'board_create':
+      return `Create Pixel Board “${typeof args.title === 'string' ? args.title.slice(0, 80) : 'Untitled'}”`;
+    case 'board_create_diagram':
+      return `Create the “${typeof args.title === 'string' ? args.title.slice(0, 80) : 'untitled'}” diagram on Pixel Board`;
+    case 'board_add_text':
+      return 'Add editable text to Pixel Board';
+    case 'board_add_shape':
+      return `Add a ${typeof args.shape === 'string' ? args.shape : 'shape'} to Pixel Board`;
+    case 'board_add_stroke':
+      return `Add a ${args.kind === 'highlighter' ? 'highlighter' : 'pen'} stroke to Pixel Board`;
+    case 'board_add_marker':
+      return 'Add a numbered step marker to Pixel Board';
+    case 'board_update_object':
+      return `Update Pixel Board object ${typeof args.id === 'string' ? args.id.slice(0, 40) : ''}`;
+    case 'board_delete_object':
+      return `Remove Pixel Board object ${typeof args.id === 'string' ? args.id.slice(0, 40) : ''}`;
+    case 'board_clear':
+      return 'Clear objects from Pixel Board (undoable)';
+    case 'board_undo':
+      return 'Undo the last Pixel Board change';
+    case 'board_redo':
+      return 'Redo the last Pixel Board change';
+    case 'board_open':
+      return 'Open a Pixel Board document';
+    case 'board_save':
+      return 'Save an editable Pixel Board document';
+    case 'board_export':
+      return 'Export Pixel Board as SVG';
     case 'get_current_time':
       return 'Checked the time';
     case 'get_system_info':
@@ -796,6 +826,8 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return 'Looked at the screen';
     case 'screen_highlight_control':
       return 'Highlight an exact accessible control';
+    case 'screen_draw_arrow':
+      return `Draw an arrow to ${typeof args.selector === 'string' ? args.selector : 'the selected control'}`;
     case 'screen_clear_annotations':
       return 'Clear visual guidance';
     case 'get_foreground_window':
@@ -855,6 +887,7 @@ export function buildPermissionRequest(
   args: Record<string, unknown>,
 ): PermissionRequest {
   const eligibility = standingGrantEligibility(tool.name, args);
+  const sessionEligibility = sessionGrantEligibility(tool.name, args);
   const scope = eligibility.target;
   const allowPersistent = tool.risk !== 'high' && eligibility.allowed;
   return {
@@ -873,11 +906,14 @@ export function buildPermissionRequest(
       ? 'Sensitive actions always require fresh approval.'
       : eligibility.reason,
     scopeLabel: allowPersistent ? describeScope(scope) : 'this exact action, one time',
+    ...(sessionEligibility.allowed ? { allowSession: true, sessionScopeLabel: sessionEligibility.reason } : {}),
   };
 }
 
 function targetFor(name: string, args: Record<string, unknown>): string {
-  if (name === 'analyze_screen') return 'this screen';
+  if (name.startsWith('board_')) return 'the active Pixel Board';
+  if (name === 'analyze_screen') return typeof args.targetWindowId === 'string' ? describeWindowTarget(args) : 'this screen';
+  if (name === 'screen_draw_arrow' || name === 'screen_highlight_control') return describeWindowTarget(args);
   if (name === 'browser_navigate' && typeof args.url === 'string') return args.url;
   if (name === 'browser_open_search' && typeof args.query === 'string') return `Search: ${args.query.trim().slice(0, 120)}`;
   if (name === 'documents_index' && typeof args.directory === 'string') return args.directory;

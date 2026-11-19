@@ -28,7 +28,7 @@ const element = {
 };
 
 describe('Windows UI Automation tools', () => {
-  it('keeps native observation behind the screen approval gate and excludes it in Guide Mode when it would act', () => {
+  it('keeps screen capture behind approval while exposing read-only window metadata without a prompt', () => {
     const registry = new ToolRegistry(BUILTIN_TOOLS);
     const inspect = registry.get('find_ui_elements');
     const lastExternal = registry.get('get_last_external_foreground_window');
@@ -36,8 +36,8 @@ describe('Windows UI Automation tools', () => {
     const invoke = registry.get('invoke_ui_element');
     expect(inspect?.requiresApproval).toBe(true);
     expect(inspect?.changesState).toBe(false);
-    expect(lastExternal).toMatchObject({ requiresApproval: true, changesState: false, risk: 'high' });
-    expect(listExternal).toMatchObject({ requiresApproval: true, changesState: false, risk: 'high' });
+    expect(lastExternal).toMatchObject({ requiresApproval: false, changesState: false, risk: 'low' });
+    expect(listExternal).toMatchObject({ requiresApproval: false, changesState: false, risk: 'low' });
     expect(registry.availableFor('guide')).toContainEqual(lastExternal);
     expect(invoke?.requiresApproval).toBe(true);
     expect(invoke?.changesState).toBe(true);
@@ -472,7 +472,7 @@ describe('Windows UI Automation tools', () => {
       durationMs: 12000,
     });
     expect(result.ok).toBe(true);
-    expect(result.content).toContain('highlighted its current bounds');
+    expect(result.content).toContain('displayed the highlight at its current bounds');
     expect(result.content).toContain('did not click it');
     expect(showVisualGuidance).toHaveBeenCalledWith(expect.objectContaining({
       selector: 'NetworkCategory',

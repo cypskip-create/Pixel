@@ -16,7 +16,7 @@ import { getModeDescriptor } from '../../shared/types';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 
-import { deriveGrantScope, scopeCovers, standingGrantEligibility, validateStandingGrant, PERMISSION_POLICY_VERSION } from './scope';
+import { deriveGrantScope, scopeCovers, standingGrantEligibility, sessionGrantEligibility, validateSessionGrant, validateStandingGrant, PERMISSION_POLICY_VERSION, SCREEN_SESSION_GRANT_TOOL, isScreenSessionTool } from './scope';
 
 export interface ToolContext {
   /** User's current mode. */
@@ -91,7 +91,7 @@ export function evaluateInvocation(
 export function hasValidGrant(toolName: string, context: ToolContext): boolean {
   const wanted = deriveGrantScope(toolName, context.args ?? {});
   for (const [key, grant] of context.grants) {
-    if (grant.toolName !== toolName) continue;
+    if (grant.toolName !== toolName && !(grant.toolName === SCREEN_SESSION_GRANT_TOOL && isScreenSessionTool(toolName))) continue;
     if (grant.scope !== 'always' && grant.expiresAt !== undefined && Date.now() > grant.expiresAt) {
       context.grants.delete(key);
       continue;
@@ -119,7 +119,9 @@ export function applyDecision(
   return {
     ...(Object.keys(target).length > 0 ? { target } : {}),
     id: `grant_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    toolName: request.toolName,
+    toolName: decision.duration === 'session' && isScreenSessionTool(request.toolName)
+      ? SCREEN_SESSION_GRANT_TOOL
+      : request.toolName,
     scope: decision.duration,
     grantedAt: now,
     risk: request.risk,
@@ -180,7 +182,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'analyze_screen',
     description:
-      'Captures the screen and asks a vision model to describe or explain what is visible. Only runs after the user explicitly requests it.',
+      'Captures a screen or exact selected window and asks a vision model to describe what is visible. For selected_window, pass the exact window ID, title, and process identity from a recent window observation. The user may authorize a volatile session limited to that exact window for screen observation and passive guidance; this never grants clicks or typing.',
     category: 'screen',
     risk: 'high',
     requiresApproval: true,
@@ -208,8 +210,8 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'get_foreground_window',
     description: 'Reads the foreground Windows application title and bounds using UI Automation.',
     category: 'screen',
-    risk: 'high',
-    requiresApproval: true,
+    risk: 'low',
+    requiresApproval: false,
     changesState: false,
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
@@ -217,8 +219,8 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'get_last_external_foreground_window',
     description: 'Reads Pixel\'s most recently observed non-Pixel foreground window from the in-memory Windows tracker. This reads window metadata only, takes no screenshot, and marks closed or changed-process targets stale.',
     category: 'screen',
-    risk: 'high',
-    requiresApproval: true,
+    risk: 'low',
+    requiresApproval: false,
     changesState: false,
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
@@ -226,8 +228,8 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'list_external_windows',
     description: 'Lists current visible non-Pixel top-level windows so the user can explicitly identify a target when the application or window is ambiguous. Do not choose among multiple plausible targets without the user selecting one. This reads metadata only and takes no screenshot.',
     category: 'screen',
-    risk: 'high',
-    requiresApproval: true,
+    risk: 'low',
+    requiresApproval: false,
     changesState: false,
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
@@ -272,6 +274,29 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
         shape: { type: 'string', enum: ['rectangle', 'circle', 'arrow'] },
         label: { type: 'string', maxLength: 100 },
         step: { type: 'integer', minimum: 1, maximum: 99 },
+        durationMs: { type: 'integer', minimum: 3000, maximum: 30000 },
+      },
+      required: ['selector', 'targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'screen_draw_arrow',
+    description: 'Finds one exact accessible control in the explicitly selected, recently observed window and draws a temporary passive arrow and optional label to it on the desktop overlay. Coordinates come only from verified UI Automation bounds. This never clicks or focuses the application.',
+    category: 'screen',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        role: { type: 'string', maxLength: 80 },
+        targetWindowId: { type: 'string', minLength: 1, maxLength: 64 },
+        expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
+        expectedProcessId: { type: 'integer', minimum: 1 },
+        expectedProcessName: { type: 'string', minLength: 1, maxLength: 260 },
+        label: { type: 'string', maxLength: 100 },
         durationMs: { type: 'integer', minimum: 3000, maximum: 30000 },
       },
       required: ['selector', 'targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'],
@@ -604,6 +629,10 @@ export class ToolRegistry {
     return standingGrantEligibility(toolName, args);
   }
 
+  canGrantSession(toolName: string, args: Record<string, unknown>): { allowed: boolean; target: ReturnType<typeof deriveGrantScope>; reason: string } {
+    return sessionGrantEligibility(toolName, args);
+  }
+
   /** Add one exact grant. Persistent entries are rejected unless policy and scope match. */
   grant(grant: PermissionGrant): boolean {
     if (grant.scope === 'always' && (
@@ -611,6 +640,10 @@ export class ToolRegistry {
       grant.policyVersion !== PERMISSION_POLICY_VERSION ||
       !validateStandingGrant(grant.toolName, grant.target)
     )) return false;
+    // Keep existing tool-specific session grants working. The new shared
+    // screen-observation grant is the only session capability that needs the
+    // stricter multi-field target validation below.
+    if (grant.scope === 'session' && grant.toolName === SCREEN_SESSION_GRANT_TOOL && !validateSessionGrant(grant.toolName, grant.target)) return false;
     this.grants.set(grant.id, { ...grant });
     return true;
   }
@@ -717,6 +750,8 @@ export function toolCategoryLabel(category: ToolCategory): string {
       return 'Browser';
     case 'memory':
       return 'Memory';
+    case 'board':
+      return 'Pixel Board';
     case 'code':
       return 'Code';
   }

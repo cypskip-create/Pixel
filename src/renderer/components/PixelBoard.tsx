@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eraser, FilePlus2, FileUp, Hand, Highlighter, ListOrdered, MousePointer2, Redo2, Save, Undo2, X } from 'lucide-react';
 import {
   BOARD_DRAFT_KEY, BOARD_HEIGHT, BOARD_WIDTH, boardSvg, createBoard,
-  validateBoardDocument, type BoardObject, type BoardPoint, type BoardTool, type PixelBoardDocument,
+  validateBoardDocument, wrapBoardText, type BoardObject, type BoardOperation, type BoardPoint, type BoardSnapshot, type BoardTool, type PixelBoardDocument,
 } from '@shared/drawingBoard';
 
 const TOOL_ITEMS: Array<{ id: BoardTool; label: string; icon: typeof MousePointer2 }> = [
@@ -17,6 +17,12 @@ const TOOL_ITEMS: Array<{ id: BoardTool; label: string; icon: typeof MousePointe
   { id: 'marker', label: 'Step marker', icon: ListOrdered },
   { id: 'eraser', label: 'Erase', icon: Eraser },
 ];
+
+function boardApi() {
+  const bridge = window.cyps;
+  if (!bridge?.board) throw new Error('The trusted Pixel Board bridge is unavailable.');
+  return bridge.board;
+}
 
 function loadDraft(): PixelBoardDocument {
   try {
@@ -36,35 +42,74 @@ function hasBoardContent(document: PixelBoardDocument): boolean {
 }
 
 export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: boolean }): React.JSX.Element {
-  const [document, setDocument] = useState<PixelBoardDocument>(loadDraft);
+  const [snapshot, setSnapshot] = useState<BoardSnapshot>({ document: createBoard(), revision: 0, canUndo: false, canRedo: false });
+  const document = snapshot.document;
   const [tool, setTool] = useState<BoardTool>('pen');
   const [selected, setSelected] = useState<string | null>(null);
-  const [notice, setNotice] = useState('Draft saves locally in this Pixel profile.');
-  const [history, setHistory] = useState<PixelBoardDocument[]>([]);
-  const [future, setFuture] = useState<PixelBoardDocument[]>([]);
+  const [titleDraft, setTitleDraft] = useState('Untitled board');
+  const [notice, setNotice] = useState('Loading the main-process Board document…');
+  const [ready, setReady] = useState(false);
   const [previewObject, setPreviewObject] = useState<BoardObject | null>(null);
   const [color, setColor] = useState('#4299F5');
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [drawing, setDrawing] = useState(false);
+  const snapshotRef = useRef(snapshot);
+  const editingTitle = useRef(false);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
   const currentObject = useRef<BoardObject | null>(null);
   const movingObject = useRef<{ id: string; start: BoardPoint; original: BoardObject } | null>(null);
   const svg = useMemo(() => boardSvg(document), [document]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(BOARD_DRAFT_KEY, JSON.stringify({ ...document, updatedAt: Date.now() }));
-      setNotice('Draft saved locally. Use Save to export an editable .pixelboard file.');
-    } catch {
-      setNotice('Local draft storage is unavailable. Export your board to keep it.');
-    }
-  }, [document]);
+    let alive = true;
+    const accept = (next: BoardSnapshot): void => {
+      if (!alive || next.revision < snapshotRef.current.revision) return;
+      snapshotRef.current = next;
+      setSnapshot(next);
+      if (!editingTitle.current) setTitleDraft(next.document.title);
+    };
+    const unsubscribe = boardApi().onChanged(accept);
+    void boardApi().getState().then(async (current) => {
+      if (!alive) return;
+      accept(current);
+      const legacy = loadDraft();
+      if (current.revision === 0 && hasBoardContent(legacy)) {
+        const migrated = await boardApi().importLegacyDraft(legacy);
+        accept(migrated);
+        setNotice('Recovered the existing local Board draft into the main-process document.');
+      } else {
+        setNotice('Board draft is saved locally in this Pixel profile. Use Save to export an editable .pixelboard file.');
+      }
+      setReady(true);
+    }).catch((error: unknown) => {
+      setNotice(error instanceof Error ? error.message : 'Pixel could not load the Board document.');
+      setReady(true);
+    });
+    return () => { alive = false; unsubscribe(); };
+  }, []);
 
-  const commit = (nextObjects: BoardObject[]): void => {
-    setHistory((items) => [...items.slice(-39), document]);
-    setFuture([]);
-    setDocument((current) => ({ ...current, objects: nextObjects, updatedAt: Date.now() }));
+  const acceptSnapshot = (next: BoardSnapshot): void => {
+    if (next.revision < snapshotRef.current.revision) return;
+    snapshotRef.current = next;
+    setSnapshot(next);
+    if (!editingTitle.current) setTitleDraft(next.document.title);
+  };
+
+  const enqueue = (operation: () => Promise<void>): void => {
+    queueRef.current = queueRef.current.then(operation).catch(async (error: unknown) => {
+      setNotice(error instanceof Error ? error.message : 'Pixel could not update the Board.');
+      try { acceptSnapshot(await boardApi().getState()); } catch { /* the error stays visible */ }
+    });
+  };
+
+  const commit = (operations: BoardOperation[]): void => {
+    if (emergencyStopped || !ready) return;
+    enqueue(async () => {
+      const next = await boardApi().apply(operations, snapshotRef.current.revision);
+      acceptSnapshot(next);
+      setNotice(`Updated the main-process Board · revision ${next.revision}.`);
+    });
   };
 
   const pointAt = (event: React.PointerEvent<SVGSVGElement>): BoardPoint => {
@@ -76,7 +121,7 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
   };
 
   const pointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
-    if (emergencyStopped) return;
+    if (emergencyStopped || !ready) return;
     const point = pointAt(event);
     if (tool === 'select') {
       const target = (event.target as Element).closest('[data-board-object]');
@@ -92,20 +137,20 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
     if (tool === 'eraser') {
       const target = (event.target as Element).closest('[data-board-object]');
       const id = target?.getAttribute('data-board-object');
-      if (id) commit(document.objects.filter((item) => item.id !== id));
+      if (id) commit([{ type: 'delete', id }]);
       return;
     }
     if (tool === 'text') {
       const text = window.prompt('Text to place on the board:', '');
       if (!text?.trim()) return;
-      commit([...document.objects, { id: crypto.randomUUID(), kind: 'text', points: [point], text: text.trim().slice(0, 2_000), color, width: strokeWidth }]);
+      commit([{ type: 'add', object: { id: crypto.randomUUID(), kind: 'text', points: [point], text: wrapBoardText(text.trim().slice(0, 2_000)), color, width: strokeWidth } }]);
       setTool('select');
       return;
     }
     if (tool === 'marker') {
       const step = document.objects.filter((item) => item.kind === 'marker').length + 1;
       if (step > 99) { setNotice('This board reached its 99-step-marker limit.'); return; }
-      commit([...document.objects, { id: crypto.randomUUID(), kind: 'marker', points: [point], step, color, width: strokeWidth }]);
+      commit([{ type: 'add', object: { id: crypto.randomUUID(), kind: 'marker', points: [point], step, color, width: strokeWidth } }]);
       setTool('select');
       return;
     }
@@ -142,7 +187,11 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
       movingObject.current = null;
       const moved = previewObject;
       setPreviewObject(null);
-      if (moved) commit(document.objects.map((item) => item.id === moving.id ? moved : item));
+      if (moved) {
+        const originalFirst = moving.original.points[0];
+        const movedFirst = moved.points[0];
+        if (originalFirst && movedFirst) commit([{ type: 'move', id: moving.id, dx: movedFirst.x - originalFirst.x, dy: movedFirst.y - originalFirst.y }]);
+      }
       return;
     }
     const current = currentObject.current;
@@ -151,28 +200,20 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
     setPreviewObject(null);
     setDrawing(false);
     if (document.objects.length >= 500) { setNotice('This board reached its 500-object limit.'); return; }
-    commit([...document.objects, current]);
+    commit([{ type: 'add', object: current }]);
   };
 
   const undo = (): void => {
-    const previous = history.at(-1);
-    if (!previous) return;
-    setFuture((items) => [...items, document]);
-    setHistory((items) => items.slice(0, -1));
-    setDocument(previous);
-    setSelected(null);
+    if (!ready || !snapshotRef.current.canUndo) return;
+    enqueue(async () => { acceptSnapshot(await boardApi().undo()); setSelected(null); });
   };
   const redo = (): void => {
-    const next = future.at(-1);
-    if (!next) return;
-    setHistory((items) => [...items, document]);
-    setFuture((items) => items.slice(0, -1));
-    setDocument(next);
-    setSelected(null);
+    if (!ready || !snapshotRef.current.canRedo) return;
+    enqueue(async () => { acceptSnapshot(await boardApi().redo()); setSelected(null); });
   };
   const removeSelected = (): void => {
     if (!selected) return;
-    commit(document.objects.filter((item) => item.id !== selected));
+    commit([{ type: 'delete', id: selected }]);
     setSelected(null);
   };
   const editSelectedText = (): void => {
@@ -180,7 +221,7 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
     if (!item) return;
     const text = window.prompt('Edit board text:', item.text ?? '');
     if (text === null) return;
-    commit(document.objects.map((candidate) => candidate.id === item.id ? { ...candidate, text: text.slice(0, 2_000) } : candidate));
+    commit([{ type: 'update', id: item.id, patch: { text: text.slice(0, 2_000) } }]);
   };
 
   const download = (name: string, data: Blob): void => {
@@ -189,8 +230,14 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
     link.href = url; link.download = name; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
   };
-  const saveBoard = (): void => download(`${safeName(document.title)}.pixelboard`, new Blob([JSON.stringify(document, null, 2)], { type: 'application/json' }));
-  const exportSvg = (): void => download(`${safeName(document.title)}.svg`, new Blob([svg], { type: 'image/svg+xml' }));
+  const saveBoard = (): void => enqueue(async () => {
+    const result = await boardApi().save('pixelboard');
+    setNotice(result.cancelled ? 'Save cancelled.' : result.ok ? `Saved and verified ${result.path ?? 'Pixel Board document'}.` : result.error ?? 'Pixel could not save the Board.');
+  });
+  const exportSvg = (): void => enqueue(async () => {
+    const result = await boardApi().save('svg');
+    setNotice(result.cancelled ? 'SVG export cancelled.' : result.ok ? `Exported and verified ${result.path ?? 'SVG file'}.` : result.error ?? 'Pixel could not export the Board.');
+  });
   const exportPng = async (): Promise<void> => {
     const image = new Image();
     const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -205,21 +252,15 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
       canvas.toBlob((blob) => blob ? download(`${safeName(document.title)}.png`, blob) : setNotice('Pixel could not export a PNG.'), 'image/png');
     } catch { setNotice('Pixel could not export a PNG image.'); }
   };
-  const openBoard = async (file?: File): Promise<void> => {
-    if (!file) return;
-    try {
-      if (file.size > 2_000_000) throw new Error('Board files are limited to 2 MB.');
-      const loaded = validateBoardDocument(JSON.parse(await file.text()));
-      if (!loaded) throw new Error('This file is not a valid Pixel board.');
-      if (hasBoardContent(document) && !window.confirm('Replace the current board and local draft? Export it first if you want to keep a separate copy.')) return;
-      setHistory((items) => [...items.slice(-39), document]); setFuture([]); setDocument(loaded); setSelected(null);
-      setNotice(`Opened ${loaded.title}.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Pixel could not open that board.'); }
-    finally { if (fileRef.current) fileRef.current.value = ''; }
-  };
+  const openBoard = (): void => enqueue(async () => {
+    const result = await boardApi().open();
+    if (result.snapshot) { acceptSnapshot(result.snapshot); setSelected(null); setNotice(`Opened ${result.snapshot.document.title}.`); }
+    else setNotice(result.cancelled ? 'Open cancelled.' : result.error ?? 'Pixel could not open the Board.');
+  });
   const newBoard = (): void => {
+    if (emergencyStopped || !ready) return;
     if (hasBoardContent(document) && !window.confirm('Replace the current board and local draft? Export it first if you want to keep a separate copy.')) return;
-    setHistory((items) => [...items.slice(-39), document]); setFuture([]); setDocument(createBoard()); setSelected(null);
+    enqueue(async () => { acceptSnapshot(await boardApi().create('Untitled board', true, snapshotRef.current.revision)); setSelected(null); });
   };
 
   useEffect(() => {
@@ -237,27 +278,26 @@ export function PixelBoard({ emergencyStopped = false }: { emergencyStopped?: bo
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [document, future, history, selected]);
+  }, [document, snapshot.canRedo, snapshot.canUndo, selected, emergencyStopped, ready]);
 
   return (
     <section className="workspace-page pixel-board-page" aria-label="Pixel board">
-      <header className="workspace-page-heading"><div><h1>Pixel Board</h1><p>Make an editable note or diagram. This board is inside Pixel and does not draw over other Windows apps.</p></div><input aria-label="Board title" value={document.title} maxLength={120} onChange={(event) => setDocument((current) => ({ ...current, title: event.target.value }))} /></header>
+      <header className="workspace-page-heading"><div><h1>Pixel Board</h1><p>One editable Board shared by your Workspace and Pixel’s agent. Desktop annotations are a separate feature.</p></div><input aria-label="Board title" value={titleDraft} maxLength={120} disabled={!ready || emergencyStopped} onFocus={() => { editingTitle.current = true; }} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => { editingTitle.current = false; if (titleDraft !== document.title) commit([{ type: 'setTitle', title: titleDraft }]); else setTitleDraft(document.title); }} /></header>
       {emergencyStopped ? <p className="pixel-board-stop" role="alert">Emergency stop is active. Drawing is paused until it is cleared.</p> : null}
       <div className="pixel-board-toolbar" role="toolbar" aria-label="Board tools">
-        {TOOL_ITEMS.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-pressed={tool === id} title={label} disabled={emergencyStopped} onClick={() => setTool(id)} className={tool === id ? 'is-active' : ''}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}
+        {TOOL_ITEMS.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-pressed={tool === id} title={label} disabled={emergencyStopped || !ready} onClick={() => setTool(id)} className={tool === id ? 'is-active' : ''}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}
         <label title="Stroke color">Color <input type="color" value={color} onChange={(event) => setColor(event.target.value)} /></label>
         <label title="Stroke width">Width <input type="range" min="1" max="20" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} /></label>
-        <button type="button" disabled={!history.length} onClick={undo} title="Undo"><Undo2 size={15} />Undo</button>
-        <button type="button" disabled={!future.length} onClick={redo} title="Redo"><Redo2 size={15} />Redo</button>
+        <button type="button" disabled={!snapshot.canUndo || !ready} onClick={undo} title="Undo"><Undo2 size={15} />Undo</button>
+        <button type="button" disabled={!snapshot.canRedo || !ready} onClick={redo} title="Redo"><Redo2 size={15} />Redo</button>
         <button type="button" disabled={!document.objects.some((item) => item.id === selected && item.kind === 'text')} onClick={editSelectedText} title="Edit selected text"><Hand size={15} />Edit text</button>
         <button type="button" disabled={!selected} onClick={removeSelected} title="Delete selected object"><X size={15} />Remove</button>
         <span className="pixel-board-toolbar-spacer" />
-        <button type="button" onClick={newBoard}><FilePlus2 size={15} />New</button>
+        <button type="button" onClick={newBoard} disabled={emergencyStopped || !ready}><FilePlus2 size={15} />New</button>
         <button type="button" onClick={saveBoard}><Save size={15} />Save</button>
-        <button type="button" onClick={() => fileRef.current?.click()}><FileUp size={15} />Open</button>
+        <button type="button" onClick={openBoard} disabled={!ready}><FileUp size={15} />Open</button>
         <button type="button" onClick={exportSvg}><Download size={15} />SVG</button>
         <button type="button" onClick={() => void exportPng()}><Download size={15} />PNG</button>
-        <input ref={fileRef} type="file" accept=".pixelboard,application/json" className="sr-only" onChange={(event) => void openBoard(event.target.files?.[0])} />
       </div>
       <div className="pixel-board-canvas-wrap">
         <svg ref={svgRef} className={`pixel-board-canvas ${emergencyStopped ? 'is-disabled' : ''}`} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} preserveAspectRatio="none" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} role="application" aria-label="Editable drawing canvas">
@@ -279,7 +319,7 @@ function BoardShape({ object, selected }: { object: BoardObject; selected: boole
   const xs = object.points.map((point) => point.x); const ys = object.points.map((point) => point.y);
   const minX = Math.min(...xs); const minY = Math.min(...ys); const maxX = Math.max(...xs); const maxY = Math.max(...ys);
   return <g data-board-object={object.id} opacity={object.kind === 'highlighter' ? .34 : 1}>
-    {object.kind === 'text' ? <text x={first.x} y={first.y} fill={object.color} fontFamily="Segoe UI, sans-serif" fontSize={Math.max(18, object.width * 5)}>{object.text}</text>
+    {object.kind === 'text' ? <text x={first.x} y={first.y} fill={object.color} fontFamily="Segoe UI, sans-serif" fontSize={Math.max(18, object.width * 5)}>{(object.text ?? '').split(/\r?\n/).slice(0, 32).map((line, index) => <tspan key={`${object.id}-${index}`} x={first.x} dy={index === 0 ? 0 : Math.max(18, object.width * 5) * 1.25}>{line}</tspan>)}</text>
       : object.kind === 'marker' ? <g><circle cx={first.x} cy={first.y} r="16" fill="#202020" stroke={object.color} strokeWidth={object.width} /><text x={first.x} y={first.y + 5} fill={object.color} textAnchor="middle" fontFamily="Segoe UI, sans-serif" fontSize="14" fontWeight="700">{object.step ?? 1}</text></g>
         : object.kind === 'pen' || object.kind === 'highlighter' ? <polyline points={object.points.map((point) => `${point.x},${point.y}`).join(' ')} {...common} />
           : object.kind === 'line' ? <line x1={first.x} y1={first.y} x2={last.x} y2={last.y} {...common} />

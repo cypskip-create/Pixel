@@ -48,18 +48,18 @@ export function PermissionsPanel({ onBack }: { onBack: () => void }): React.JSX.
   return <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-2.5">
     <button type="button" onClick={onBack} className="no-drag mb-2 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] text-[var(--color-ink-soft)] hover:bg-white/8"><ArrowLeft size={12} aria-hidden="true" /> Back to settings</button>
     <div className="mb-2 flex items-start gap-2">
-      <p className="flex-1 text-[10.5px] leading-snug text-[var(--color-ink-dim)]">Always Allow permissions are local and limited to the listed app or secure website origin. Emergency Stop revokes all saved grants.</p>
+      <p className="flex-1 text-[10.5px] leading-snug text-[var(--color-ink-dim)]">Persistent grants and current Pixel-run window approvals are listed here and can be revoked. Emergency Stop revokes all active grants.</p>
       <button type="button" disabled={busyId !== null} onClick={() => void clearExpired()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[9.5px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Clear expired</button>
     </div>
     {error ? <p role="alert" className="mb-2 rounded-lg border border-neutral-400/35 bg-neutral-500/12 px-2 py-1.5 text-[10.5px] text-neutral-100">{error}</p> : null}
     {notice ? <p role="status" className="mb-2 text-[10px] text-neutral-200">{notice}</p> : null}
-    {grants.length === 0 ? <p className="rounded-xl border border-white/8 bg-white/4 px-2.5 py-3 text-[10.5px] text-[var(--color-ink-dim)]">No active Always Allow permissions.</p> : grants.map((grant) => <article key={grant.id} className="mb-1.5 rounded-xl border border-[var(--color-border)] bg-white/4 p-2">
+    {grants.length === 0 ? <p className="rounded-xl border border-white/8 bg-white/4 px-2.5 py-3 text-[10.5px] text-[var(--color-ink-dim)]">No active permissions.</p> : grants.map((grant) => <article key={grant.id} className="mb-1.5 rounded-xl border border-[var(--color-border)] bg-white/4 p-2">
       <div className="flex items-start gap-2">
         <Shield size={13} className="mt-0.5 shrink-0 text-neutral-300" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[10.5px] font-semibold text-[var(--color-ink)]">{grant.toolName}</p>
+          <p className="truncate text-[10.5px] font-semibold text-[var(--color-ink)]">{grant.toolName === 'screen_observation_session' ? 'Screen observation & passive guidance' : grant.toolName}</p>
           <p className="break-all text-[10px] text-[var(--color-ink-dim)]">{scopeText(grant)}</p>
-          <p className="mt-0.5 text-[9px] text-[var(--color-ink-dim)]">Approved {dateText(grant.grantedAt)} · Last used {grant.lastUsedAt ? dateText(grant.lastUsedAt) : 'not yet'}</p>
+          <p className="mt-0.5 text-[9px] text-[var(--color-ink-dim)]">{grant.scope === 'session' ? 'This Pixel run' : grant.scope === 'always' ? 'Always Allow' : 'Allow Once'} · Approved {dateText(grant.grantedAt)}{grant.expiresAt ? ` · Expires ${dateText(grant.expiresAt)}` : ''}</p>
         </div>
         <button type="button" disabled={busyId !== null} onClick={() => void revoke(grant)} aria-label={`Revoke ${grant.toolName} permission`} className="no-drag flex shrink-0 items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[9.5px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50"><Trash2 size={10} /> Revoke</button>
       </div>
@@ -71,6 +71,7 @@ export function PermissionsPanel({ onBack }: { onBack: () => void }): React.JSX.
 }
 
 function scopeText(grant: PermissionGrant): string {
+  if (grant.target?.processName && grant.target.windowTitle) return `Exact window: ${grant.target.processName} · ${grant.target.windowTitle} · ref ${grant.target.windowId ?? 'unknown'}`;
   if (grant.target?.app) return `Application: ${grant.target.app}`;
   if (grant.target?.origin) return `Website origin: ${grant.target.origin}`;
   return 'Target unavailable';

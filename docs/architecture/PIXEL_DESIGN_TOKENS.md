@@ -10,14 +10,14 @@ interaction accent.
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--color-app-bg` | `#171717` | Main Workspace canvas |
-| `--color-sidebar` | `#252525` | Sidebar and secondary panel |
+| `--color-app-bg` | `#181818` | Main Workspace canvas |
+| `--color-sidebar` | `#1B1B1B` | Chat/sidebar surface |
 | `--color-surface` | `#343434` | Standard grouped panel |
-| `--color-surface-raised` | `#202020` | Raised surfaces |
-| `--color-hover` | `#414141` | Hover surface |
+| `--color-surface-raised` | `#232323` | Raised surfaces |
+| `--color-hover` | `#303030` | Hover surface and selected navigation fill |
 | `--color-selected` | `#494949` | Neutral selected navigation row with blue icon/edge cue |
-| `--color-border` | `#444444` | Border and divider |
-| `--color-border-strong` | `#595959` | Emphasized border |
+| `--color-border` | `#353535` | Border and divider |
+| `--color-border-strong` | `#505050` | Emphasized border |
 | `--color-popover` | `#252525` | Menus and popovers |
 | `--color-ink` | `#F3F3F3` | Primary text |
 | `--color-ink-soft` | `#D3D3D3` | Secondary text |
@@ -39,6 +39,18 @@ interaction accent.
 | `--color-state-error` | `#D88B83` | Error state |
 | `--color-state-paused` | `#D5AB72` | Paused state |
 
+## Workspace conversation accents
+
+| Token | Value | Use |
+| --- | --- | --- |
+| Workspace user bubble | `#214D90` | Compact, right-aligned user messages |
+| Workspace composer surface | `#303030` | Main chat composer |
+| Workspace rail | `#202020` | Narrow application-section navigation |
+
+Assistant messages stay unboxed on the near-black canvas. Interactive controls
+use `--color-accent`; the blue user-bubble fill is a separate conversation
+surface. Pix's mint remains isolated to the mascot SVG.
+
 ## Replaced palette
 
 The preceding renderer used the following navy/chromatic tokens. Their
@@ -46,27 +58,27 @@ replacement is shown so theme migrations have a single reference:
 
 | Previous token/value | Current token/value |
 | --- | --- |
-| `--color-glass: rgb(13 17 28 / 0.88)` | `--color-surface: #1B1B1B` |
-| `--color-glass-raised: rgb(22 28 43 / 0.95)` | `--color-surface-raised: #222222` |
-| `--color-glass-border: rgb(255 255 255 / 0.1)` | `--color-border: #333333` |
-| `--color-glass-border-strong: rgb(255 255 255 / 0.18)` | `--color-border-strong: #4A4A4A` |
-| `--color-popover-glass: rgb(20 26 40 / 0.97)` | `--color-popover: #1B1B1B` |
-| `--color-ink: #e9edf7` | `--color-ink: #F4F4F4` |
-| `--color-ink-soft: #b9c2d6` | `--color-ink-soft: #B8B8B8` |
-| `--color-ink-dim: #8a94ab` | `--color-ink-dim: #888888` |
-| idle `#8ea3c4` | `--color-state-idle: #B8B8B8` |
-| listening `#22d3ee` | `--color-state-listening: #F4F4F4` |
-| thinking `#a78bfa` | `--color-state-thinking: #D4D4D4` |
-| speaking `#38bdf8` | `--color-state-speaking: #D4D4D4` |
-| working `#fbbf24` | `--color-state-working: #B8B8B8` |
-| success `#34d399` | `--color-state-success: #D4D4D4` |
-| error `#fb7185` | `--color-state-error: #F4F4F4` |
-| paused `#94a3b8` | `--color-state-paused: #888888` |
-| Workspace surface `#151c28` | app canvas `#0D0D0D` |
-| Workspace panel `#1c2635` | sidebar `#141414` |
-| Workspace panel `#243144` | raised surface `#222222` |
-| Workspace hover `#2c3b51` | hover surface `#292929` |
-| Workspace accent `#49c5de` | brand foreground `#D4D4D4` |
+| `--color-glass: rgb(13 17 28 / 0.88)` | Removed; visible surfaces use opaque `--color-surface: #343434` |
+| `--color-glass-raised: rgb(22 28 43 / 0.95)` | `--color-surface-raised: #232323` |
+| `--color-glass-border: rgb(255 255 255 / 0.1)` | `--color-border: #353535` |
+| `--color-glass-border-strong: rgb(255 255 255 / 0.18)` | `--color-border-strong: #505050` |
+| `--color-popover-glass: rgb(20 26 40 / 0.97)` | `--color-popover: #252525` |
+| `--color-ink: #e9edf7` | `--color-ink: #F3F3F3` |
+| `--color-ink-soft: #b9c2d6` | `--color-ink-soft: #D3D3D3` |
+| `--color-ink-dim: #8a94ab` | `--color-ink-dim: #ABABAB` |
+| idle `#8ea3c4` | `--color-state-idle: #B8BEC2` |
+| listening `#22d3ee` | `--color-state-listening: #8CB8A5` |
+| thinking `#a78bfa` | `--color-state-thinking: #8CB8A5` |
+| speaking `#38bdf8` | `--color-state-speaking: #8CB8A5` |
+| working `#fbbf24` | `--color-state-working: #8CB8A5` |
+| success `#34d399` | `--color-state-success: #8CB8A5` |
+| error `#fb7185` | `--color-state-error: #D88B83` |
+| paused `#94a3b8` | `--color-state-paused: #D5AB72` |
+| Workspace surface `#151c28` | app canvas `#181818` |
+| Workspace panel `#1c2635` | sidebar `#1B1B1B` |
+| Workspace panel `#243144` | composer surface `#303030` |
+| Workspace hover `#2c3b51` | hover surface `#303030` |
+| Workspace accent `#49c5de` | interactive accent `#4299F5` |
 
 The old light-theme values (`rgb(248 250 253 / 0.9)`,
 `rgb(255 255 255 / 0.97)`, `rgb(15 23 42 / 0.12)`,
@@ -88,8 +100,8 @@ signal.
 - The P mark uses the unchanged approved geometry and negative-space sparkle
   from `src/shared/pixelMark.json`. `PixelMark.tsx` maps its shapes to semantic
   grayscale foreground tokens for in-app use; native icons keep the master.
-- The cursor companion is a 28 DIP grayscale pointer character in a 36 DIP
-  transparent, focusless, click-through native window.
+- Cursor Buddy is a 28 DIP grayscale rounded-rectangle character with a small
+  cursor nib in a 36 DIP transparent, focusless, click-through native window.
 - Workspace palette aliases (`--workspace-surface`, `--workspace-panel`,
   `--workspace-panel-solid`, and `--workspace-hover`) reference shared tokens
   instead of maintaining a second set of surface colors.

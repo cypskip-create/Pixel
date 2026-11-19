@@ -8,6 +8,12 @@ export interface StandingGrantEligibility {
 }
 
 const ALWAYS_LAUNCHABLE_APPS = new Set(['notepad', 'calculator', 'mspaint']);
+export const SCREEN_SESSION_GRANT_TOOL = 'screen_observation_session';
+const SCREEN_SESSION_TOOLS = new Set(['analyze_screen', 'find_ui_elements', 'verify_ui_state', 'screen_highlight_control', 'screen_draw_arrow']);
+
+export function isScreenSessionTool(toolName: string): boolean {
+  return SCREEN_SESSION_TOOLS.has(toolName);
+}
 
 /** Explicit allow-list for repeatable operations that are safe to remember. */
 export function standingGrantEligibility(toolName: string, args: Record<string, unknown>): StandingGrantEligibility {
@@ -29,6 +35,27 @@ export function standingGrantEligibility(toolName: string, args: Record<string, 
   }
 
   return { allowed: false, target: deriveGrantScope(toolName, args), reason: 'This action requires approval each time because its target or effects are not safe to persist.' };
+}
+
+/** A volatile observation grant is exact to one live HWND/PID/title identity. */
+export function sessionGrantEligibility(toolName: string, args: Record<string, unknown>): StandingGrantEligibility {
+  if (toolName === 'analyze_screen' && args.target !== 'selected_window') {
+    return { allowed: false, target: {}, reason: 'Select one exact live application window before authorizing screen observation for this Pixel run.' };
+  }
+  const target = selectedWindowScope(args);
+  if (!isScreenSessionTool(toolName) || !target) {
+    return { allowed: false, target: deriveGrantScope(toolName, args), reason: 'Session access is available only for one explicitly selected live window.' };
+  }
+  return { allowed: true, target, reason: `This Pixel run only · screen observation and passive guidance for ${target.processName} · “${target.windowTitle}” (exact live window; no clicks or typing)` };
+}
+
+export function validateSessionGrant(toolName: string, target: GrantScope | undefined): boolean {
+  if (!target || toolName !== SCREEN_SESSION_GRANT_TOOL) return false;
+  return Object.keys(target).length === 4 &&
+    typeof target.windowId === 'string' && target.windowId.length > 0 && target.windowId.length <= 64 &&
+    Number.isInteger(target.processId) && Number(target.processId) > 0 &&
+    typeof target.processName === 'string' && target.processName.length > 0 && target.processName.length <= 260 &&
+    typeof target.windowTitle === 'string' && target.windowTitle.length > 0 && target.windowTitle.length <= 500;
 }
 
 export const PERMISSION_POLICY_VERSION = 1;
@@ -69,6 +96,13 @@ export function deriveGrantScope(toolName: string, args: Record<string, unknown>
       const directory = canonicalDirectory(args.directory);
       return directory ? { directory } : {};
     }
+    case 'analyze_screen':
+    case 'find_ui_elements':
+    case 'verify_ui_state':
+    case 'screen_highlight_control':
+    case 'screen_draw_arrow':
+      if (toolName === 'analyze_screen' && args.target !== 'selected_window') return {};
+      return selectedWindowScope(args) ?? {};
     default:
       return {};
   }
@@ -81,6 +115,10 @@ export function scopeCovers(granted: GrantScope | undefined, wanted: GrantScope)
   if (granted.app !== undefined && granted.app !== wanted.app) return false;
   if (granted.directory !== undefined && canonicalDirectory(granted.directory) !== canonicalDirectory(wanted.directory)) return false;
   if (granted.query !== undefined && granted.query !== wanted.query) return false;
+  if (granted.windowId !== undefined && granted.windowId !== wanted.windowId) return false;
+  if (granted.processId !== undefined && granted.processId !== wanted.processId) return false;
+  if (granted.processName !== undefined && granted.processName.toLocaleLowerCase() !== wanted.processName?.toLocaleLowerCase()) return false;
+  if (granted.windowTitle !== undefined && granted.windowTitle !== wanted.windowTitle) return false;
   return true;
 }
 
@@ -115,9 +153,23 @@ function canonicalDirectory(value: unknown): string | null {
 
 /** Human description of a scope for the approval card. */
 export function describeScope(scope: GrantScope): string {
+  if (scope.windowId && scope.processName && scope.windowTitle) return `${scope.processName} window “${scope.windowTitle}” (${scope.windowId}, PID ${scope.processId ?? '?'})`;
   if (scope.origin) return `only ${scope.origin}`;
   if (scope.app) return `only ${scope.app}`;
   if (scope.directory) return `only ${scope.directory}`;
   if (scope.query) return `only the search “${scope.query.slice(0, 72)}”`;
   return 'this action anywhere';
+}
+
+function selectedWindowScope(args: Record<string, unknown>): GrantScope | null {
+  if (typeof args.targetWindowId !== 'string' || !args.targetWindowId || args.targetWindowId.length > 64 ||
+    typeof args.expectedWindowTitle !== 'string' || !args.expectedWindowTitle || args.expectedWindowTitle.length > 500 ||
+    typeof args.expectedProcessName !== 'string' || !args.expectedProcessName || args.expectedProcessName.length > 260 ||
+    !Number.isInteger(args.expectedProcessId) || Number(args.expectedProcessId) <= 0) return null;
+  return {
+    windowId: args.targetWindowId,
+    processId: Number(args.expectedProcessId),
+    processName: args.expectedProcessName,
+    windowTitle: args.expectedWindowTitle,
+  };
 }

@@ -19,6 +19,7 @@ import { PixelMark } from '@/components/PixelMark';
 import { PixMascot } from '@/components/PixMascot';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
+import { WorkspaceNavigationRail } from '@/components/WorkspaceNavigationRail';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
@@ -128,6 +129,14 @@ export function Workspace(): React.JSX.Element {
     void bridge.bridge.window.getWorkspaceState().then((next) => { if (alive) setWindowState(next); }).catch(() => undefined);
     const unsubscribe = safeSubscribe<WorkspaceWindowState>(bridge.bridge.window.onWorkspaceState, setWindowState);
     return () => { alive = false; unsubscribe(); };
+  }, [bridge]);
+
+  useEffect(() => {
+    if (bridge.kind !== 'ready') return;
+    return safeSubscribe(bridge.bridge.board.onFocusRequested, () => {
+      setContextOpen(false);
+      setView('board');
+    });
   }, [bridge]);
 
   useEffect(() => {
@@ -405,7 +414,13 @@ export function Workspace(): React.JSX.Element {
       </header>
 
       <div className="workspace-body">
-        <WorkspaceSidebar
+        <WorkspaceNavigationRail
+          view={view}
+          onViewChange={setView}
+          emergencyStopped={stopped}
+          onEmergencyStop={() => void toggleEmergency()}
+        />
+        {view !== 'settings' ? <WorkspaceSidebar
           view={view}
           onViewChange={setView}
           collapsed={sidebarCollapsed}
@@ -421,7 +436,7 @@ export function Workspace(): React.JSX.Element {
           currentProject={currentProject}
           activeTaskCount={tasks.filter(isTaskActive).length}
           disabled={chat.streaming || chat.historyLoading}
-        />
+        /> : null}
 
         <main className="workspace-main">
           {notice ? <div role="status" className="workspace-notice">{notice}<button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><X size={13} /></button></div> : null}

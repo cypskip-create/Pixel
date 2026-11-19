@@ -63,6 +63,17 @@ export const CHANNELS = {
   screenCaptureRegion: 'screen:captureRegion',
   screenGuidanceUpdate: 'screen:guidanceUpdate',
 
+  boardGetState: 'board:getState',
+  boardApply: 'board:apply',
+  boardCreate: 'board:create',
+  boardImportLegacyDraft: 'board:importLegacyDraft',
+  boardUndo: 'board:undo',
+  boardRedo: 'board:redo',
+  boardOpen: 'board:open',
+  boardSave: 'board:save',
+  boardChanged: 'board:changed',
+  boardFocusRequested: 'board:focusRequested',
+
   systemDiagnostics: 'system:diagnostics',
   systemEmergencyStop: 'system:emergencyStop',
   systemIsEmergencyStopped: 'system:isEmergencyStopped',

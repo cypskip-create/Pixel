@@ -1,5 +1,97 @@
 # Pixel Windows acceptance procedure
 
+## Experience 5.2 — Board agent and workspace follow-up
+
+The current local change is based on latest GitHub `main`
+`d98fbe896c4893fadc506b7fd0783e570dfbd3f8`. CI run
+[`44567448710`](https://github.com/cypskip-create/Pixel/actions/runs/44567448710)
+is green on parent commit `0a8f39f68bf54bc10ac3274521ef348b8289080a`; it does
+not validate this local worktree. Typecheck, full tests and production build
+must be rerun on this exact source before merging. The Electron GUI and these
+steps have not yet been exercised here.
+
+### Pixel Board agent workflow
+
+1. Start Pixel from the target checkout with `npm run dev`. Open the full
+   Workspace and choose Pixel Board from the navigation rail.
+2. In Agent mode, ask: “Create a new board called Network Architecture.”
+   Confirm the title appears in the Board page and the task records a successful
+   `board_create` result.
+3. Ask: “Draw a diagram showing a PC connected to a switch, then a router, then
+   the internet.” Confirm Pixel reports a verified diagram tool result; the
+   Workspace opens the Board page; a title, four editable node boxes, and three
+   arrows appear. Select and move one object, then undo it once. Confirm the
+   entire generated diagram is undone/redone as one group.
+4. Ask Pixel to “Add a short explanation under the diagram.” Confirm the text
+   wraps and does not overlap the existing object bounds. Edit the text
+   manually, then confirm the agent can still read the new content with
+   `board_get_state`.
+5. Ask Pixel to save the Board. In the native Save dialog choose a temporary
+   test folder and `.pixelboard` name. Confirm the overwrite prompt appears if
+   a destination already exists, and confirm Pixel reports a path only after
+   read-back verification. Open the saved file independently as JSON and
+   verify it contains the title and objects.
+6. Create a blank board, then ask Pixel to open the saved document. Confirm the
+   replacement warning appears and the original saved objects return. Export
+   the reopened Board to SVG and verify the file begins with an SVG element.
+7. Deny one Board edit approval (open/save is approval-gated) and confirm the
+   requested file action did not happen. Trigger Emergency Stop during a
+   harmless task and verify later agent tool calls are rejected.
+
+### Selected-window annotation and permission reuse
+
+1. Open Notepad with harmless text and keep it as the only candidate target.
+   Ask Pixel to identify the current foreground window and the Search/Settings
+   control on the chosen harmless target.
+2. Ask Pixel to inspect that explicitly selected window and draw a passive
+   arrow to one uniquely identified accessible control. If prompted, approve
+   “This Window · Session” and read the scope: the exact window only, passive
+   observation/guidance, no clicking or typing.
+3. Confirm the arrow appears on the external desktop window, not in Pixel
+   Board. Verify it points at the selected control, remains click-through, and
+   the control was not clicked or focused by Pixel.
+4. Ask Pixel to inspect/draw on the same window again; the session authorization
+   should be reused without another prompt. Change to a different window and
+   repeat; the new target must not inherit the previous window grant.
+5. Revoke the session grant from Settings → Permissions, then retry and confirm
+   a new approval is required. Deny it and verify the overlay does not appear.
+
+This release supports UIA-bound temporary guidance only. It does not include an
+interactive freehand desktop canvas, arbitrary coordinate drawing, desktop
+annotation editing/save/export, or physical-coordinate clicking. Do not treat
+the arrow as an executed computer action.
+
+### Workspace and Cursor Buddy visuals
+
+Compare Pixel at 1280×768 or 1366×768 and 100%/125% scaling against the supplied
+Codex references. Confirm the narrow section rail, separate chat sidebar,
+selected conversation, near-black chat canvas, blue right-aligned user
+bubbles, unboxed assistant replies and fixed charcoal composer. Open Settings:
+the chat sidebar should be replaced by the Settings categories; check grouped
+rows, blue enabled switches and right-aligned controls. Capture screenshots
+before/after for review; automated CSS assertions are not visual acceptance.
+
+Enable Cursor Companion. Confirm the terminal prints `renderer-ready` then
+`visible`, inspect the small rounded-rectangle character beside the pointer on
+both light and dark backgrounds, and verify it remains click-through and
+focusless. Test all corners, a second display, Workspace, Settings,
+Reduce Motion, disable/re-enable, screen lock and resume. Pix should remain the
+silver/mint application mascot and must not follow the pointer.
+
+### Local commands
+
+Run in the current checkout before the GUI procedure:
+
+```powershell
+npm run typecheck
+npm test -- --reporter=dot
+npm run build
+git diff --check
+```
+
+The full Windows CI run for the pushed commit is required after this local
+change; the successful parent-commit run above is not a substitute.
+
 ## Experience 5.1 base and Cursor Buddy trust follow-up (2026-11-19)
 
 Current automated evidence and blockers are in

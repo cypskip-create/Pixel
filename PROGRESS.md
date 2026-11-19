@@ -2,6 +2,64 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
+## Current local checkpoint — Experience 5.2 Board agent and Workspace
+
+Reviewed GitHub `main`: `d98fbe896c4893fadc506b7fd0783e570dfbd3f8` (latest as of
+2026-11-19). Windows CI run
+[`44567448710`](https://github.com/cypskip-create/Pixel/actions/runs/44567448710)
+completed successfully on parent release commit
+`0a8f39f68bf54bc10ac3274521ef348b8289080a`. The changes below are local and
+uncommitted; no push or workflow run was created.
+
+- Pixel Board is now owned by `PixelBoardService` in the main process. It
+  persists revisioned documents under the Pixel user-data directory, imports
+  the previous local draft without deleting it, validates all objects, groups
+  edits for undo/redo, and prevents stale revisions from overwriting newer
+  renderer/agent edits.
+- Agent-visible Board tools are registered in the same schema, policy and
+  executor pipeline as the other tools: `board_get_state`, `board_create`,
+  `board_add_text`, `board_add_shape`, `board_add_stroke`, `board_add_marker`,
+  `board_create_diagram`, `board_update_object`, `board_delete_object`,
+  `board_clear`, `board_undo`, `board_redo`, `board_open`, `board_save` and
+  `board_export`. Diagram creation is one undoable operation; the tool result
+  includes a verified main-process snapshot. Open/save/export use main-process
+  file dialogs and explicit overwrite/replacement confirmation. Agent export
+  currently supports editable `.pixelboard` and SVG.
+- Added exact-window `screen_draw_arrow`. It locates one accessible UIA control
+  in the approved window and displays a passive arrow using only verified UIA
+  bounds. It never clicks or focuses the target. Existing rectangle/circle/
+  arrow highlight guidance remains available. Arbitrary freehand desktop
+  drawing, editable desktop overlays and desktop export are not implemented.
+- Agent-mode screen authorization can be granted for one exact selected window
+  for the current app session. That volatile grant covers only screen
+  observation and passive UIA guidance on the same window identity; it does not
+  authorize clicks or typing and is revoked/expired independently. Read-only
+  foreground metadata no longer prompts. Persistent Always Allow remains
+  limited to the existing app-launch and HTTPS-origin allowlists.
+- The Workspace now has a separate narrow section rail beside the recent-chat
+  sidebar. Settings replaces the chat sidebar with its own category navigation.
+  User messages use right-aligned blue bubbles (`#214D90`), assistant replies
+  remain unboxed, and the shared dark palette matches the supplied charcoal
+  references. The Settings page now has a visible General/Voice/Privacy/Tools
+  heading and grouped content. Pix keeps its independent mint artwork.
+- Cursor Buddy remains separate from Pix and now has a compact rounded
+  rectangle with its own small cursor nib. The nib is the anchor used by
+  bounded screen-edge placement; this remains a code-level change until a
+  visible Windows test confirms its appearance.
+- Validation on this worktree: `npm run typecheck`, `npm run build:native`,
+  and `npm run build` passed; `npm test --
+  --reporter=dot` passed with **856 passed, 0 failed, 27 skipped (883 total;
+  60 files passed, 1 skipped)**; and `npm run build` passed. The tests ran with
+  an isolated `USERPROFILE` under `.pixel-test-profile` so tests could not
+  write into the real Windows profile. Browser tests skipped because Playwright
+  Chromium is unavailable; NSIS tests skipped because `makensis` is unavailable.
+  The supplied Actions run is green on the parent commit, not these local
+  changes. Windows UI launch was attempted: `npm run dev` stopped because Vite
+  reported its strict port 5199 was occupied; launching the built Electron app
+  with isolated user-data paths exited with code 1 without a window or useful
+  log. The desktop UI, external-window annotation, save/reopen dialogs, screenshot
+  comparison and pointer-follow behavior therefore remain unverified.
+
 ## Current fix — Cursor Buddy stays hidden after being enabled
 
 Reviewed latest GitHub `main`: `0a8f39f68bf54bc10ac3274521ef348b8289080a`.

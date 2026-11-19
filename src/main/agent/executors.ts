@@ -28,6 +28,11 @@ import type { FileTools } from '../files/toolset';
 import { terminateProcessTree } from '../services/process';
 import { NativeHelperError } from '../services/nativeHelper';
 import type { FindElementsQuery, LastExternalWindowResult, NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
+import { randomUUID } from 'node:crypto';
+import { BOARD_HEIGHT, BOARD_WIDTH, wrapBoardText } from '../../shared/drawingBoard';
+import type { BoardDiagramEdge, BoardObject, BoardOperation, BoardSnapshot } from '../../shared/drawingBoard';
+import type { BoardFileFormat, PixelBoardService } from '../board/service';
+import { isBoardTool } from '../board/tools';
 
 const sharedDesktopInputLease = new DesktopInputLease();
 
@@ -105,6 +110,11 @@ export interface ExecutorDeps {
   /** Opens only a validated HTTPS URL in the user's default browser. */
   openExternal?: (url: string) => Promise<void>;
   searchProvider?: () => SearchProvider;
+  /** Main-process Board service and user-mediated file picker. */
+  board?: PixelBoardService;
+  chooseBoardFile?: (action: 'open' | 'save', format: BoardFileFormat, title: string) => Promise<{ path: string; overwrite?: boolean; replace?: boolean } | null>;
+  /** Navigate the trusted Workspace to the Board after an agent edit. */
+  focusBoard?: () => void;
 }
 
 export class ToolExecutors {
@@ -205,6 +215,7 @@ export class ToolExecutors {
       if (this.deps.files?.handles(name)) {
         return this.deps.files.run(name, args);
       }
+      if (isBoardTool(name)) return await this.runBoardTool(name, args, signal);
 
       switch (name) {
         case 'get_current_time':
@@ -230,6 +241,8 @@ export class ToolExecutors {
           return await this.analyzeScreen(args, signal);
         case 'screen_highlight_control':
           return await this.highlightControl(args, signal);
+        case 'screen_draw_arrow':
+          return await this.highlightControl({ ...args, shape: 'arrow' }, signal);
         case 'screen_clear_annotations':
           this.deps.clearVisualGuidance?.(typeof args.selector === 'string' ? args.selector : undefined);
           return { ok: true, content: 'Pixel visual guidance annotations were cleared.', detail: { cleared: true } };
@@ -288,6 +301,138 @@ export class ToolExecutors {
         errorCode: 'FAILED',
       };
     }
+  }
+
+  private async runBoardTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    const board = this.deps.board;
+    if (!board) return { ok: false, content: 'Pixel Board is unavailable in this application session.', errorCode: 'UNAVAILABLE' };
+    if (signal?.aborted) return cancelledResult(name);
+    let snapshot: BoardSnapshot;
+    let operation = name;
+
+    switch (name) {
+      case 'board_get_state': {
+        snapshot = board.getSnapshot();
+        const items = snapshot.document.objects.slice(0, 100).map((item) => ({ id: item.id, kind: item.kind, text: item.text?.slice(0, 180), points: item.points.slice(0, 6) }));
+        return {
+          ok: true,
+          content: `Pixel Board “${snapshot.document.title}” revision ${snapshot.revision} has ${snapshot.document.objects.length} editable objects.${snapshot.document.objects.length > items.length ? ` First ${items.length} shown; ask for a specific object if needed.` : ''}\n${items.map((item, index) => `${index + 1}. ${item.kind} ${item.id}${item.text ? `: ${item.text.replace(/\n/g, ' / ')}` : ''}`).join('\n')}`,
+          detail: { title: snapshot.document.title, revision: snapshot.revision, objectCount: snapshot.document.objects.length, objects: items },
+          verification: { summary: `Main-process Board revision ${snapshot.revision} returned ${snapshot.document.objects.length} editable objects.`, source: 'Pixel Board service snapshot' },
+        };
+      }
+      case 'board_create':
+        snapshot = board.create(String(args.title ?? 'Untitled board'));
+        break;
+      case 'board_add_text': {
+        const current = board.getSnapshot();
+        const rawText = typeof args.text === 'string' ? args.text.trim() : '';
+        if (!rawText) throw new Error('Provide text to add to the Board.');
+        const text = wrapBoardText(rawText);
+        const x = numberArgument(args.x, 48);
+        const y = args.y === undefined ? findBoardTextBaseline(current.document.objects, x, text, 4) : numberArgument(args.y, NaN);
+        if (!Number.isFinite(x) || x < 0 || x > BOARD_WIDTH || !Number.isFinite(y) || y < 20 || y > BOARD_HEIGHT) throw new Error('The text block is outside Pixel Board bounds.');
+        if (textOverlapsObjects(current.document.objects, x, y, text, 4)) throw new Error('That text would overlap existing Board content. Choose another position or a shorter note.');
+        const object: BoardObject = { id: randomUUID(), kind: 'text', points: [{ x, y }], text: text.slice(0, 2_000), color: validColor(args.color) ?? '#F3F3F3', width: 4 };
+        snapshot = board.apply([{ type: 'add', object }]);
+        operation = `added text object ${object.id}`;
+        break;
+      }
+      case 'board_add_shape': {
+        const shape = args.shape;
+        if (!['line', 'arrow', 'rectangle', 'circle'].includes(String(shape))) throw new Error('Choose a line, arrow, rectangle, or circle.');
+        const x = numberArgument(args.x, NaN); const y = numberArgument(args.y, NaN);
+        const width = numberArgument(args.width, NaN); const height = numberArgument(args.height, NaN);
+        const endX = x + width; const endY = y + height;
+        if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || endX > BOARD_WIDTH || endY > BOARD_HEIGHT) throw new Error('The requested shape is outside Pixel Board bounds.');
+        const object: BoardObject = { id: randomUUID(), kind: shape as BoardObject['kind'], points: [{ x, y }, { x: endX, y: endY }], color: validColor(args.color) ?? '#4299F5', width: 3 };
+        snapshot = board.apply([{ type: 'add', object }]);
+        operation = `added ${object.kind} object ${object.id}`;
+        break;
+      }
+      case 'board_add_stroke': {
+        if (args.kind !== 'pen' && args.kind !== 'highlighter') throw new Error('Choose pen or highlighter.');
+        const points = Array.isArray(args.points) ? args.points as BoardObject['points'] : [];
+        if (points.length < 2 || points.length > 500) throw new Error('A stroke requires 2 to 500 points.');
+        const object: BoardObject = { id: randomUUID(), kind: args.kind, points, color: validColor(args.color) ?? '#4299F5', width: numberArgument(args.width, 5) };
+        snapshot = board.apply([{ type: 'add', object }]);
+        operation = `added ${object.kind} stroke ${object.id}`;
+        break;
+      }
+      case 'board_add_marker': {
+        const stepCount = board.getSnapshot().document.objects.filter((item) => item.kind === 'marker').length;
+        const step = Number.isInteger(args.step) ? Number(args.step) : stepCount + 1;
+        const object: BoardObject = { id: randomUUID(), kind: 'marker', points: [{ x: numberArgument(args.x, NaN), y: numberArgument(args.y, NaN) }], step, color: '#4299F5', width: 3 };
+        snapshot = board.apply([{ type: 'add', object }]);
+        operation = `added step marker ${object.id}`;
+        break;
+      }
+      case 'board_create_diagram': {
+        const nodes = Array.isArray(args.nodes) ? args.nodes as string[] : [];
+        const edges = Array.isArray(args.edges) ? args.edges as BoardDiagramEdge[] : [];
+        snapshot = board.createDiagram(String(args.title ?? ''), nodes, edges);
+        operation = `created a diagram with ${nodes.length} nodes and ${edges.length} connectors`;
+        break;
+      }
+      case 'board_update_object': {
+        const id = String(args.id ?? '');
+        const patch: Partial<Pick<BoardObject, 'text' | 'color' | 'width'>> = {};
+        if (typeof args.text === 'string') patch.text = args.text.slice(0, 2_000);
+        if (typeof args.color === 'string') patch.color = args.color;
+        if (args.width !== undefined) patch.width = numberArgument(args.width, NaN);
+        const operations: BoardOperation[] = [];
+        if (Object.keys(patch).length) operations.push({ type: 'update', id, patch });
+        if (args.dx !== undefined || args.dy !== undefined) operations.push({ type: 'move', id, dx: numberArgument(args.dx, 0), dy: numberArgument(args.dy, 0) });
+        if (!operations.length) throw new Error('Provide text, color, width, dx, or dy to update this object.');
+        snapshot = board.apply(operations);
+        operation = `updated object ${id}`;
+        break;
+      }
+      case 'board_delete_object':
+        snapshot = board.apply([{ type: 'delete', id: String(args.id ?? '') }]);
+        operation = `deleted object ${String(args.id ?? '')}`;
+        break;
+      case 'board_clear':
+        snapshot = board.apply([{ type: 'clear' }]);
+        break;
+      case 'board_undo':
+        if (!board.getSnapshot().canUndo) return { ok: false, content: 'There is no previous Board edit to undo.', errorCode: 'NOT_FOUND' };
+        snapshot = board.undo();
+        break;
+      case 'board_redo':
+        if (!board.getSnapshot().canRedo) return { ok: false, content: 'There is no undone Board edit to redo.', errorCode: 'NOT_FOUND' };
+        snapshot = board.redo();
+        break;
+      case 'board_open': {
+        if (!this.deps.chooseBoardFile) return { ok: false, content: 'Pixel cannot open Board files because the native file picker is unavailable.', errorCode: 'UNAVAILABLE' };
+        const chosen = await this.deps.chooseBoardFile('open', 'pixelboard', board.getSnapshot().document.title);
+        if (!chosen || signal?.aborted) return signal?.aborted ? cancelledResult(name) : { ok: false, content: 'Opening a Board was cancelled.', errorCode: 'CANCELLED' };
+        snapshot = board.openFromFile(chosen.path, chosen.replace === true);
+        operation = `opened ${chosen.path}`;
+        break;
+      }
+      case 'board_save':
+      case 'board_export': {
+        if (!this.deps.chooseBoardFile) return { ok: false, content: 'Pixel cannot save Board files because the native file picker is unavailable.', errorCode: 'UNAVAILABLE' };
+        const format: BoardFileFormat = name === 'board_save' ? 'pixelboard' : 'svg';
+        const chosen = await this.deps.chooseBoardFile('save', format, board.getSnapshot().document.title);
+        if (!chosen || signal?.aborted) return signal?.aborted ? cancelledResult(name) : { ok: false, content: 'Saving the Board was cancelled.', errorCode: 'CANCELLED' };
+        const saved = board.saveToFile(chosen.path, format, chosen.overwrite === true);
+        return { ok: true, content: `Saved ${format === 'pixelboard' ? 'editable Pixel Board' : 'SVG export'} to ${saved.path} (${saved.bytes} bytes); the file contents were verified.`, detail: saved, verification: { summary: `The ${format} file exists at ${saved.path} and passed read-back validation.`, source: 'main-process file read-back' } };
+      }
+      default:
+        return { ok: false, content: `Pixel Board does not implement ${name}.`, errorCode: 'NOT_FOUND' };
+    }
+
+    if (signal?.aborted) return cancelledResult(name);
+    if (!['board_get_state', 'board_save', 'board_export'].includes(name)) this.deps.focusBoard?.();
+    const summary = `${operation}; revision ${snapshot.revision}; ${snapshot.document.objects.length} editable object(s)`;
+    return {
+      ok: true,
+      content: `Pixel Board ${summary}.`,
+      detail: { operation: name, revision: snapshot.revision, title: snapshot.document.title, objectCount: snapshot.document.objects.length, ids: snapshot.document.objects.slice(-20).map((object) => object.id) },
+      verification: { summary: `The main-process Board snapshot confirms revision ${snapshot.revision} with ${snapshot.document.objects.length} objects.`, source: 'Pixel Board service postcondition' },
+    };
   }
 
   /* ----------------------------- read-only ---------------------------- */
@@ -356,8 +501,8 @@ export class ToolExecutors {
     const hasAnyTargetIdentity = ['targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'].some((key) => args[key] !== undefined);
     const hasTargetIdentity = typeof args.targetWindowId === 'string' && typeof args.expectedWindowTitle === 'string' &&
       typeof args.expectedProcessId === 'number' && typeof args.expectedProcessName === 'string';
-    if (hasAnyTargetIdentity && !hasTargetIdentity) {
-      return { ok: false, content: 'The selected window identity is incomplete. Re-list windows and select one exact target.', errorCode: 'FAILED' };
+    if (hasAnyTargetIdentity && (!hasTargetIdentity || target !== 'selected_window')) {
+      return { ok: false, content: 'A window identity can only be used with target "selected_window". Re-list windows and select one exact target.', errorCode: 'FAILED' };
     }
     if (target === 'selected_window' && !hasTargetIdentity) {
       return { ok: false, content: 'Select one exact window from the current external-window list before capturing it.', errorCode: 'FAILED' };
@@ -459,8 +604,8 @@ export class ToolExecutors {
     return {
       ok: true,
       content: visible
-        ? 'Pixel verified the exact ' + exact[0].role + ' control "' + exact[0].name + '" in ' + target.title + ' and highlighted its current bounds. You can interact with it yourself; Pixel did not click it.'
-        : 'Pixel verified the exact ' + exact[0].role + ' control "' + exact[0].name + '" in ' + target.title + '. The highlight will appear when that exact application is foreground; Pixel did not switch applications or click it.',
+        ? 'Pixel verified the exact ' + exact[0].role + ' control "' + exact[0].name + '" in ' + target.title + ' and displayed the ' + (shape === 'arrow' ? 'arrow' : 'highlight') + ' at its current bounds. You can interact with it yourself; Pixel did not click it.'
+        : 'Pixel verified the exact ' + exact[0].role + ' control "' + exact[0].name + '" in ' + target.title + '. The ' + (shape === 'arrow' ? 'arrow' : 'highlight') + ' will appear when that exact application is foreground; Pixel did not switch applications or click it.',
       detail: {
         source: 'ui_automation',
         verified: true,
@@ -1109,6 +1254,51 @@ function selectedWindowTarget(args: Record<string, unknown>): ScreenWindowTarget
 
 function round(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function numberArgument(value: unknown, fallback: number): number {
+  return typeof value === 'number' ? value : fallback;
+}
+
+function findBoardTextBaseline(objects: BoardObject[], x: number, text: string, width: number): number {
+  const metrics = boardTextMetrics(text, width);
+  for (let baseline = 72; baseline <= BOARD_HEIGHT; baseline += 24) {
+    if (!textOverlapsObjects(objects, x, baseline, text, width)) return baseline;
+  }
+  throw new Error(`There is no clear area for this ${metrics.lines}-line text block. Move or clear Board objects, or add a shorter note.`);
+}
+
+function textOverlapsObjects(objects: BoardObject[], x: number, baseline: number, text: string, width: number): boolean {
+  const candidate = boardTextMetrics(text, width);
+  const box = { left: x, right: x + candidate.width, top: baseline - candidate.fontSize, bottom: baseline + candidate.height - candidate.lineHeight };
+  if (box.right > BOARD_WIDTH || box.bottom > BOARD_HEIGHT) return true;
+  return objects.some((object) => {
+    const first = object.points[0];
+    if (!first) return false;
+    let left: number; let right: number; let top: number; let bottom: number;
+    if (object.kind === 'text') {
+      const measure = boardTextMetrics(wrapBoardText(object.text ?? '', 72), object.width);
+      left = first.x; right = left + measure.width; top = first.y - measure.fontSize; bottom = first.y + measure.height - measure.lineHeight;
+    } else if (object.kind === 'marker') {
+      left = first.x - 17; right = first.x + 17; top = first.y - 17; bottom = first.y + 17;
+    } else {
+      const xs = object.points.map((point) => point.x); const ys = object.points.map((point) => point.y);
+      left = Math.min(...xs) - 8; right = Math.max(...xs) + 8; top = Math.min(...ys) - 8; bottom = Math.max(...ys) + 8;
+    }
+    const gap = 12;
+    return box.left < right + gap && box.right + gap > left && box.top < bottom + gap && box.bottom + gap > top;
+  });
+}
+
+function boardTextMetrics(text: string, width: number): { fontSize: number; lineHeight: number; lines: number; width: number; height: number } {
+  const fontSize = Math.max(18, width * 5);
+  const lineHeight = fontSize * 1.25;
+  const lines = text.split('\n');
+  return { fontSize, lineHeight, lines: lines.length, width: Math.max(1, ...lines.map((line) => line.length * fontSize * 0.55)), height: lines.length * lineHeight };
+}
+
+function validColor(value: unknown): string | null {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
 }
 
 function message(error: unknown): string {

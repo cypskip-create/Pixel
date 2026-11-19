@@ -38,13 +38,14 @@ describe('charcoal Pixel design system', () => {
 
   it('defines charcoal surfaces, blue interactive accents, and independent Pix/status colors', () => {
     for (const [token, value] of [
-      ['--color-app-bg', '#171717'],
-      ['--color-sidebar', '#252525'],
+      ['--color-app-bg', '#181818'],
+      ['--color-sidebar', '#1B1B1B'],
       ['--color-surface', '#343434'],
-      ['--color-surface-raised', '#202020'],
-      ['--color-hover', '#414141'],
+      ['--color-surface-raised', '#232323'],
+      ['--color-hover', '#303030'],
       ['--color-selected', '#494949'],
-      ['--color-border', '#444444'],
+      ['--color-border', '#353535'],
+      ['--color-border-strong', '#505050'],
       ['--color-ink', '#F3F3F3'],
       ['--color-ink-soft', '#D3D3D3'],
       ['--color-ink-dim', '#ABABAB'],
@@ -67,7 +68,8 @@ describe('charcoal Pixel design system', () => {
     const approvedTints = new Set([
       '0e1013', '101113', '1a1e23', '20252a', '2a3138', '333a40', '394147', '3a4147', '515a61',
       'e6e9ed', 'c6cacd', '9aa1a6', 'd2d7db', 'a7d7c2', 'd6ede3', 'd5ab72', 'd88b83',
-      '4299f5', '60a9fa', '1d70c9', '185ea9', '171717', '252525', '343434', '202020', '414141', '494949', '444444', '595959', 'f3f3f3', 'd3d3d3', 'ababab', 'd8d8d8',
+      '4299f5', '60a9fa', '1d70c9', '185ea9', '214d90', '181818', '1b1b1b', '232323', '303030', '353535', '505050', '171717', '252525', '343434', '202020', '414141', '494949', '444444', '595959', 'f3f3f3', 'd3d3d3', 'ababab', 'd8d8d8',
+      '090909', '050505', '2b2b2b', 'e4e4e4', '111111', '555555', 'f0f0f0', 'bfbfbf',
       '9be5c7', '8cb8a5', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',
       'f1f3f3', 'e7eaea', 'f7f9f9', 'e3e7e7', 'd7dedd', 'c8d0ce', '9aa6a2', 'f5f7f6',
       '161b1a', '414947', '68716e',
@@ -111,9 +113,11 @@ describe('charcoal Pixel design system', () => {
     expect(CURSOR_ICON_VIEWBOX_SIZE).toBe(32);
     expect(CURSOR_WINDOW_HOTSPOT.x).toBeCloseTo(4 + CURSOR_ICON_HOTSPOT.x * CURSOR_VISIBLE_SIZE / CURSOR_ICON_VIEWBOX_SIZE, 8);
     expect(CURSOR_WINDOW_HOTSPOT.y).toBeCloseTo(4 + CURSOR_ICON_HOTSPOT.y * CURSOR_VISIBLE_SIZE / CURSOR_ICON_VIEWBOX_SIZE, 8);
+    expect(CURSOR_ICON_HOTSPOT).toEqual({ x: 2, y: 29 });
     expect(cursor).toContain('width="28"');
     expect(cursor).toContain('height="28"');
     expect(cursor).toContain('viewBox="0 0 32 32"');
+    expect(cursor).toContain('rect x="8" y="7" width="17" height="12" rx="4"');
     expect(cursor).not.toMatch(/#(?:02f3fe|73f9fd)/i);
   });
 });

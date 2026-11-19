@@ -1,6 +1,6 @@
 # Pixel security model
 
-Updated: 2026-11-19 — Cursor Buddy IPC trust fix on `0a8f39f` (latest main); Experience 5.1 functionality and permission boundaries retained.
+Updated: 2026-11-19 — Experience 5.2 local Board-agent and scoped observation work on latest main `d98fbe8`.
 
 ## Trust boundaries
 
@@ -13,12 +13,13 @@ Updated: 2026-11-19 — Cursor Buddy IPC trust fix on `0a8f39f` (latest main); E
 | Approval response to request | Approval ids must match the pending request. Main-process policy independently validates Always Allow against an explicit tool/scope allow-list. High-risk and unsupported standing grants are rejected. | Real Electron approval-card interaction is not verified in this host. |
 | Automatic memory | Deterministic extraction runs in the main process only on direct user text or verified task outcomes. Credentials, injection-like content and copied web/document instructions are filtered. | Extraction intentionally handles a narrow set of phrasing; arbitrary project milestones, source-attributed external facts, and global/cross-project preference features are not complete. |
 | Persistent permissions | Always grants use SQLite migration 7 and include tool, canonical app/origin scope, risk, timestamps, revocation, and policy version. Startup revalidates grants; Settings can revoke one or all; emergency stop revokes grants. | Persistent grants are only available for allow-listed app launch and exact HTTPS origin navigation. |
+| Screen-observation session | A volatile main-process grant can cover observation and passive guidance for one exact window identity (opaque ref, PID, process and title); it can be revoked and expires within eight hours. | It is not persisted/recovered after restart and grants no clicking, typing or application switching. |
 | Browser to network | Only HTTP(S), public DNS destinations and allowed connected addresses are surfaced. Requests are checked, including redirects and subresources. | A DNS rebind can connect before the post-connect check rejects the page; an egress proxy is needed to prevent that network connection entirely. |
 | Task state to disk | Zod validates snapshots; common credential patterns and sensitive argument fields are redacted; typed text and file-write bodies are not stored in task args. | SQLite task text is not application-layer encrypted, and redaction is pattern-based. Windows account/file permissions remain important. |
 | Provider key | Electron `safeStorage` encrypts the DeepSeek key (DPAPI on Windows); if encryption is unavailable, Pixel refuses to persist it. The renderer never receives the plaintext key. | This is a provider API-key store, not a general-purpose credential vault. |
-| Screen capture and guidance | Capture requires the existing explicit screen approval. Window IDs remain opaque in the renderer; native capture revalidates exact window/process identity. The visual overlay accepts a revalidated unique UIA control, remains passive/click-through, expires, and clears on stale target, lock or emergency stop. | Vision output is model interpretation. Native capture and the visible overlay have not passed target-laptop acceptance; current native integration fails before producing a screenshot in this host. |
+| Screen capture and guidance | Capture requires explicit approval or a volatile exact-window session grant. Window IDs remain opaque in the renderer; native capture revalidates exact window/process identity. The visual overlay accepts a revalidated unique UIA control, remains passive/click-through, expires, and clears on stale target, lock or emergency stop. | Vision output is model interpretation. Native capture and the visible overlay have not passed target-laptop acceptance; current native integration fails before producing a screenshot in this host. |
 | New everyday file operations | Experience Polish 5.0 search, metadata, directory creation, copy and rename are main-process tools in the existing registry. New paths are constrained to home scope; search is bounded and skips hidden, sensitive-name and symlink entries. Mutations avoid overwrite and verify destination postconditions. | No new clipboard read/write workflow was added. Real Pixel approval-card interaction and multi-step daily task UI remain unverified. |
-| Pixel Board | Board scene documents are validated in the renderer, drafts remain in the local Pixel profile, and explicit `.pixelboard`, SVG and PNG exports use user-triggered downloads. | The board is inside Workspace; it does not annotate another application's desktop, persist via main-owned files, capture screenshots, or provide PDF export. |
+| Pixel Board | Main-process `PixelBoardService` validates and persists the active scene with revision checks; typed IPC synchronizes renderer and agent edits. Agent tools use the same schema/permission/executor path, and the tool result includes a read-back snapshot. File dialogs and overwrite confirmation are main-owned. | Agent export currently supports editable `.pixelboard` and SVG. PNG export remains renderer-only; PDF and screenshot import are unavailable. Windows dialog and GUI acceptance remain unverified here. |
 
 ## Approval behavior
 
@@ -29,21 +30,24 @@ Updated: 2026-11-19 — Cursor Buddy IPC trust fix on `0a8f39f` (latest main); E
 
 Approval cards identify the proposed action, target, risk and whether a lasting scoped grant is available. Native UIA reads require approval; `invoke_ui_element` is a high-risk state change, shows the exact foreground title, selector and expected accessible UI state, and is single-use. Current tools do not include external messaging, purchase, payment, elevated-command or production-infrastructure actions.
 
-`analyze_screen`, `find_ui_elements` and `screen_highlight_control` use the
-existing high-risk, per-request approval behavior. A highlight is observation
-guidance only and cannot grant permission to invoke a control. The clear
-annotations command only removes Pixel's own temporary marks and does not
-require approval. Display and region capture requests are correlated to exact
-display IDs; ambiguous or stale identity fails closed. Captured images remain
-in memory in the screen service and are not persisted to chat/task history by
-default.
+`analyze_screen`, `find_ui_elements`, `verify_ui_state`,
+`screen_highlight_control` and `screen_draw_arrow` may reuse a user-approved
+session grant for the same exact selected window. The grant is volatile and
+does not include clicks, typing, UI invocation or application switching. A
+highlight/arrow is guidance only. Read-only foreground window metadata is
+low-risk and does not take a screenshot. The clear-annotations command only
+removes Pixel's own temporary marks. Display and region capture requests are
+correlated to exact display IDs; ambiguous or stale identity fails closed.
+Captured images remain in memory in the screen service and are not persisted
+to chat/task history by default.
 
-The requested four-tier critical-risk classifier and automatic Agent/Hybrid
-execution matrix are not implemented in this checkpoint. Modes retain the
-existing registry policy and explicit grant system. There is no new per-task
-screen-observation session toggle; ordinary captures remain approval-gated.
-The desktop guidance renderer remains passive/click-through; interactive
-desktop drawing and coordinate-based pointer fallback are not exposed.
+Agent/Hybrid Board edits are registered medium-risk tools that run without a
+prompt; Guide mode filters them because they change the Board. Board opening,
+saving and exporting are approval-gated and require user-selected paths. This
+does not implement a generalized four-tier decision engine: each tool still
+uses its explicit risk, `changesState`, mode and approval settings. The desktop
+guidance renderer remains passive/click-through; freehand desktop drawing and
+coordinate-based pointer fallback are not exposed.
 
 ## Secret handling
 

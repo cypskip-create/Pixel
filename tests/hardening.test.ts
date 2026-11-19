@@ -170,7 +170,7 @@ describe('grants for high-risk tools', () => {
     expect(stored).toBeUndefined();
   });
 
-  it('keeps a session grant for a medium-risk tool', () => {
+  it('keeps a scoped session grant for an approved application launch', () => {
     const registry = new ToolRegistry();
     registry.grant({
       id: 'g',

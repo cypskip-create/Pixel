@@ -29,7 +29,8 @@ export const DEFAULT_FOLLOW_CONFIG: FollowConfig = {
 export const CURSOR_WINDOW_SIZE = 36;
 export const CURSOR_VISIBLE_SIZE = 28;
 export const CURSOR_ICON_VIEWBOX_SIZE = 32;
-export const CURSOR_ICON_HOTSPOT = { x: 2, y: 2 } as const;
+/** The lower-left nib remains the cursor anchor in the rounded-rect design. */
+export const CURSOR_ICON_HOTSPOT = { x: 2, y: 29 } as const;
 export const CURSOR_WINDOW_PADDING = (CURSOR_WINDOW_SIZE - CURSOR_VISIBLE_SIZE) / 2;
 export const CURSOR_WINDOW_HOTSPOT = {
   x: CURSOR_WINDOW_PADDING + (CURSOR_ICON_HOTSPOT.x / CURSOR_ICON_VIEWBOX_SIZE) * CURSOR_VISIBLE_SIZE,

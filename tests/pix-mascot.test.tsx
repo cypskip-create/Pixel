@@ -54,11 +54,11 @@ describe('official Pix mascot', () => {
     expect(expressionForAssistantState('stopped')).toBe('stopped');
   });
 
-  it('keeps Pix separate from the pointer-shaped Cursor Buddy', () => {
+  it('keeps Pix separate from the rounded-rectangular Cursor Buddy', () => {
     const pix = renderToStaticMarkup(createElement(PixMascot, { size: 40, decorative: true, animate: false }));
     const cursor = renderToStaticMarkup(createElement(CursorBuddy));
     expect(pix).toContain('pix-fold');
-    expect(cursor).toContain('M2 2 28 18 17 20 22 30 16.5 32 12 22 5.5 29Z');
+    expect(cursor).toContain('M10 3h12c4.1 0 7 2.9 7 7v8c0 4.1-2.9 7-7 7h-9L2 29l3-8c-1.9-1.2-3-3-3-5.4V10c0-4.1 3-7 8-7Z');
     expect(cursor).not.toContain('pix-mascot');
     expect(cursor).not.toContain('pix-fold');
   });

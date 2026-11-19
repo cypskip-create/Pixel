@@ -45,10 +45,12 @@ and 140/96/64/40/32 px small-size review remain acceptance work.
 
 ## Cursor Buddy — the separate desktop follower
 
-Cursor Buddy is pointer-shaped artwork in a separate transparent Electron
-window. It is never Pix and does not use the Pix mascot. It remains
-focusless/click-through under the existing native window policy and follows
-the bounded cursor-follow placement algorithm. Settings preview is artwork
+Cursor Buddy is a small rounded-rectangle character with a distinct lower-left
+cursor nib in a separate transparent Electron window. It is never Pix and does
+not use the Pix mascot. It remains focusless/click-through under the existing
+native window policy and follows the bounded cursor-follow placement
+algorithm. The nib is the pointer anchor; edge placement mirrors the shape
+while keeping the nib near the cursor. Settings preview is artwork
 only; the native follower is hidden while Settings is open. Closing Settings
 repositions it from the current pointer before showing. Workspace focus and
 Island expanded/idle state are no longer hidden lifecycle gates.
@@ -69,6 +71,11 @@ deny every other channel. The 2026-11-19 laptop log showed this readiness call
 being rejected by the generic guard; the focused fix adds the narrow exception
 and blocks popup/cross-document navigation. Real post-fix visibility still
 needs laptop verification.
+
+The Experience 5.2 source update changes only Cursor Buddy's artwork and anchor
+geometry. Automated placement and appearance checks pass. Real visibility,
+pointer offset, readability over light/dark backgrounds and click-through
+behavior have not been retested after this visual change.
 
 ## Acceptance separation
 

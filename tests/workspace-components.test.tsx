@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CompactModeSelector } from '../src/renderer/components/CompactModeSelector';
 import { WorkspaceComposer } from '../src/renderer/components/WorkspaceComposer';
 import { WorkspaceSidebar } from '../src/renderer/components/WorkspaceSidebar';
+import { WorkspaceNavigationRail } from '../src/renderer/components/WorkspaceNavigationRail';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '../src/renderer/components/WorkspaceTaskActivity';
 import { PermissionCard } from '../src/renderer/components/PermissionCard';
 import { WorkspaceConversationHeader } from '../src/renderer/components/WorkspaceConversationHeader';
@@ -47,6 +48,18 @@ function task(status: TaskRecord['status'] = 'running'): TaskRecord {
 }
 
 describe('conversation-first Workspace controls', () => {
+  it('provides a compact section rail with working navigation and emergency stop', () => {
+    const onViewChange = vi.fn();
+    const onEmergencyStop = vi.fn();
+    const rendered = mount(<WorkspaceNavigationRail view="chat" onViewChange={onViewChange} emergencyStopped={false} onEmergencyStop={onEmergencyStop} />);
+    expect(rendered.querySelector('[aria-label="Pixel sections"]')).not.toBeNull();
+    expect(rendered.querySelector('[aria-current="page"][aria-label="Chats"]')).not.toBeNull();
+    act(() => rendered.querySelector<HTMLButtonElement>('[aria-label="Pixel Board"]')?.click());
+    expect(onViewChange).toHaveBeenCalledWith('board');
+    act(() => rendered.querySelector<HTMLButtonElement>('[aria-label="Emergency stop"]')?.click());
+    expect(onEmergencyStop).toHaveBeenCalledOnce();
+  });
+
   it('keeps the mode trigger compact and opens a keyboard-operable menu only on demand', async () => {
     const onRequestMode = vi.fn();
     const rendered = mount(<CompactModeSelector current="hybrid" onRequestMode={onRequestMode} />);

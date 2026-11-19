@@ -50,22 +50,59 @@ verifies the destination before source deletion; a failed copy verification
 leaves the source intact. Clipboard orchestration and additional unrestricted
 application-control interfaces were not added in this checkpoint.
 
-## Experience 5.1 board and policy boundary
+## Experience 5.2 Board and screen-guidance integration
 
-`PixelBoard` is currently a renderer-owned Workspace vector editor. It supports
-bounded scene objects, local profile draft recovery, explicit `.pixelboard`
-save/open and SVG/PNG downloads. The scene is not an agent tool and does not
-write through the main process, annotate another application's window, or
-provide PDF/screenshot import. The separate desktop guidance overlay remains
-passive and UIA-bound.
+`PixelBoardService` in `src/main/board/service.ts` owns the active validated
+document and monotonically increasing revision. It persists a recovery draft
+under the Pixel profile, imports the previous renderer localStorage draft once
+without deleting it, and supplies renderer edits and agent calls through the
+same typed bridge/service. Each edit validates a candidate document, persists
+before publishing, and enters bounded undo/redo history. Revision checks reject
+stale renderer writes. Diagram creation is one service transaction and one
+undoable operation.
 
-The requested four-tier consequence classifier and automatic Hybrid/Agent
-approval matrix are not implemented. Tool authorization still follows
-`ToolDefinition.requiresApproval`, `changesState`, mode restrictions, and
-explicit once/session grants. Reuse remains limited by the existing grant
-scope rules; a new Agent screen-observation session grant has not been added.
-No policy change in this checkpoint turns observation or computer control into
-silent background access.
+The registered Board tool group currently contains `board_get_state`,
+`board_create`, `board_add_text`, `board_add_shape`, `board_add_stroke`,
+`board_add_marker`, `board_create_diagram`, `board_update_object`,
+`board_delete_object`, `board_clear`, `board_undo`, `board_redo`, `board_open`,
+`board_save`, and `board_export`. The AgentExecutor passes tool calls through
+the ordinary JSON schema validation, mode policy, cancellation-aware executor,
+audit and result path. Agent open/save/export use native file dialogs and
+confirm replacing content/files; exports are editable `.pixelboard` and SVG.
+PNG remains a renderer-only export and PDF is unavailable.
+
+Board editing tools are medium-risk, automatic in Hybrid/Agent, and filtered in
+Guide because they change the Board document. Open/save/export require approval
+and use explicit user-selected paths. Board state is local to one active
+document; there is no multiple-document tab manager. Text auto-placement is a
+bounded layout estimate, not full font measurement.
+
+`screen_draw_arrow` uses one exact selected window identity and one unique UIA
+control rectangle to show a temporary passive arrow. The existing
+`screen_highlight_control` also supports UIA-bound rectangle, circle and arrow
+guidance. Neither capability clicks, types or focuses the application. These
+are not an interactive desktop drawing editor: arbitrary freehand input,
+desktop shape editing, transfer to Board and desktop annotation export remain
+unimplemented.
+
+## Experience 5.2 permission reuse boundary
+
+Read-only foreground/window metadata is low-risk and does not prompt. Screen
+capture remains gated, but a user may authorize one exact selected window for
+this running Pixel session. The main process stores this scope in volatile
+memory and matches opaque window reference, PID, process name and title on
+every observation/passive-guidance operation. It expires after eight hours or
+revocation and is not restored on restart. It covers `analyze_screen`,
+`find_ui_elements`, `verify_ui_state`, `screen_highlight_control` and
+`screen_draw_arrow` on that window only. It never grants UI invocation,
+typing, pointer input or application switching. Persistent Always Allow remains
+restricted to the existing allow-listed application launches and exact HTTPS
+origin navigation.
+
+The broad, general-purpose four-tier risk matrix is not implemented. Current
+behavior is controlled by the registered per-tool risk, mode and approval
+flags. This explicit scope reduces repeated approvals for the selected-window
+observation flow without asserting that Agent mode authorizes every task.
 
 ## Durable state and restart behavior
 
@@ -89,7 +126,7 @@ Task snapshots preserve a sanitized request and result, step metadata, budget co
 
 - `analyze_screen` reuses the screen permission path and returns capture identity, time, target bounds, display ID, scale and actual pixel dimensions. Window capture uses the native helper's exact opaque window reference; display/region capture correlates by Electron display ID. Regions use global virtual-desktop DIP and cross-display or stale-layout requests fail instead of guessing.
 - `find_ui_elements` returns accessibility-backed controls with source and observation time. Vision descriptions are labeled as model interpretation, not UIA verification. Empty vision output and failed capture are errors. A provider without image support returns unavailable rather than fabricated analysis.
-- `screen_highlight_control` requires a complete selected-window identity and one exact, unique UI Automation name or AutomationId. It draws only the current accessible control bounds in a separate, transparent, sandboxed, passive window. The user must approve the high-risk guidance request. The tool never clicks or types; `screen_clear_annotations` is narrowly scoped and safe.
+- `screen_highlight_control` and `screen_draw_arrow` require a complete selected-window identity and one exact, unique UI Automation name or AutomationId. They draw only current accessible control bounds in a separate, transparent, sandboxed, passive window. A selected-window session grant may cover these passive actions after the user grants it. They never click or type; `screen_clear_annotations` only removes Pixel's own marks.
 - The overlay repeatedly validates the target, foreground state and control bounds, expires within 3–30 seconds and clears on stale targets, lock and emergency stop. It receives a narrow typed update subscription only; it has no native handle, unrestricted IPC or window-creation API.
 - Unit/build evidence is recorded in `PROGRESS.md`. The native foreground integration currently fails in this environment before capture with `The observed window or process is no longer available`; the real Pixel GUI and annotation workflow remain unverified until target-laptop acceptance passes.
 
