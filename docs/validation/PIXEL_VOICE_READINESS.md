@@ -5,6 +5,8 @@
 The development main process now uses `.venv-voice-dev` rather than the
 PyInstaller-only `.venv-voice-build`. Run `npm run setup:voice-dev` to install
 the pinned local inference runtime after an explicit user action. The script
+accepts `PIXEL_VOICE_DEV_PYTHON` or `-Python` for the Python 3.12 x64
+interpreter (separate from the packaging-only `PIXEL_VOICE_BUILD_PYTHON`),
 checks package imports, CTranslate2 CPU compute types, ONNX Runtime CPU provider
 and JSONL capabilities. To check an existing model, pass
 `-ModelPath <selected-model-directory>`; to prove inference, also pass
@@ -12,9 +14,17 @@ and JSONL capabilities. To check an existing model, pass
 inference were not executed here, so model readiness and recognition remain
 unverified.
 
-Updated 2026-11-19. This is a local working-tree report, not a release sign-off.
-Current base commit: `d6031d9c0909413622b082fe9b8035a2acac01ba`; these changes are
-uncommitted. Do not treat this base SHA as containing the work below.
+Updated 2026-11-19. Latest reviewed `main` is
+`8ed850fbb3b2f1d550e7f246d916a99491da3fc9`. A follow-up corrected the setup
+interpreter override and removed duplicate Workspace navigation locally; these
+changes are uncommitted and have no CI run. Current automated evidence after
+those changes: TypeScript and production build passed; Vitest **858 passed, 0
+failed, 27 skipped (885 total)**; Python worker tests **12/12 passed**; native
+helper build passed. The setup diagnostic was checked with an invalid
+`PIXEL_VOICE_DEV_PYTHON` path and reported the correct remediation. No Python
+dependency installation, downloaded model inference, microphone/speaker test,
+or live Electron voice test was performed. These results verify the existing
+automated voice boundaries, not real-device recognition quality or TTS quality.
 
 ## Implemented
 

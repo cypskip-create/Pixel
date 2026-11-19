@@ -1,9 +1,11 @@
 # Pixel implementation handoff
 
-## Current follow-up — voice development runtime and composer Pix
+## Current follow-up — voice development runtime, composer Pix and navigation
 
-Reviewed base: `3897a2a1765eac06d165da81a7a306d17c0a2cd0` on `main`.
-Local changes are uncommitted for the user to review and commit.
+Reviewed base: `8ed850fbb3b2f1d550e7f246d916a99491da3fc9` on `main`.
+Current small follow-up changes are local and uncommitted. The latest Windows
+workflow run `44593414322` passed on the preceding commit `3897a2a`, not these
+changes.
 
 - Development voice now uses a dedicated `.venv-voice-dev` and
   `npm run setup:voice-dev`, separate from PyInstaller's build environment.
@@ -17,6 +19,10 @@ Local changes are uncommitted for the user to review and commit.
 - A missing development faster-whisper dependency now produces a setup
   instruction rather than a packaged-reinstall message. Packaged worker
   failures still direct users to repair/reinstall.
+- The setup interpreter override now uses `PIXEL_VOICE_DEV_PYTHON`; the prior
+  error text incorrectly referred to the packaging-only override. The duplicate
+  app-section rail was removed; navigation remains in the expandable sidebar,
+  with emergency stop in the Workspace header.
 - Workspace places a 44 px Pix beside the composer. During idle it schedules
   an occasional bounded short exploration/ball interaction. Task/listening/
   response states, reduced motion, component cleanup and hidden-document
@@ -25,14 +31,21 @@ Local changes are uncommitted for the user to review and commit.
 - Board, desktop drawing, permission, Cursor Buddy, packaged worker and native
   Windows acceptance remain subject to the existing checkpoint limitations.
   No commit, push or CI run was created.
-- Validation after this follow-up: TypeScript passed; production build passed;
-  Vitest **859 passed, 27 skipped, 0 failed (886 total)**. The skipped tests
-  require the unavailable Playwright Chromium or `makensis` tooling. The
-  PowerShell parser accepted the new setup script; Python worker tests passed
-  **12/12** and the native helper build/protocol smoke passed. The dependency
-  install and model inference were intentionally not run. Latest Actions run
-  [`44593414322`](https://github.com/cypskip-create/Pixel/actions/runs/44593414322)
-  passed on the reviewed base. No current local changes have a CI run.
+- Regression audit: the full Vitest suite includes Board service/tool
+  registration, session-scope checks, Pix expressions/play cleanup, Workspace
+  navigation and Cursor Buddy geometry/trust coverage. The separate Python
+  worker suite passed 12/12, the native helper rebuilt, and the latest known
+  Windows workflow passed all steps on parent `3897a2a`. These are automated
+  regressions; they do not prove model inference, live DeepSeek Board execution,
+  screen overlay placement, or desktop companion visibility.
+- Validation after this follow-up: TypeScript and production build passed;
+  Vitest **858 passed, 0 failed, 27 skipped (885 total; 61 files passed, 1
+  skipped)**; Workspace controls **8/8**. Browser and NSIS tests skipped for
+  unavailable Chromium/`makensis`. An invalid Python override check confirms
+  the setup error names `PIXEL_VOICE_DEV_PYTHON`. Existing Python worker tests
+  (12/12) and native helper build/protocol smoke passed on the earlier CI
+  checkpoint. Dependency installation, real model inference and the Windows
+  GUI remain unverified. No local changes have CI validation.
 
 ## Current local checkpoint — Experience 5.2
 

@@ -587,36 +587,7 @@
 .workspace-emergency-control:hover, .workspace-emergency-control.is-active { background: var(--color-selected); color: var(--color-ink); }
 .workspace-body { position: relative; min-width: 0; }
 
-/* The compact section rail and the wider chat sidebar are separate surfaces. */
-.workspace-rail {
-  z-index: 2;
-  display: flex;
-  flex: 0 0 48px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  border-right: 1px solid var(--color-border);
-  padding: 8px 5px;
-  background: #202020;
-}
-.workspace-rail-items, .workspace-rail-bottom { display: grid; width: 100%; justify-items: center; gap: 5px; }
-.workspace-rail-bottom { padding-top: 8px; border-top: 1px solid var(--color-border); }
-.workspace-rail-button {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 9px;
-  color: var(--color-ink-dim);
-  transition: background 120ms, color 120ms;
-}
-.workspace-rail-button:hover { background: var(--color-hover); color: var(--color-ink); }
-.workspace-rail-button.is-active { background: #303030; color: var(--color-accent); }
-.workspace-rail-button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
-.workspace-rail-stop { color: var(--color-destructive); }
-.workspace-rail-stop:hover, .workspace-rail-stop.is-active { background: #303030; color: var(--color-destructive); }
-
-/* Sidebar */
+/* One expandable sidebar owns Workspace navigation. */
 .workspace-sidebar {
   position: relative;
   z-index: 1;

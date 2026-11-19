@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$Python,
+  [string]$Python = $env:PIXEL_VOICE_DEV_PYTHON,
   [string]$ModelPath,
   [string]$AudioPath
 )
@@ -17,7 +17,7 @@ if (-not $Python) {
   if (-not $launcher) { throw 'Python 3.12 x64 is required. Install it, then rerun npm run setup:voice-dev.' }
   $Python = (& py -3.12 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1).Trim()
 }
-if (-not $Python -or -not (Test-Path -LiteralPath $Python)) { throw 'Could not locate Python 3.12. Set PIXEL_VOICE_BUILD_PYTHON or pass -Python <python.exe>.' }
+if (-not $Python -or -not (Test-Path -LiteralPath $Python)) { throw 'Could not locate Python 3.12. Set PIXEL_VOICE_DEV_PYTHON or pass -Python <python.exe>.' }
 
 $info = & $Python -c 'import platform,struct,sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{struct.calcsize(chr(80))*8}")'
 if ($LASTEXITCODE -ne 0 -or $info -ne '3.12.64') { throw "Voice development requires Python 3.12 x64; found $info." }

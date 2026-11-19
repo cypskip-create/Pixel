@@ -20,7 +20,6 @@ import { PixMascot } from '@/components/PixMascot';
 import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
-import { WorkspaceNavigationRail } from '@/components/WorkspaceNavigationRail';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
@@ -415,12 +414,6 @@ export function Workspace(): React.JSX.Element {
       </header>
 
       <div className="workspace-body">
-        <WorkspaceNavigationRail
-          view={view}
-          onViewChange={setView}
-          emergencyStopped={stopped}
-          onEmergencyStop={() => void toggleEmergency()}
-        />
         {view !== 'settings' ? <WorkspaceSidebar
           view={view}
           onViewChange={setView}

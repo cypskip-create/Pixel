@@ -237,11 +237,11 @@ at different sizes; historical message avatars are static. The official P
 mark remains a separate brand asset elsewhere. Settings provides an
 independent preview of Pix expressions.
 
-The Workspace follows a compact desktop three-region layout: a 48 DIP section
-rail, a 276 DIP independently scrolling chat/sidebar region, and the main
-conversation surface. The section rail routes to supported Pixel surfaces and
-keeps emergency stop available. Settings replaces the chat sidebar with its
-own category navigation, while its content scrolls independently. The selected
+The Workspace uses one expandable, independently scrolling navigation sidebar
+beside the main conversation surface. It owns chat, library, project and
+Settings navigation; the duplicate icon rail was removed. Emergency stop stays
+in the Workspace header. Settings replaces the chat sidebar with its own
+category navigation, while its content scrolls independently. The selected
 Settings category is stored in renderer local storage and falls back to
 General if storage is unavailable. The main Workspace remains near-black;
 user messages use compact right-aligned blue bubbles and assistant replies are

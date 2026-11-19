@@ -2,10 +2,13 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
-## Follow-up — local voice setup and composer Pix
+## Follow-up — voice setup, composer Pix and navigation consolidation
 
-Reviewed source at `3897a2a1765eac06d165da81a7a306d17c0a2cd0` on
-`main`. The development app had been pinned to `.venv-voice-build`, the
+Reviewed current `main`: `8ed850fbb3b2f1d550e7f246d916a99491da3fc9`.
+The latest verified Windows workflow is
+[`44593414322`](https://github.com/cypskip-create/Pixel/actions/runs/44593414322)
+on parent commit `3897a2a`; no run exists for these local edits.
+The development app had been pinned to `.venv-voice-build`, the
 packaging-only environment, while the documented user checks confirmed that
 environment and the frozen worker did not exist. Development now has a
 separate, explicit `npm run setup:voice-dev` setup and uses
@@ -15,21 +18,26 @@ selected model plus a real inference when `-ModelPath`/`-AudioPath` are
 provided. A missing faster-whisper runtime now reports the actionable setup
 command instead of asking to reinstall a development checkout. This has not
 yet been run on the target laptop, and no downloaded model or inference result
-is claimed here.
+is claimed here. Fixed setup's interpreter override to use the development-only
+`PIXEL_VOICE_DEV_PYTHON` variable; it no longer points users at the packaging
+environment variable.
 
 Workspace now includes a small Pix beside the composer. It idles with the
 existing expression system, occasionally explores within a fixed 25 px lane
 and briefly rolls a small ball. Assistant activity, reduced motion and hidden
 documents stop idle play. Native screenshot comparison and Windows timing are
-not yet verified. Validation: TypeScript passed; production build passed; full
-Vitest **859 passed, 27 skipped, 0 failed (886 total; 61 files passed, 1
-skipped)**; the new Pix timer tests passed. Browser and NSIS checks skipped
-because Playwright Chromium and `makensis` are unavailable. PowerShell parser
-accepted the setup script; Python worker tests **12/12** and native helper
-build/protocol smoke passed. Latest Windows Actions run
-[`44593414322`](https://github.com/cypskip-create/Pixel/actions/runs/44593414322)
-passed on reviewed base `3897a2a`; no run exists for this local work. The user
-will create any commits and push.
+not yet verified. The redundant app icon rail has been removed so the
+expandable Workspace sidebar is the single navigation source; the header
+emergency-stop control remains. A packaging-only interpreter variable typo in
+the voice setup diagnostic is corrected to `PIXEL_VOICE_DEV_PYTHON`.
+Validation on this follow-up: typecheck and production build passed; full Vitest
+**858 passed, 0 failed, 27 skipped (885 total; 61 files passed, 1 skipped)**;
+Workspace control tests passed **8/8**. Browser and NSIS tests skipped because
+Playwright Chromium and `makensis` are unavailable. The setup diagnostic now
+identifies the development override on an invalid-path check. Actual dependency
+installation, local model inference, live Windows UI and previous feature
+acceptance remain unverified. The latest Windows workflow is green on its
+parent commit only; no commit or push was made.
 
 ## Current local checkpoint — Experience 5.2 Board agent and Workspace
 

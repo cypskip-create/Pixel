@@ -102,7 +102,9 @@ deliberately with `npm run setup:voice-dev`; this installs the pinned speech
 runtime without PyInstaller. The setup probes CTranslate2 CPU support, ONNX CPU
 provider, the worker JSONL protocol and the optional model files supplied with
 `-ModelPath`. Supplying `-AudioPath` runs actual offline inference against that
-model. The selected model stays in Pixel user data and is not copied into the
+model. Set `PIXEL_VOICE_DEV_PYTHON` or pass `-Python <python.exe>` to select the
+Python 3.12 x64 interpreter; this is distinct from the packaging-only
+`PIXEL_VOICE_BUILD_PYTHON`. The selected model stays in Pixel user data and is not copied into the
 development environment. If setup has not been run, Pixel can still start, but
 the local worker reports the missing interpreter/dependencies rather than
 claiming local Whisper is ready. Packaged applications require
