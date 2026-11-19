@@ -97,10 +97,17 @@ this build and copy the runtime to `resources/voice-runtime`. Models are never
 inside the installer; they live under user data and therefore are not removed
 by the existing per-user installer/uninstaller policy.
 
-Development uses `.venv-voice-build` when present. Otherwise the pre-existing
-developer Python discovery path is retained for local development/document
-tools. Packaged applications require `resources/voice-runtime/PixelVoiceWorker.exe`
-and never use that development fallback.
+Development uses the separate `.venv-voice-dev` environment. Create it
+deliberately with `npm run setup:voice-dev`; this installs the pinned speech
+runtime without PyInstaller. The setup probes CTranslate2 CPU support, ONNX CPU
+provider, the worker JSONL protocol and the optional model files supplied with
+`-ModelPath`. Supplying `-AudioPath` runs actual offline inference against that
+model. The selected model stays in Pixel user data and is not copied into the
+development environment. If setup has not been run, Pixel can still start, but
+the local worker reports the missing interpreter/dependencies rather than
+claiming local Whisper is ready. Packaged applications require
+`resources/voice-runtime/PixelVoiceWorker.exe` and never use the development
+fallback.
 
 The Electron renderer sees only typed model IDs, status, progress and existing
 voice methods on `window.cypsShell`. It does not receive filesystem paths,

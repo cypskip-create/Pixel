@@ -12,7 +12,7 @@
  *  - stderr capture for diagnostics (never secrets: the worker is given none)
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -140,8 +140,8 @@ export class PythonWorker {
       return {
         available: false,
         reason: this.options.requirePackagedWorker
-          ? 'Pixel’s bundled speech worker is missing. Reinstall Pixel to repair the local voice runtime.'
-          : 'No Python interpreter was found. Document features need Python 3.10+ with PyMuPDF, python-docx and openpyxl.',
+          ? 'Pixel’s bundled speech worker is missing from resources. Repair or reinstall Pixel.'
+          : 'No Python interpreter was found. Run npm run setup:voice-dev to create Pixel’s local speech environment.',
       };
     }
     const script = this.resolveScript();
@@ -489,15 +489,16 @@ export class PythonWorker {
 
     const candidates = [
       join(process.resourcesPath ?? '', 'python', 'python.exe'),
+      join(process.cwd(), '.venv-voice-dev', 'Scripts', 'python.exe'),
       join(process.cwd(), 'python', '.venv', 'Scripts', 'python.exe'),
       'python',
       'py',
     ];
     for (const candidate of candidates) {
-      if (candidate === 'python' || candidate === 'py') return candidate;
+      if ((candidate === 'python' || candidate === 'py') && commandAvailable(candidate)) return candidate;
       if (existsSync(candidate)) return candidate;
     }
-    return 'python';
+    return null;
   }
 
   private resolveWorkerDir(): string {
@@ -507,4 +508,9 @@ export class PythonWorker {
   private resolveScript(): string {
     return join(this.resolveWorkerDir(), 'pixel_worker', 'worker.py');
   }
+}
+
+function commandAvailable(command: 'python' | 'py'): boolean {
+  const result = spawnSync(command, ['--version'], { windowsHide: true, timeout: 3_000, stdio: 'ignore' });
+  return !result.error && result.status === 0;
 }

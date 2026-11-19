@@ -1,5 +1,17 @@
 # Pixel Voice Engine 4.1 readiness
 
+## Development setup follow-up (2026-11-19)
+
+The development main process now uses `.venv-voice-dev` rather than the
+PyInstaller-only `.venv-voice-build`. Run `npm run setup:voice-dev` to install
+the pinned local inference runtime after an explicit user action. The script
+checks package imports, CTranslate2 CPU compute types, ONNX Runtime CPU provider
+and JSONL capabilities. To check an existing model, pass
+`-ModelPath <selected-model-directory>`; to prove inference, also pass
+`-AudioPath <local-wav>`. This is code-path implementation only: the setup and
+inference were not executed here, so model readiness and recognition remain
+unverified.
+
 Updated 2026-11-19. This is a local working-tree report, not a release sign-off.
 Current base commit: `d6031d9c0909413622b082fe9b8035a2acac01ba`; these changes are
 uncommitted. Do not treat this base SHA as containing the work below.

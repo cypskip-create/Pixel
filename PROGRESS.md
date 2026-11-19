@@ -2,6 +2,35 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
+## Follow-up — local voice setup and composer Pix
+
+Reviewed source at `3897a2a1765eac06d165da81a7a306d17c0a2cd0` on
+`main`. The development app had been pinned to `.venv-voice-build`, the
+packaging-only environment, while the documented user checks confirmed that
+environment and the frozen worker did not exist. Development now has a
+separate, explicit `npm run setup:voice-dev` setup and uses
+`.venv-voice-dev`; setup installs pinned speech dependencies only after the
+user runs it, checks CTranslate2/ONNX and worker protocol, and can verify the
+selected model plus a real inference when `-ModelPath`/`-AudioPath` are
+provided. A missing faster-whisper runtime now reports the actionable setup
+command instead of asking to reinstall a development checkout. This has not
+yet been run on the target laptop, and no downloaded model or inference result
+is claimed here.
+
+Workspace now includes a small Pix beside the composer. It idles with the
+existing expression system, occasionally explores within a fixed 25 px lane
+and briefly rolls a small ball. Assistant activity, reduced motion and hidden
+documents stop idle play. Native screenshot comparison and Windows timing are
+not yet verified. Validation: TypeScript passed; production build passed; full
+Vitest **859 passed, 27 skipped, 0 failed (886 total; 61 files passed, 1
+skipped)**; the new Pix timer tests passed. Browser and NSIS checks skipped
+because Playwright Chromium and `makensis` are unavailable. PowerShell parser
+accepted the setup script; Python worker tests **12/12** and native helper
+build/protocol smoke passed. Latest Windows Actions run
+[`44593414322`](https://github.com/cypskip-create/Pixel/actions/runs/44593414322)
+passed on reviewed base `3897a2a`; no run exists for this local work. The user
+will create any commits and push.
+
 ## Current local checkpoint — Experience 5.2 Board agent and Workspace
 
 Reviewed GitHub `main`: `d98fbe896c4893fadc506b7fd0783e570dfbd3f8` (latest as of

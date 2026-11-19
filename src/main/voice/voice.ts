@@ -222,8 +222,18 @@ export class VoiceService {
           const modelPath = await this.voiceModels.getSttModelPath(preferredModel);
           if (modelPath) {
             const capabilities = await this.pythonWorker.capabilities();
-            if (!capabilities.ok || capabilities.result.optional.faster_whisper !== true) {
-              return { ok: false, text: '', error: 'Pixel’s packaged local speech runtime is unavailable. Reinstall Pixel to repair it.' };
+            if (!capabilities.ok) {
+              const availability = this.pythonWorker.availability();
+              return { ok: false, text: '', error: availability.reason ?? capabilities.error.message };
+            }
+            if (capabilities.result.optional.faster_whisper !== true) {
+              return {
+                ok: false,
+                text: '',
+                error: this.pythonWorker.availability().packagedExecutable
+                  ? 'The packaged voice worker is missing faster-whisper. Repair or reinstall Pixel.'
+                  : 'The development speech environment is missing faster-whisper. Run npm run setup:voice-dev, then restart Pixel.',
+              };
             }
             const whisper = await this.pythonWorker.transcribeAudio(file, preferredModel, modelPath, controller.signal);
             if (whisper.ok) {

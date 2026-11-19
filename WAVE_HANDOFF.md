@@ -1,5 +1,39 @@
 # Pixel implementation handoff
 
+## Current follow-up — voice development runtime and composer Pix
+
+Reviewed base: `3897a2a1765eac06d165da81a7a306d17c0a2cd0` on `main`.
+Local changes are uncommitted for the user to review and commit.
+
+- Development voice now uses a dedicated `.venv-voice-dev` and
+  `npm run setup:voice-dev`, separate from PyInstaller's build environment.
+  The explicit setup installs pinned runtime packages, verifies CTranslate2
+  CPU support, ONNX Runtime CPU, and the worker JSONL protocol. Optional
+  `-ModelPath` checks the selected model files; adding `-AudioPath` performs
+  local inference and prints the transcript. Runtime setup/inference has not
+  been executed on this laptop, so neither model readiness nor recognition is
+  claimed. The user-reported absent `.venv-voice-build` and frozen worker were
+  not rechecked here.
+- A missing development faster-whisper dependency now produces a setup
+  instruction rather than a packaged-reinstall message. Packaged worker
+  failures still direct users to repair/reinstall.
+- Workspace places a 44 px Pix beside the composer. During idle it schedules
+  an occasional bounded short exploration/ball interaction. Task/listening/
+  response states, reduced motion, component cleanup and hidden-document
+  visibility stop idle play. Windows visual timing and Island containment are
+  not verified by this change.
+- Board, desktop drawing, permission, Cursor Buddy, packaged worker and native
+  Windows acceptance remain subject to the existing checkpoint limitations.
+  No commit, push or CI run was created.
+- Validation after this follow-up: TypeScript passed; production build passed;
+  Vitest **859 passed, 27 skipped, 0 failed (886 total)**. The skipped tests
+  require the unavailable Playwright Chromium or `makensis` tooling. The
+  PowerShell parser accepted the new setup script; Python worker tests passed
+  **12/12** and the native helper build/protocol smoke passed. The dependency
+  install and model inference were intentionally not run. Latest Actions run
+  [`44593414322`](https://github.com/cypskip-create/Pixel/actions/runs/44593414322)
+  passed on the reviewed base. No current local changes have a CI run.
+
 ## Current local checkpoint — Experience 5.2
 
 Latest GitHub `main` reviewed: `d98fbe896c4893fadc506b7fd0783e570dfbd3f8`.

@@ -17,6 +17,7 @@ import { PermissionCard } from '@/components/PermissionCard';
 import { PixelBoard } from '@/components/PixelBoard';
 import { PixelMark } from '@/components/PixelMark';
 import { PixMascot } from '@/components/PixMascot';
+import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceNavigationRail } from '@/components/WorkspaceNavigationRail';
@@ -483,6 +484,7 @@ export function Workspace(): React.JSX.Element {
               {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="workspace-message-mark"><PixMascot size={22} state="thinking" animate={false} reducedMotion decorative /></div><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
               {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
             </div>
+            <WorkspacePixPlay state={assistantState} reducedMotion={settings.companion.reducedMotion} />
             <WorkspaceComposer
               draft={draft}
               onDraftChange={setDraft}

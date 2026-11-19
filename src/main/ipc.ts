@@ -181,7 +181,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     (progress) => context.sendToRenderer(CHANNELS.voiceModelsProgress, progress),
   );
   const pythonWorker = new PythonWorker({
-    pythonPath: app.isPackaged ? undefined : join(app.getAppPath(), '.venv-voice-build', 'Scripts', 'python.exe'),
+    pythonPath: app.isPackaged ? undefined : join(app.getAppPath(), '.venv-voice-dev', 'Scripts', 'python.exe'),
     workerRoot: join(app.getAppPath(), 'python'),
     modelRoot: join(app.getPath('userData'), 'voice-models'),
     packagedWorkerPath: join(process.resourcesPath, 'voice-runtime', 'PixelVoiceWorker.exe'),
