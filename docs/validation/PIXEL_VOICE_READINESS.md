@@ -1,99 +1,143 @@
-# Pixel Voice Engine 4.0 readiness
+# Pixel Voice Engine 4.1 readiness
 
-Updated 2026-11-19. This is a working-tree report, not a release sign-off.
+Updated 2026-11-19. This is a local working-tree report, not a release sign-off.
+Current base commit: `d6031d9c0909413622b082fe9b8035a2acac01ba`; these changes are
+uncommitted. Do not treat this base SHA as containing the work below.
 
 ## Implemented
 
-- Existing Pixel microphone capture, PTT chord, 20-second cap, manual draft,
-  waveform, temporary WAV cleanup, emergency stop and typed shell bridge are
-  retained.
-- Pixel-managed, allowlisted, optional `tiny.en`, `base.en`, `small.en` and
-  Kokoro int8 downloads with partial resume, cancellation, progress, controlled
-  user-data paths, file-size bounds, atomic install, weight SHA-256 checks,
-  metadata validation and corruption status.
-- faster-whisper inference uses the selected Pixel-managed model and CPU int8.
-  Missing selected models use Windows System.Speech only as the existing
-  explicitly described fallback. An installed model failure is returned as a
-  failure rather than silently changing recognizers. No confidence is invented.
-- Optional Kokoro ONNX worker synthesis, fixed voice selection, rate control,
-  WAV playback, stop/cancel and no overlapping speech. Windows System.Speech
-  remains a separately selected local engine; Pixel does not silently switch
-  engines after a synthesis failure.
-- Packaged app resolves a frozen worker under `resources/voice-runtime` and
-  does not fall back to a global Python interpreter. Model data remains in
-  `app.getPath('userData')` and is not packaged.
-- Build requirements, packaging script, runtime notices, acceptance steps and
-  architecture/licensing limits are recorded.
+- Fixed the confirmed Windows PowerShell quoting defect in
+  `scripts/build-voice-worker.ps1`. It now uses a numeric Python version probe,
+  requires Python 3.12 x64 before creating a build environment, verifies the
+  venv architecture/version and starts the frozen worker for a JSON/native
+  dependency smoke test. CI passes the `setup-python` executable explicitly.
+- Replaced the MediaRecorder/Opus/decode path with explicit AudioWorklet Float32
+  capture and WebAudio resampling to mono PCM16 WAV at 16 kHz. Manual dictation
+  supports up to 120 seconds with fixed memory bounds. PTT keeps its existing
+  20-second bound. Stop closes the input track and flushes the worklet before
+  the captured data is resampled.
+- Added an opt-in 30-second Settings Voice Test. It displays the actual backend,
+  model and processing duration; its transcript is not sent to chat. Optional
+  signal metadata includes input/capture/output sample rates, duration, count,
+  RMS, peak, clipping, low-energy share and start/stop time. Raw recording stays
+  in memory only and can be saved only after a separate opt-in and native save
+  dialog; the user can discard it.
+- Added Fast (`tiny.en`), Balanced (`base.en`) and High accuracy (`small.en`)
+  labels to the existing model selector. The existing decoder is unchanged
+  (beam size 1 and existing VAD/conditioning parameters) until real recordings
+  demonstrate a better choice. Backend probe results are no longer presented
+  as proof that a model loaded; Voice Test reports the real inference backend.
+- Increased validated WAV and worker bounds to 120 seconds; local Whisper
+  timeout is 180 seconds. The existing Windows fallback is tagged and timed.
+- Kokoro replies up to 20,000 characters are stripped of fenced code, URLs and
+  basic Markdown and split into bounded requests. Synthesis and playback are
+  serial and cancellable. Settings' test voice reports the selected backend
+  and measured generation/playback time when the engine provides it. Serial
+  chunking can have gaps and is not described as streaming.
+- Added `python/tools/benchmark_voice.py` for manually verified local WAV
+  manifests. It compares selected installed model paths at beam sizes 1/3/5 and
+  records model load time, warm inference, RTF, CPU, working set, WER/CER,
+  omissions, repetitions and false speech on explicitly marked silence. The
+  report omits recordings, file paths and transcripts.
+- Extended the actual Electron sandbox smoke to load and instantiate the
+  production AudioWorklet module without microphone permission. This runs only
+  after the renderer build.
 
-## Partially implemented or blocked
+## Partially implemented
 
-- The Windows release pipeline is wired to build and package an isolated
-  `PixelVoiceWorker`, but the worker artifact was not produced on this host.
-  The packaged-runtime behavior must be treated as incomplete until the Python
-  3.12 x64 build, unpacked package and installer launch pass.
-- Recognition is English-only and retains Pixel's existing 20-second capture
-  limit. Voice-activity segmentation, longer dictation, custom vocabulary and
-  exact-string correction are not implemented.
-- Kokoro output is whole-response local synthesis/playback with cancellation;
-  sentence streaming and output-device selection are not implemented.
-- There is no measured comparison against Handy's transcribe.cpp, Pocket TTS,
-  Piper or a manually verified speech corpus. The current engine selection is
-  an integration decision, not a demonstrated quality/performance win.
+- Capture diagnostics currently measure output-signal levels and timing. There
+  is no built-in raw-vs-processed listening comparison or UI toggle for Windows
+  noise suppression/automatic gain control; these need real recordings before
+  changing those defaults.
+- Long dictation is one continuous bounded recording, not VAD-based segmented
+  dictation. Kokoro text is chunked, but each chunk must finish synthesis before
+  its playback starts; transitions can pause.
+- Voice Settings can show a selected mic and last test result. Device labels
+  are surfaced only after microphone access. Runtime/module/file probes do not
+  prove the model loaded; a successful Voice Test does.
+- The quality mode labels map model sizes and are not benchmark results.
+  `small.en` is available only after a user downloads its larger model.
 
-## Automated evidence from this host
+## Automated evidence on this host
 
-The completed focused TypeScript suite:
+- `npm run typecheck`: passed (renderer and main TypeScript projects).
+- `npm test -- --reporter=default`: **801 passed, 0 failed, 27 skipped**
+  (**828 total; 50 test files passed, 1 skipped**). The skips are 17 browser
+  cases because Playwright Chromium is absent, 7 NSIS cases because `makensis`
+  is absent, and 3 opt-in native foreground integration tests.
+- `python -m unittest discover -s python/tests -v`: **11 passed, 0 failed**.
+- `python -m compileall -q python/pixel_worker python/tests python/tools`:
+  passed.
+- `npm run build`: passed (main, esbuild preload, Vite renderer, worklet public
+  asset and icon).
+- Playwright Chromium installation was attempted, but DNS to
+  `cdn.playwright.dev` is blocked in this environment. Browser tests remain
+  skipped.
+- Python 3.15 x64 rejection check passed: `build:voice-worker` exited with the
+  clear Python 3.12 x64 requirement before creating `.venv-voice-build`.
+- Electron sandbox/AudioWorklet smoke was attempted. Electron 45.2.3 exited
+  with `2147483651` before writing app/preload smoke output. This host therefore
+  did not verify actual Electron AudioWorklet execution.
 
-- `tests/voice.test.ts`, `tests/voice-models.test.ts`, and
-  `tests/presentation-settings.test.tsx`: **31 passed, 0 failed, 0 skipped**.
-- Python worker boundary suite (`python -m unittest discover -s python/tests
-  -v`): **4 passed, 0 failed, 0 skipped** on Python 3.15.2.
-- `python -m compileall -q python/pixel_worker python/tests`: passed.
-- `npm run typecheck`: passed.
-- Full Vitest suite: **793 passed, 0 failed, 27 skipped (820 total; 49 files
-  passed, 1 skipped)**. Skips: 17 browser cases (Playwright Chromium absent), 7
-  NSIS cases (`makensis` absent), and 3 opt-in native foreground tests.
-- `npm run build`: passed (main/preload, renderer and icon).
-- `npm run build:native`: passed (PixelNative.exe compiled).
-- `npm run build:voice-worker`: blocked before environment creation because
-  Python 3.12 x64 is required but this host only provides Python 3.15.2. This
-  means the packaged worker, unpacked application, portable executable and
-  installer were not produced or inspected for this tree.
+## Unverified or blocked
 
-The focused TypeScript run reports current machine capabilities
-`stt=false`, `tts=true`; that is only the operating-system probe, not evidence
-that Kokoro or a Whisper model is installed or has run.
-
-## Unverified on Windows hardware
-
-- No current-tree Windows CI result exists because these changes are
-  uncommitted. The local full tests/build above are not CI evidence.
-- The bundled worker could not be built on this host because installed Python
-  is 3.15.2 and the build script requires Python 3.12 x64. Thus no unpacked
-  Windows artifact, installer, portable executable or worker DLL discovery
-  result was produced.
-- No real Whisper/Kokoro model download, transcription, synthesis, microphone,
-  speaker, disconnected-network test, Windows GUI check, benchmark or clean
-  machine installation was run.
-- No GitHub Actions run exists for this uncommitted tree. The workflow now
-  contains a Python worker test step and packages the bundled runtime on Windows
-  CI, but CI status is not claimed.
-- Kokoro inference has not been exercised against version 0.6.1 in the worker.
-  GPL phonemizer/eSpeak NG distribution obligations and per-voice attribution
-  need review before commercial/closed distribution.
-- Native `transcribe.cpp`, Pocket TTS and Piper were reviewed but not benchmarked
-  in this environment. Accuracy, quality, CPU/RAM and installer-size
-  comparisons are unmeasured.
+- The actual Python 3.12 x64 worker build, dependency installation, PyInstaller
+  native-DLL smoke, unpacked app, portable executable and NSIS installer were
+  not produced. Only Python 3.15 is available locally. A new Windows CI run
+  cannot be produced from this uncommitted tree; the previous GitHub run
+  `44485597153` failed in package construction on the PowerShell quoting bug
+  fixed here. It must be rerun after the user pushes.
+- No real microphone, speaker, Whisper/Kokoro inference, model comparison,
+  accuracy score, latency score, TTS naturalness comparison, offline device
+  test, or Windows app/settings visual acceptance was run. No speech quality
+  improvement is claimed.
+- Handy/transcribe.cpp and other STT/TTS alternatives were not built or
+  benchmarked. No verified reference WAV corpus was supplied. Use the harness
+  below with manually verified speech before changing decoding defaults or
+  claiming an accuracy win.
+- Kokoro's current Windows `SoundPlayer` path still starts a playback process
+  per segment, does not select an output device and is not seamless streaming.
+  Generated audio duration does not equal a subjective naturalness score.
+- Speech distribution licenses/model terms still require review before a
+  closed-source commercial release.
 
 ## Not implemented
 
-- Parakeet or multilingual models, application-specific vocabulary controls,
-  long-form segmentation, streamed neural playback, and output-device choice.
-- Reproducible STT accuracy/real-time-factor/memory benchmarks and TTS
-  latency/quality benchmarks on an identified Windows laptop. No real-device
-  success claim should be made until the documented procedure is run and its
-  measurements recorded.
+- VAD-based long-dictation segmentation, language selection beyond English,
+  custom vocabulary, Parakeet or multilingual models.
+- Live audio streaming, gapless Kokoro queue playback, a persistent Windows
+  playback engine and output-device selection. Kokoro still uses serial
+  synthesis and PowerShell/`SoundPlayer` playback per segment.
+- A review-before-send control for push-to-talk. PTT continues to submit one
+  transcript automatically; potentially state-changing agent actions remain
+  subject to Pixel's existing permission broker.
+- A/B evaluation of Windows noise suppression/automatic gain control and
+  original-vs-processed audio listening.
+- A separate voice worker or measured voice/document contention policy. The
+  current supervised worker is shared and serial; actual contention and memory
+  impact require a real model/load test.
+- Measured TTS voice naturalness comparison or a confirmed accuracy/latency
+  advantage over Handy/transcribe.cpp or other engines.
 
-See [`PIXEL_VOICE_ACCEPTANCE.md`](PIXEL_VOICE_ACCEPTANCE.md) for the exact
-Windows procedure and [`../architecture/PIXEL_VOICE_ENGINE.md`](../architecture/PIXEL_VOICE_ENGINE.md)
-for design and scope.
+## Benchmark procedure
+
+1. Create a local JSON manifest with manually verified references and WAV paths
+   relative to it. Use mono signed PCM16 at 16 kHz. Mark silence examples with
+   `"silence": true`. Keep this data local/private.
+2. In the Python 3.12 voice environment, run for each installed model:
+
+   ```powershell
+   python python/tools/benchmark_voice.py --manifest C:\private\voice-set.json `
+     --model tiny.en=C:\private\models\tiny.en `
+     --model base.en=C:\private\models\base.en `
+     --model small.en=C:\private\models\small.en `
+     --beam 1 --beam 3 --beam 5 --output C:\private\voice-results.json
+   ```
+
+3. Review aggregate-only WER/CER and latency; listen to the recordings and
+   inspect the manually checked transcript privately. Do not place transcript
+   text, API keys or audio in logs, task history or source control.
+
+See [`PIXEL_VOICE_ACCEPTANCE.md`](PIXEL_VOICE_ACCEPTANCE.md) for laptop-side
+steps and [`../architecture/PIXEL_VOICE_ENGINE.md`](../architecture/PIXEL_VOICE_ENGINE.md)
+for architecture, actual status and limits.

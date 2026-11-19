@@ -129,7 +129,7 @@ describe('local voice model settings', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(download).toHaveBeenCalledWith('base.en');
-    expect(host.textContent).toContain('Selected model is ready offline.');
+    expect(host.textContent).toContain('Downloaded; actual load and inference are confirmed by Voice Test.');
 
     const engine = host.querySelector<HTMLSelectElement>('[aria-label="Speech output engine"]');
     expect(engine).not.toBeNull();
@@ -139,5 +139,33 @@ describe('local voice model settings', () => {
       engine.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(onPatch).toHaveBeenCalledWith({ voice: { ttsEngine: 'kokoro', ttsVoice: null } });
+  });
+
+  it('reports an unavailable native voice bridge instead of starting an implicit test', async () => {
+    window.cypsShell = {
+      voiceCapability: async () => ({ speechToText: false, textToSpeech: false, reason: 'Unavailable in test.' }),
+    } as unknown as NonNullable<Window['cypsShell']>;
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(createElement(SettingsPanel, {
+        settings: structuredClone(DEFAULT_SETTINGS),
+        displays: [],
+        onPatch: vi.fn(),
+        onRequestMode: vi.fn(),
+        onClose: vi.fn(),
+        hasApiKey: false,
+        onSaveApiKey: async () => ({ ok: true }),
+        onRemoveApiKey: async () => ({ ok: true }),
+        onTestConnection: async () => ({ ok: true }),
+        error: null,
+        saving: false,
+      }));
+      await Promise.resolve();
+    });
+    const button = [...host.querySelectorAll('button')].find((item) => item.textContent === 'Test recognition');
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(host.textContent).toContain('The local voice test is unavailable in this Pixel build.');
   });
 });

@@ -75,6 +75,7 @@ export interface SynthesizedAudio {
   outputPath: string;
   sampleRate: number;
   durationSeconds: number;
+  processingMs?: number;
 }
 
 export interface PythonWorkerOptions {
@@ -165,7 +166,7 @@ export class PythonWorker {
 
   /** Optional offline faster-whisper path. It never downloads a model. */
   async transcribeAudio(path: string, model: string, modelPath: string | null, signal?: AbortSignal): Promise<WorkerResult<TranscribedAudio>> {
-    const result = await this.send<TranscribedAudio>('transcribe_audio', { path, model, model_path: modelPath }, 90_000, signal);
+    const result = await this.send<TranscribedAudio>('transcribe_audio', { path, model, model_path: modelPath }, 180_000, signal);
     this.scheduleVoiceModelUnload();
     return result;
   }
@@ -263,7 +264,7 @@ export class PythonWorker {
           this.pending.delete(id);
         }
         finish({ ok: false, error: { code: 'CANCELLED', message: `The "${op}" request was cancelled; its worker was stopped.` } });
-        this.terminateWorker('The document worker was stopped after cancellation.');
+        this.terminateWorker('The local worker was stopped after cancellation.');
       };
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -274,7 +275,7 @@ export class PythonWorker {
             message: `The "${op}" request took longer than ${String(timeoutMs)} ms.`,
           },
         });
-        this.terminateWorker('The document worker was stopped after a request timeout.');
+        this.terminateWorker('The local worker was stopped after a request timeout.');
       }, timeoutMs);
 
       this.pending.set(id, {
@@ -359,7 +360,7 @@ export class PythonWorker {
         this.options.onLog?.(`worker exited with code ${String(code)}`);
         this.failAllPending({
           code: 'WORKER_UNAVAILABLE',
-          message: `The document worker stopped unexpectedly (exit code ${String(code)}).`,
+          message: `The local worker stopped unexpectedly (exit code ${String(code)}).`,
         });
       });
 
@@ -389,7 +390,7 @@ export class PythonWorker {
         ok: false,
         error: {
           code: 'WORKER_UNAVAILABLE',
-          message: `The document worker restarted more than ${String(this.options.maxRestarts)} times. It is probably misconfigured.`,
+          message: `The local worker restarted more than ${String(this.options.maxRestarts)} times. It is probably misconfigured.`,
         },
       };
     }

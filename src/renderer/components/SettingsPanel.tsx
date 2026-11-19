@@ -7,7 +7,7 @@ import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { AutomationPanel } from '@/components/AutomationPanel';
 import { MemoryPanel } from '@/components/MemoryPanel';
 import { PixelMark } from '@/components/PixelMark';
-import { MicrophoneCapture } from '@/lib/audioCapture';
+import { MicrophoneCapture, type VoiceCaptureDiagnostics } from '@/lib/audioCapture';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -63,6 +63,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [microphoneTest, setMicrophoneTest] = useState(false);
   const [microphoneLevel, setMicrophoneLevel] = useState(0);
   const [microphoneError, setMicrophoneError] = useState<string | null>(null);
+  const [voiceTestRecording, setVoiceTestRecording] = useState(false);
+  const [voiceTestBusy, setVoiceTestBusy] = useState(false);
+  const [voiceTestResult, setVoiceTestResult] = useState<{ text?: string; backend?: string; model?: string; processingMs?: number; error?: string; diagnostics?: VoiceCaptureDiagnostics } | null>(null);
+  const [showCaptureDiagnostics, setShowCaptureDiagnostics] = useState(false);
+  const [allowDiagnosticAudioSave, setAllowDiagnosticAudioSave] = useState(false);
+  const [diagnosticAudio, setDiagnosticAudio] = useState<Uint8Array | null>(null);
   const [voiceModels, setVoiceModels] = useState<VoiceModelInfo[]>([]);
   const [voiceModelProgress, setVoiceModelProgress] = useState<VoiceModelProgress | null>(null);
   const [voiceSystemVoices, setVoiceSystemVoices] = useState<string[]>([]);
@@ -70,6 +76,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const microphoneCapture = useRef<MicrophoneCapture | null>(null);
+  const voiceTestCapture = useRef<MicrophoneCapture | null>(null);
+  const voiceTestSession = useRef(0);
+  const voiceTestTranscribing = useRef(false);
   const microphoneTestTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -96,6 +105,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
     if (microphoneTestTimer.current !== null) window.clearTimeout(microphoneTestTimer.current);
     microphoneCapture.current?.cancel();
     microphoneCapture.current = null;
+    voiceTestCapture.current?.cancel();
+    voiceTestCapture.current = null;
+    voiceTestSession.current += 1;
+    if (voiceTestTranscribing.current) void window.cypsShell?.voiceCancel?.();
     void window.cypsShell?.voiceCaptureRelease?.();
   }, []);
 
@@ -112,8 +125,94 @@ export function SettingsPanel(props: SettingsPanelProps) {
   useEffect(() => {
     const shell = window.cypsShell;
     if (!shell?.onVoiceCaptureCancel) return;
-    return shell.onVoiceCaptureCancel(stopMicrophoneTest);
+    return shell.onVoiceCaptureCancel(() => {
+      stopMicrophoneTest();
+      voiceTestSession.current += 1;
+      voiceTestCapture.current?.cancel();
+      voiceTestCapture.current = null;
+      setVoiceTestRecording(false);
+      setVoiceTestBusy(false);
+      voiceTestTranscribing.current = false;
+      setDiagnosticAudio(null);
+      setVoiceTestResult({ error: 'Voice test cancelled.' });
+    });
   }, [stopMicrophoneTest]);
+
+  const finishVoiceTest = useCallback(async (capture: MicrophoneCapture, reachedLimit = false, sessionId = voiceTestSession.current): Promise<void> => {
+    if (voiceTestCapture.current !== capture || sessionId !== voiceTestSession.current) return;
+    voiceTestCapture.current = null;
+    setVoiceTestRecording(false);
+    setVoiceTestBusy(true);
+    voiceTestTranscribing.current = true;
+    const shell = window.cypsShell;
+    try {
+      const wav = await capture.stop();
+      const diagnostics = capture.diagnostics();
+      await shell?.voiceCaptureRelease?.();
+      if (sessionId !== voiceTestSession.current) return;
+      setDiagnosticAudio(allowDiagnosticAudioSave ? wav : null);
+      if (!shell?.voiceTranscribeWav) throw new Error('The local transcription bridge is unavailable.');
+      const result = await shell.voiceTranscribeWav(wav);
+      if (sessionId !== voiceTestSession.current) return;
+      setVoiceTestResult(result.ok
+        ? {
+            text: result.text,
+            backend: result.backend,
+            model: result.model,
+            processingMs: result.processingMs,
+            ...(showCaptureDiagnostics && diagnostics ? { diagnostics } : {}),
+            ...(reachedLimit ? { error: 'The 30-second voice test limit was reached.' } : {}),
+          }
+        : { error: result.error ?? 'Pixel could not transcribe this voice test.', ...(showCaptureDiagnostics && diagnostics ? { diagnostics } : {}) });
+    } catch (error) {
+      await shell?.voiceCaptureRelease?.();
+      if (sessionId !== voiceTestSession.current) return;
+      const text = error instanceof Error ? error.message : 'Voice test failed.';
+      if (!text.toLowerCase().includes('cancelled')) setVoiceTestResult({ error: text });
+    } finally {
+      if (sessionId === voiceTestSession.current) {
+        setVoiceTestBusy(false);
+        setMicrophoneLevel(0);
+        voiceTestTranscribing.current = false;
+      }
+    }
+  }, [allowDiagnosticAudioSave, showCaptureDiagnostics]);
+
+  const toggleVoiceTest = useCallback(async (): Promise<void> => {
+    const shell = window.cypsShell;
+    if (voiceTestCapture.current) {
+      await finishVoiceTest(voiceTestCapture.current, false, voiceTestSession.current);
+      return;
+    }
+    if (!shell?.voiceCaptureAcquire || !shell.voiceTranscribeWav) {
+      setVoiceTestResult({ error: 'The local voice test is unavailable in this Pixel build.' });
+      return;
+    }
+    setVoiceTestResult(null);
+    const sessionId = ++voiceTestSession.current;
+    const capture = new MicrophoneCapture(setMicrophoneLevel, () => { void finishVoiceTest(capture, true, sessionId); });
+    voiceTestCapture.current = capture;
+    try {
+      const acquired = await shell.voiceCaptureAcquire();
+      if (!acquired) throw new Error('Another Pixel window is already using the microphone.');
+      if (sessionId !== voiceTestSession.current) { capture.cancel(); return; }
+      await capture.start(settings.voice.inputDeviceId, true, 30_000);
+      if (sessionId !== voiceTestSession.current || voiceTestCapture.current !== capture) { capture.cancel(); return; }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setMicrophones(devices.filter((device) => device.kind === 'audioinput').map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `Microphone ${index + 1}`,
+      })));
+      setVoiceTestRecording(true);
+    } catch (error) {
+      if (sessionId !== voiceTestSession.current) { capture.cancel(); return; }
+      voiceTestCapture.current = null;
+      capture.cancel();
+      await shell.voiceCaptureRelease?.();
+      setVoiceTestRecording(false);
+      setVoiceTestResult({ error: error instanceof Error ? error.message : 'Voice test could not start.' });
+    }
+  }, [finishVoiceTest, settings.voice.inputDeviceId]);
 
   const toggleMicrophoneTest = useCallback(() => {
     if (microphoneCapture.current) {
@@ -153,6 +252,24 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
   const closeSettings = useCallback(() => {
     setKeyEditorReset((value) => value + 1);
+    voiceTestSession.current += 1;
+    if (voiceTestTranscribing.current) {
+      void window.cypsShell?.voiceCancel?.();
+      voiceTestTranscribing.current = false;
+    }
+    if (microphoneTestTimer.current !== null) window.clearTimeout(microphoneTestTimer.current);
+    microphoneTestTimer.current = null;
+    microphoneCapture.current?.cancel();
+    microphoneCapture.current = null;
+    voiceTestCapture.current?.cancel();
+    voiceTestCapture.current = null;
+    setMicrophoneTest(false);
+    setVoiceTestRecording(false);
+    setVoiceTestBusy(false);
+    setMicrophoneLevel(0);
+    setDiagnosticAudio(null);
+    setVoiceTestResult(null);
+    void window.cypsShell?.voiceCaptureRelease?.();
     onClose();
   }, [onClose]);
 
@@ -224,7 +341,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
     setVoiceNotice(null);
     try {
       const result = await speak('Hello, this is a local Pixel voice test.');
-      if (result.ok) setVoiceNotice('Voice test completed.');
+      if (result.ok) {
+        const details = [result.backend, typeof result.generationMs === 'number' ? `${result.generationMs} ms synthesis` : null, typeof result.playbackMs === 'number' ? `${result.playbackMs} ms playback` : null, result.backend === 'Windows System.Speech' && typeof result.elapsedMs === 'number' ? `${result.elapsedMs} ms total` : null].filter(Boolean).join(' · ');
+        setVoiceNotice(details ? `Voice test completed · ${details}` : 'Voice test completed.');
+      }
       else setVoiceError(result.error ?? 'Pixel could not play the voice test.');
     } catch (error) {
       setVoiceError(error instanceof Error ? error.message : 'Pixel could not play the voice test.');
@@ -451,21 +571,21 @@ export function SettingsPanel(props: SettingsPanelProps) {
               {microphones.map((device) => <option key={device.deviceId || device.label} value={device.deviceId}>{device.label}</option>)}
             </select>
           </Row>
-          <Row label="Local model">
+          <Row label="Recognition quality">
             <select
-              aria-label="Local speech model"
+              aria-label="Recognition quality and local speech model"
               value={settings.voice.sttModel}
               onChange={(event) => onPatch({ voice: { sttModel: event.target.value as AppSettings['voice']['sttModel'] } })}
               className="no-drag max-w-[180px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
             >
               {voiceModels.filter((model) => model.kind === 'stt').map((model) => (
-                <option key={model.id} value={model.id}>{model.label}{model.downloaded ? ' · ready' : ' · not downloaded'}</option>
+                <option key={model.id} value={model.id}>{model.id === 'tiny.en' ? 'Fast · ' : model.id === 'small.en' ? 'High accuracy · ' : 'Balanced · '}{model.label}{model.downloaded ? ' · downloaded' : ' · not downloaded'}</option>
               ))}
             </select>
           </Row>
           {selectedSttModel ? <div className="mx-1 flex items-center gap-2 pb-1">
             {selectedSttModel.downloaded ? <>
-              <span role="status" className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Selected model is ready offline.</span>
+              <span role="status" className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Downloaded; actual load and inference are confirmed by Voice Test.</span>
               <button type="button" disabled={voiceAction !== null} onClick={() => void removeVoiceModel(selectedSttModel)} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Remove</button>
             </> : <>
               <span className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Optional download · about {Math.round(selectedSttModel.sizeBytes / 1_000_000)} MB</span>
@@ -494,7 +614,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </Row>
             <div className="mx-1 flex items-center gap-2 pb-1">
               {kokoroModel?.downloaded ? <>
-                <span role="status" className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Kokoro model ready · offline after download.</span>
+                <span role="status" className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Kokoro assets downloaded; model load is verified by Test voice.</span>
                 <button type="button" disabled={voiceAction !== null} onClick={() => void removeVoiceModel(kokoroModel)} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Remove</button>
               </> : <>
                 <span className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Optional download · about 143 MB.</span>
@@ -528,6 +648,45 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </div>
           {microphoneError ? <p role={microphoneError.includes('stopped') ? 'status' : 'alert'} className="px-1 text-[10px] text-[var(--color-ink-dim)]">{microphoneError}</p> : null}
           <div className="mx-1 flex items-center gap-2 pb-1">
+            <button type="button" disabled={voiceTestBusy} onClick={() => void toggleVoiceTest()} aria-pressed={voiceTestRecording} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">
+              {voiceTestBusy ? 'Transcribing locally…' : voiceTestRecording ? 'Stop & transcribe test' : 'Test recognition'}
+            </button>
+            <span className="text-[10px] text-[var(--color-ink-dim)]">30-second limit · never sent to chat</span>
+          </div>
+          <label className="mx-1 flex items-center gap-2 pb-1 text-[10px] text-[var(--color-ink-dim)]">
+            <input type="checkbox" checked={showCaptureDiagnostics} onChange={(event) => setShowCaptureDiagnostics(event.target.checked)} className="no-drag accent-neutral-300" />
+            Show capture diagnostics for the next voice test
+          </label>
+          <label className="mx-1 flex items-center gap-2 pb-1 text-[10px] text-[var(--color-ink-dim)]">
+            <input type="checkbox" checked={allowDiagnosticAudioSave} onChange={(event) => { setAllowDiagnosticAudioSave(event.target.checked); if (!event.target.checked) setDiagnosticAudio(null); }} className="no-drag accent-neutral-300" />
+            Keep the next 30-second test recording in memory so I can save it
+          </label>
+          {voiceTestResult ? <div className="mx-1 rounded-lg border border-white/10 bg-black/20 p-2 text-[10px]" aria-live="polite">
+            {voiceTestResult.text ? <>
+              <p className="mb-1 text-[var(--color-ink-dim)]">Transcription result (not submitted)</p>
+              <p className="whitespace-pre-wrap break-words text-[var(--color-ink-soft)]">{voiceTestResult.text}</p>
+              <p className="mt-1 text-[var(--color-ink-dim)]">
+                Backend: {voiceTestResult.backend ?? 'not reported'}{voiceTestResult.model ? ` · model: ${voiceTestResult.model}` : ''}{typeof voiceTestResult.processingMs === 'number' ? ` · ${voiceTestResult.processingMs} ms` : ''}
+              </p>
+            </> : null}
+            {voiceTestResult.error ? <p className="text-[var(--color-ink-soft)]">{voiceTestResult.error}</p> : null}
+            {voiceTestResult.diagnostics ? <p className="mt-1 break-words text-[var(--color-ink-dim)]">
+              Capture: {voiceTestResult.diagnostics.captureDurationMs} ms · {voiceTestResult.diagnostics.sampleCount} samples · input {voiceTestResult.diagnostics.inputSampleRate ?? 'unknown'} Hz · stream {voiceTestResult.diagnostics.captureSampleRate} Hz → WAV {voiceTestResult.diagnostics.outputSampleRate} Hz · RMS {voiceTestResult.diagnostics.rmsDbfs.toFixed(1)} dBFS · peak {voiceTestResult.diagnostics.peakDbfs.toFixed(1)} dBFS · clipping {voiceTestResult.diagnostics.clippingPercent.toFixed(2)}% · quiet {voiceTestResult.diagnostics.lowEnergyPercent.toFixed(1)}% · {microphones.find((device) => device.deviceId === voiceTestResult.diagnostics?.inputDeviceId)?.label ?? (voiceTestResult.diagnostics.inputDeviceId ? 'Selected microphone' : 'System microphone')}
+              {' '}({new Date(voiceTestResult.diagnostics.startedAtUnixMs).toLocaleTimeString()}–{new Date(voiceTestResult.diagnostics.stoppedAtUnixMs).toLocaleTimeString()})
+            </p> : null}
+          </div> : null}
+          {diagnosticAudio ? <div className="mx-1 flex items-center gap-2 pb-1">
+            <button type="button" onClick={() => void (async () => {
+              try {
+                const result = await window.cypsShell?.voiceSaveDiagnosticWav?.(diagnosticAudio);
+                if (!result?.ok) setVoiceError(result?.error ?? 'Could not save the diagnostic recording.');
+                else if (!result.cancelled) setVoiceNotice('Diagnostic WAV saved to the selected location.');
+              } catch { setVoiceError('Could not save the diagnostic recording.'); }
+            })()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8">Save diagnostic WAV…</button>
+            <button type="button" onClick={() => setDiagnosticAudio(null)} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-dim)] hover:bg-white/8">Discard recording</button>
+            <span className="text-[10px] text-[var(--color-ink-dim)]">Held in memory only</span>
+          </div> : null}
+          <div className="mx-1 flex items-center gap-2 pb-1">
             <button type="button" disabled={voiceAction !== null} onClick={() => void testSelectedVoice()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">{voiceAction === 'test-voice' ? 'Playing test…' : 'Test voice'}</button>
             <button type="button" onClick={() => void window.cypsShell?.voiceCancel?.()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8">Stop voice</button>
           </div>
@@ -535,7 +694,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           {voiceNotice ? <p role="status" className="px-1 text-[10px] text-neutral-200">{voiceNotice}</p> : null}
           <p className="px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
             {speechCapability === null ? 'Checking local speech recognition…' : speechCapability.speechToText
-              ? 'Local English models run offline in Pixel. Downloads are optional, verified and kept in your user data. Windows Speech remains the fallback when no model is installed.'
+              ? `Selected model: ${selectedSttModel?.label ?? settings.voice.sttModel}${selectedSttModel?.downloaded ? ' · downloaded' : ' · not downloaded'}. Runtime availability is a probe; successful loading is confirmed by Voice Test. Pixel reports its actual backend and model after the test. Windows Speech is used when no selected local model is available.`
               : speechCapability.reason ?? 'Local speech recognition is unavailable.'}
           </p>
         </Group>

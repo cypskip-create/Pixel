@@ -2,34 +2,34 @@
 
 Updated: 2026-11-19
 
-## Current handoff — Voice Engine 4.0
+## Current handoff — Voice Engine 4.1
 
-Branch: `codex/interaction-engine-3`. Current local HEAD before these
-uncommitted voice changes: `1e822c92222a8ca13cc94546eff7d7da5a8f7b60`. No
-commit, push or release was made.
+Branch: `codex/interaction-engine-3`. Base commit before these uncommitted
+edits: `d6031d9c0909413622b082fe9b8035a2acac01ba`. No commit, push or release
+was made.
 
-- Voice implementation now extends Pixel's existing worker and recording flow
-  with optional Pixel-managed faster-whisper STT models, optional Kokoro ONNX
-  synthesis, an explicit Windows system voice option, model management in
-  Settings, cancellation, local playback and typed UI IPC. Pixel remains the
-  user-facing app. Existing PTT, manual dictation, permission, emergency-stop,
-  DeepSeek and monochrome interfaces are retained.
-- Validation on this host: typecheck passed; full Vitest **793 passed, 27
-  skipped, 0 failed (820 total; 49 files passed, 1 skipped)**; Python worker
-  tests **4/4 passed**; Python compileall passed; `npm run build` and
-  `npm run build:native` passed.
-  Vitest skips are 17 missing-Chromium browser cases, 7 missing-NSIS cases, and
-  3 opt-in native foreground cases.
-- `npm run build:voice-worker` did not produce a bundle: only Python 3.15.2 is
-  installed; the packaged voice build requires Python 3.12 x64. No current-tree
-  `pack`/`dist` output or installer inspection was done. Windows microphone,
-  speaker, model inference, offline, GUI and install acceptance remain
-  unverified. Windows CI has not run for these uncommitted changes.
-- Read [`docs/validation/PIXEL_VOICE_READINESS.md`](docs/validation/PIXEL_VOICE_READINESS.md)
-  for implementation categories and exact evidence; use
+- Voice 4.1 repairs the Python build version probe; captures direct PCM through
+  AudioWorklet; supports bounded 120-second manual dictation while keeping PTT
+  at 20 seconds; adds an explicit Settings voice test, opt-in diagnostics and
+  short user-selected recording export; reports actual recognition backend and
+  inference timing; chunks long Kokoro text and reports voice-test timing; and
+  adds a private-corpus benchmark harness. Existing Pixel features and
+  permission/security boundaries are retained.
+- Validation: typecheck and production build passed; full Vitest **801 passed,
+  27 skipped, 0 failed (828 total)**; Python worker/benchmark tests **11/11**;
+  compileall passed. Chromium install was blocked by DNS. Electron 45.2.3
+  exited `2147483651` before smoke output. Python 3.15 was correctly rejected
+  by voice build preflight without creating a venv.
+- Python 3.12 voice-worker packaging, an unpacked/portable/installer build,
+  microphone/speaker inference and CI remain unverified. No real corpus or
+  hardware results were available; no accuracy or naturalness improvement is
+  claimed. The previous GitHub run `44485597153` is still the failed baseline;
+  the fix has no new CI run until pushed.
+- Use [`docs/validation/PIXEL_VOICE_READINESS.md`](docs/validation/PIXEL_VOICE_READINESS.md)
+  for exact evidence and limits, and
   [`docs/validation/PIXEL_VOICE_ACCEPTANCE.md`](docs/validation/PIXEL_VOICE_ACCEPTANCE.md)
-  for the Python 3.12 build commands and laptop-side acceptance sequence.
-  Continue voice validation before starting Tools 4.2 or another feature wave.
+  for build, benchmark and Windows acceptance instructions. Complete those
+  checks before another voice or tools milestone.
 
 Sections below record earlier checkpoints and their historical test totals.
 

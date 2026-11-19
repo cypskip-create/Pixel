@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { join, resolve } = require('node:path');
 const { writeFileSync } = require('node:fs');
+const { pathToFileURL } = require('node:url');
 
 process.stdout.write('[preload-smoke] Electron main entry loaded\n');
 const projectRoot = resolve(__dirname, '../..');
@@ -44,6 +45,7 @@ for (const channel of Object.values(CHANNELS)) {
 app.whenReady().then(async () => {
   process.stdout.write('[preload-smoke] app ready; creating sandboxed BrowserWindow\n');
   const preload = join(projectRoot, 'dist/main/preload/index.js');
+  const workletUrl = pathToFileURL(join(projectRoot, 'dist/renderer/audio/pcm-capture-worklet.js')).href;
   const win = new BrowserWindow({
     width: 420,
     height: 240,
@@ -77,9 +79,19 @@ app.whenReady().then(async () => {
         assert(cyps.tasks && typeof cyps.tasks.onUpdate === 'function', 'task subscription is unavailable');
         assert(cyps.permissions && typeof cyps.permissions.respond === 'function', 'permission bridge is unavailable');
         assert(shell && typeof shell.voiceCapability === 'function', 'window.cypsShell is unavailable');
+        assert(typeof shell.voiceSaveDiagnosticWav === 'function', 'diagnostic WAV save capability is unavailable');
         assert(typeof window.require === 'undefined', 'Node require leaked into the page');
         assert(typeof window.process === 'undefined', 'Node process leaked into the page');
         assert(typeof window.ipcRenderer === 'undefined', 'ipcRenderer leaked into the page');
+
+        const audioContext = new AudioContext();
+        assert(audioContext.audioWorklet, 'AudioWorklet is unavailable in the sandboxed renderer');
+        await audioContext.audioWorklet.addModule(${JSON.stringify(workletUrl)});
+        const captureNode = new AudioWorkletNode(audioContext, 'pixel-pcm-capture', {
+          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        });
+        captureNode.disconnect();
+        await audioContext.close();
 
         const calls = [];
         const settings = await cyps.settings.get();
@@ -147,6 +159,7 @@ app.whenReady().then(async () => {
           ok: true,
           sandboxedBridge: true,
           noRawNodeOrIpc: true,
+          sandboxedAudioWorklet: true,
           exposedGlobals: ['cyps', 'cypsShell'],
           calls,
           taskSubscription: taskPayload,

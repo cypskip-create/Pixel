@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Pixel document worker.
+"""Pixel's supervised local document and voice worker.
 
-A supervised, single-purpose process. It extracts text from documents and does
-nothing else: no network, no shell, no database, no policy decisions. The
-TypeScript orchestrator decides what may be read and passes an absolute path.
+The process serves the typed newline-JSON protocol and performs local document
+extraction and optional speech inference/synthesis. It does no network or shell
+operations and has no database or policy authority. The TypeScript orchestrator
+validates operations, controls paths/models and owns cancellation and approvals.
 
 Protocol: newline-delimited JSON over stdin/stdout.
 
@@ -12,7 +13,7 @@ Protocol: newline-delimited JSON over stdin/stdout.
             {"id": "1", "ok": false, "error": {"code": "...", "message": "..."}}
 
 Rules that matter for security and stability:
-  * paths must be absolute and must exist; anything else is a structured error
+  * file paths must be absolute and must exist; anything else is a structured error
   * file size is capped before reading
   * optional extractors report a capability error rather than crashing
   * stdout carries protocol frames only; all logging goes to stderr
@@ -308,7 +309,7 @@ def _load_whisper_model(model_path: str) -> Any:
 
 def transcribe_audio(params: Dict[str, Any]) -> Dict[str, Any]:
     path = _check_path(params.get("path"))
-    if os.path.getsize(path) > 700_000:
+    if os.path.getsize(path) > 44 + 16_000 * 2 * 120:
         raise WorkerError("TOO_LARGE", "The voice recording exceeds the local transcription limit.")
     model_name = params.get("model", "base.en")
     if model_name not in {"tiny.en", "base.en", "small.en"}:
@@ -360,8 +361,8 @@ def synthesize_kokoro(params: Dict[str, Any]) -> Dict[str, Any]:
     text = params.get("text")
     voice = params.get("voice", "af_heart")
     speed = params.get("speed", 1.0)
-    if not isinstance(text, str) or not text.strip() or len(text) > 2000:
-        raise WorkerError("BAD_REQUEST", "Speech text must contain between 1 and 2000 characters.")
+    if not isinstance(text, str) or not text.strip() or len(text) > 1800:
+        raise WorkerError("BAD_REQUEST", "Each Kokoro speech segment must contain between 1 and 1800 characters.")
     if voice not in {"af_heart", "af_sarah", "am_adam", "am_michael"}:
         raise WorkerError("BAD_REQUEST", "Choose one of Pixel's supported Kokoro voices.")
     if not isinstance(speed, (float, int)) or isinstance(speed, bool) or not 0.7 <= speed <= 1.3:
@@ -400,6 +401,38 @@ def unload_voice_models(_params: Dict[str, Any]) -> Dict[str, bool]:
     return {"unloaded": True}
 
 
+def runtime_smoke_test(_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Import the frozen native speech stack without loading model weights."""
+    try:
+        import ctranslate2
+        import onnxruntime
+        from faster_whisper import WhisperModel
+        from kokoro_onnx import Kokoro
+        from phonemizer.backend import EspeakBackend
+
+        providers = onnxruntime.get_available_providers()
+        if "CPUExecutionProvider" not in providers:
+            raise RuntimeError("ONNX Runtime CPU provider is missing.")
+        phonemes = EspeakBackend(language="en-us").phonemize(["Pixel voice runtime smoke test."])
+        if not phonemes or not phonemes[0].strip():
+            raise RuntimeError("eSpeak did not produce phonemes.")
+    except Exception as exc:
+        raise WorkerError(
+            "RUNTIME_SMOKE_FAILED",
+            f"The packaged voice runtime could not load a native dependency ({type(exc).__name__}).",
+        ) from None
+
+    return {
+        "protocol": PROTOCOL_VERSION,
+        "ctranslate2": getattr(ctranslate2, "__version__", "available"),
+        "onnxProviders": providers,
+        "onnxCpuProvider": True,
+        "fasterWhisper": callable(WhisperModel),
+        "kokoro": callable(Kokoro),
+        "espeakReady": True,
+    }
+
+
 OPS: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     "capabilities": lambda _params: capabilities(),
     "ping": lambda _params: {"pong": True},
@@ -407,6 +440,7 @@ OPS: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     "transcribe_audio": transcribe_audio,
     "synthesize_kokoro": synthesize_kokoro,
     "unload_voice_models": unload_voice_models,
+    "runtime_smoke_test": runtime_smoke_test,
 }
 
 

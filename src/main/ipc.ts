@@ -12,7 +12,7 @@
  *  - Emergency stop is enforced in the agent runtime, not in the UI.
  */
 
-import { app, ipcMain, screen, shell } from 'electron';
+import { app, dialog, ipcMain, screen, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -62,7 +62,7 @@ import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
 import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
 import { PythonWorker } from './services/python-worker';
 import type { NativeHelper } from './services/nativeHelper';
-import { VoiceService } from './voice/voice';
+import { VoiceService, validateDiagnosticVoiceWav } from './voice/voice';
 import type { RecognitionResult } from './voice/voice';
 import { VoiceModelManager } from './voice/models';
 import type { VoiceModelInfo } from '../shared/types';
@@ -1211,6 +1211,28 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     else if (result.noSpeech) audit.record('system', 'Voice input: no speech detected', 'ok');
     else audit.record('system', 'Voice input failed', 'error', result.error);
     return result;
+  });
+
+  registerHandler(CHANNELS.voiceSaveDiagnosticWav, async (event, audio: Uint8Array): Promise<{ ok: boolean; cancelled?: boolean; error?: string }> => {
+    // This opt-in export is deliberately short and accepts only validated
+    // mono 16 kHz PCM. The caller receives no filesystem path.
+    if (!windows.isSettingsSender(event.sender) && !windows.isWorkspaceSender(event.sender)) {
+      return { ok: false, error: 'Diagnostic audio export is only available from Settings or Workspace.' };
+    }
+    const validation = validateDiagnosticVoiceWav(audio);
+    if (validation) return { ok: false, error: validation };
+    const result = await dialog.showSaveDialog({
+      title: 'Save Pixel voice diagnostic recording',
+      defaultPath: 'pixel-voice-diagnostic.wav',
+      filters: [{ name: 'WAV audio', extensions: ['wav'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: true, cancelled: true };
+    try {
+      writeFileSync(result.filePath, Buffer.from(audio), { flag: 'w', mode: 0o600 });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Pixel could not save the diagnostic recording at that location.' };
+    }
   });
 
   registerHandler(CHANNELS.voiceListen, async (_event, timeoutMs?: number) => {
