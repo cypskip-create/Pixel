@@ -39,6 +39,7 @@ interface BuilderConfig {
   };
   portable: { artifactName?: string };
   files: string[];
+  extraResources: Array<{ from: string; to: string }>;
 }
 
 function loadConfig(): BuilderConfig {
@@ -104,6 +105,14 @@ describe('packaging identity', () => {
   it('does not ship the package-local Playwright browser cache', () => {
     expect(config.files).toContain('!**/.local-browsers/**');
   });
+
+  it('packages the supervised voice runtime separately from optional model data', () => {
+    expect(config.extraResources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'python/dist/PixelVoiceWorker', to: 'voice-runtime' }),
+    ]));
+    expect(existsSync(join(root, 'scripts', 'build-voice-worker.ps1'))).toBe(true);
+    expect(existsSync(join(root, 'python', 'VOICE_RUNTIME_NOTICES.md'))).toBe(true);
+  });
 });
 
 describe('package.json', () => {
@@ -112,6 +121,7 @@ describe('package.json', () => {
     productName: string;
     version: string;
     main: string;
+    scripts: Record<string, string>;
   };
 
   it('is renamed to Pixel', () => {
@@ -125,6 +135,11 @@ describe('package.json', () => {
 
   it('still points at the compiled main bundle', () => {
     expect(pkg.main).toBe('dist/main/main/main.js');
+  });
+
+  it('builds the self-contained voice worker for both Windows distribution commands', () => {
+    expect(pkg.scripts.pack).toContain('build:voice-worker');
+    expect(pkg.scripts.dist).toContain('build:voice-worker');
   });
 });
 

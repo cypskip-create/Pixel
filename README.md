@@ -219,14 +219,19 @@ completed actions explicitly so nothing implies a rollback that did not happen.
   `window.cyps` preload bridge.
 - No screen capture without an explicit user action. There is no timer and no
   background capture path.
-- Voice input supports a configured global push-to-talk chord (default
+- Voice input retains the configured global push-to-talk chord (default
   `Ctrl+Shift+Space`) and explicit manual dictation. Push-to-talk submits one
-  valid local transcript; manual dictation leaves it in the draft. Recognition
-  uses Windows System.Speech when installed, or optional local faster-whisper
-  only when its selected model is already cached. Pixel never downloads a model
-  or sends raw audio to a provider. Availability depends on the Windows account,
-  microphone permission and installed local model; the full microphone path
-  still requires laptop acceptance.
+  valid transcript; manual dictation leaves it in the draft. Optional English
+  faster-whisper models can be downloaded and verified in Settings; Windows
+  System.Speech remains the documented fallback when no local model is ready.
+  Optional Kokoro ONNX speech output and selectable Windows voices use a
+  supervised local worker. Speech data is not sent to a provider. Windows
+  packaging is configured to bundle the worker, while models remain optional
+  user-data downloads; the worker bundle and packaged runtime have not yet been
+  built or verified in this checkpoint. Real microphone, model inference and
+  speaker acceptance are also unverified. See
+  [`docs/architecture/PIXEL_VOICE_ENGINE.md`](docs/architecture/PIXEL_VOICE_ENGINE.md)
+  and [`docs/validation/PIXEL_VOICE_ACCEPTANCE.md`](docs/validation/PIXEL_VOICE_ACCEPTANCE.md).
 - Model output cannot grant permission. Tool authority is a local policy table.
 - Instructions found on websites, in documents, or in screenshots are treated as
   untrusted data, and the system prompt says so.

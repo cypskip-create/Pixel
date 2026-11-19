@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { CypsBridge, Mode } from '@shared/types';
+import type { CypsBridge, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
 
 declare global {
   interface Window {
@@ -29,8 +29,14 @@ declare global {
       voicePttCaptureReady(sessionId: number, error?: string): Promise<boolean>;
       voicePttTranscribe(sessionId: number, audio: Uint8Array): Promise<{ ok: boolean; error?: string }>;
       voiceTranscribeWav(audio: Uint8Array): Promise<{
-        ok: boolean; text: string; confidence: number; error?: string; noSpeech?: boolean;
+        ok: boolean; text: string; confidence?: number; error?: string; noSpeech?: boolean;
       }>;
+      voiceModelsList(): Promise<VoiceModelInfo[]>;
+      voiceVoicesList(): Promise<string[]>;
+      voiceModelDownload(id: VoiceModelInfo['id']): Promise<{ ok: boolean; error?: string }>;
+      voiceModelCancelDownload(): Promise<boolean>;
+      voiceModelRemove(id: VoiceModelInfo['id']): Promise<{ ok: boolean; error?: string }>;
+      onVoiceModelsProgress(handler: (progress: VoiceModelProgress | null) => void): () => void;
       voiceCaptureAcquire(): Promise<boolean>;
       voiceCaptureRelease(): Promise<boolean>;
       onVoiceCaptureCancel(handler: () => void): () => void;
@@ -43,7 +49,7 @@ declare global {
       voiceListen(timeoutMs?: number): Promise<{
         ok: boolean;
         text: string;
-        confidence: number;
+        confidence?: number;
         error?: string;
         noSpeech?: boolean;
       }>;

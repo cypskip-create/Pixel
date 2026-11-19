@@ -64,6 +64,8 @@ import { PythonWorker } from './services/python-worker';
 import type { NativeHelper } from './services/nativeHelper';
 import { VoiceService } from './voice/voice';
 import type { RecognitionResult } from './voice/voice';
+import { VoiceModelManager } from './voice/models';
+import type { VoiceModelInfo } from '../shared/types';
 import { VISION_MODEL } from '../shared/types';
 import {
   AuditLog,
@@ -163,8 +165,16 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const database = openDatabase(join(app.getPath('userData'), 'pixel.db'));
   const memoryStore = new MemoryStore(database);
+  const voiceModelManager = new VoiceModelManager(
+    join(app.getPath('userData'), 'voice-models'),
+    (progress) => context.sendToRenderer(CHANNELS.voiceModelsProgress, progress),
+  );
   const pythonWorker = new PythonWorker({
+    pythonPath: app.isPackaged ? undefined : join(app.getAppPath(), '.venv-voice-build', 'Scripts', 'python.exe'),
     workerRoot: join(app.getAppPath(), 'python'),
+    modelRoot: join(app.getPath('userData'), 'voice-models'),
+    packagedWorkerPath: join(process.resourcesPath, 'voice-runtime', 'PixelVoiceWorker.exe'),
+    requirePackagedWorker: app.isPackaged,
     onLog: (line) => boot.info(line),
   });
   const documentIndex = new DocumentIndex(database, pythonWorker);
@@ -327,7 +337,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     (request) => context.sendToRenderer(CHANNELS.permissionsRequest, request),
     (requestId) => context.sendToRenderer(CHANNELS.permissionsResolved, requestId),
   );
-  const voice = new VoiceService(pythonWorker);
+  const voice = new VoiceService(pythonWorker, voiceModelManager);
   let activePtt: {
     id: number;
     controller: AbortController;
@@ -1105,6 +1115,24 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   /* ------------------------------- voice ----------------------------- */
 
   registerHandler(CHANNELS.voiceCapability, () => voice.capability());
+  registerHandler(CHANNELS.voiceModelsList, () => voiceModelManager.list());
+  registerHandler(CHANNELS.voiceVoicesList, () => voice.installedSystemVoices());
+  registerHandler(CHANNELS.voiceModelDownload, async (_event, id: VoiceModelInfo['id']) => {
+    const result = await voiceModelManager.download(String(id));
+    audit.record('system', result.ok ? 'Voice model download completed' : 'Voice model download failed', result.ok ? 'ok' : 'error');
+    return result;
+  });
+  registerHandler(CHANNELS.voiceModelCancelDownload, () => voiceModelManager.cancelDownload());
+  registerHandler(CHANNELS.voiceModelRemove, async (_event, id: VoiceModelInfo['id']) => {
+    if (voice.hasActiveOperations() || pythonWorker.hasPendingRequests) return { ok: false, error: 'Stop the current voice operation before removing a model.' };
+    if (pythonWorker.isRunning) {
+      const unloaded = await pythonWorker.unloadVoiceModels();
+      if (!unloaded.ok || !unloaded.result.unloaded) return { ok: false, error: 'Pixel could not safely unload the active voice model.' };
+    }
+    const result = await voiceModelManager.remove(String(id));
+    if (result.ok) audit.record('system', 'Voice model removed', 'ok');
+    return result;
+  });
 
   registerHandler(CHANNELS.voiceCaptureAcquire, (event): boolean => {
     if (activePtt || (manualVoiceCaptureOwner !== null && manualVoiceCaptureOwner !== event.sender.id)) return false;
@@ -1210,7 +1238,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (typeof text !== 'string' || text.trim().length === 0) {
       return { ok: false, error: 'There is nothing to say.' };
     }
-    const result = await voice.speak(text);
+    const result = await voice.speak(text, settings.get().voice);
     audit.record('system', result.ok ? 'Spoke a reply' : 'Speech failed', result.ok ? 'ok' : 'error');
     return result;
   });

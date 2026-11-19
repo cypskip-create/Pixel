@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../src/renderer/components/SettingsPanel';
 import { DEFAULT_SETTINGS } from '../src/shared/types';
+import type { VoiceModelInfo, VoiceModelProgress } from '../src/shared/types';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -16,6 +17,7 @@ afterEach(() => {
   root = null;
   host?.remove();
   host = null;
+  window.cypsShell = undefined;
 });
 
 describe('pinned and cursor companion preferences', () => {
@@ -73,5 +75,69 @@ describe('pinned and cursor companion preferences', () => {
       searchProvider.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(onPatch).toHaveBeenCalledWith({ browserSearchProvider: 'duckduckgo' });
+  });
+});
+
+describe('local voice model settings', () => {
+  it('shows readiness, downloads the selected model, and persists the Kokoro choice', async () => {
+    let models: VoiceModelInfo[] = [
+      { id: 'base.en', label: 'Base English · balanced', kind: 'stt', sizeBytes: 152_000_000, downloaded: false, valid: false, license: 'MIT', source: 'test' },
+      { id: 'kokoro-v1.0-int8', label: 'Kokoro English', kind: 'tts', sizeBytes: 143_000_000, downloaded: false, valid: false, license: 'Apache-2.0', source: 'test' },
+    ];
+    let progressHandler: ((progress: VoiceModelProgress | null) => void) | null = null;
+    const download = vi.fn(async (id: VoiceModelInfo['id']) => {
+      models = models.map((model) => model.id === id ? { ...model, downloaded: true, valid: true } : model);
+      return { ok: true };
+    });
+    const shell = {
+      voiceCapability: async () => ({ speechToText: false, textToSpeech: false }),
+      voiceModelsList: async () => models,
+      voiceVoicesList: async () => ['Microsoft David'],
+      voiceModelDownload: download,
+      voiceModelCancelDownload: async () => true,
+      voiceModelRemove: async () => ({ ok: true }),
+      onVoiceModelsProgress: (handler: (progress: VoiceModelProgress | null) => void) => { progressHandler = handler; return () => { progressHandler = null; }; },
+    } as unknown as NonNullable<Window['cypsShell']>;
+    window.cypsShell = shell;
+    const onPatch = vi.fn();
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(createElement(SettingsPanel, {
+        settings: structuredClone(DEFAULT_SETTINGS),
+        displays: [],
+        onPatch,
+        onRequestMode: vi.fn(),
+        onClose: vi.fn(),
+        hasApiKey: false,
+        onSaveApiKey: async () => ({ ok: true }),
+        onRemoveApiKey: async () => ({ ok: true }),
+        onTestConnection: async () => ({ ok: true }),
+        error: null,
+        saving: false,
+      }));
+      await Promise.resolve();
+    });
+    expect(progressHandler).toBeTypeOf('function');
+    expect(host.textContent).toContain('not downloaded');
+
+    const downloadButton = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Download model');
+    expect(downloadButton).toBeDefined();
+    await act(async () => {
+      downloadButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(download).toHaveBeenCalledWith('base.en');
+    expect(host.textContent).toContain('Selected model is ready offline.');
+
+    const engine = host.querySelector<HTMLSelectElement>('[aria-label="Speech output engine"]');
+    expect(engine).not.toBeNull();
+    await act(async () => {
+      if (!engine) throw new Error('Speech output engine selector is missing.');
+      engine.value = 'kokoro';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(onPatch).toHaveBeenCalledWith({ voice: { ttsEngine: 'kokoro', ttsVoice: null } });
   });
 });

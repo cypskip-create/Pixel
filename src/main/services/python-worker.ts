@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { terminateProcessTree } from './process';
 
 export const WORKER_PROTOCOL_VERSION = 1;
+export const VOICE_MODEL_IDLE_UNLOAD_MS = 10 * 60 * 1000;
 
 export type WorkerErrorCode =
   | 'CAPABILITY_MISSING'
@@ -65,6 +66,15 @@ export interface ExtractedDocument {
 export interface TranscribedAudio {
   text: string;
   language: string;
+  audioSeconds?: number;
+  processingMs?: number;
+  backend?: string;
+}
+
+export interface SynthesizedAudio {
+  outputPath: string;
+  sampleRate: number;
+  durationSeconds: number;
 }
 
 export interface PythonWorkerOptions {
@@ -72,6 +82,12 @@ export interface PythonWorkerOptions {
   pythonPath?: string;
   /** Directory containing `pixel_worker/worker.py`. */
   workerRoot?: string;
+  /** Controlled local model directory passed to the worker. */
+  modelRoot?: string;
+  /** Frozen worker executable included in packaged releases. */
+  packagedWorkerPath?: string;
+  /** Packaged releases must never fall back to a global Python interpreter. */
+  requirePackagedWorker?: boolean;
   /** Per-request limit. */
   requestTimeoutMs?: number;
   /** How many automatic restarts are allowed before giving up. */
@@ -93,6 +109,7 @@ export interface WorkerAvailability {
   available: boolean;
   reason?: string;
   pythonPath?: string;
+  packagedExecutable?: boolean;
 }
 
 export class PythonWorker {
@@ -103,6 +120,7 @@ export class PythonWorker {
   private restarts = 0;
   private capabilitiesCache: WorkerCapabilities | null = null;
   private starting: Promise<void> | null = null;
+  private voiceUnloadTimer: NodeJS.Timeout | null = null;
   private readonly options: Required<Pick<PythonWorkerOptions, 'requestTimeoutMs' | 'maxRestarts'>> &
     PythonWorkerOptions;
 
@@ -120,15 +138,16 @@ export class PythonWorker {
     if (!python) {
       return {
         available: false,
-        reason:
-          'No Python interpreter was found. Document features need Python 3.10+ with PyMuPDF, python-docx and openpyxl.',
+        reason: this.options.requirePackagedWorker
+          ? 'Pixel’s bundled speech worker is missing. Reinstall Pixel to repair the local voice runtime.'
+          : 'No Python interpreter was found. Document features need Python 3.10+ with PyMuPDF, python-docx and openpyxl.',
       };
     }
     const script = this.resolveScript();
-    if (!existsSync(script)) {
+    if (!this.options.requirePackagedWorker && !existsSync(script)) {
       return { available: false, reason: `Document worker script is missing: ${script}` };
     }
-    return { available: true, pythonPath: python };
+    return { available: true, pythonPath: python, packagedExecutable: this.options.requirePackagedWorker === true };
   }
 
   /** Start the worker if it is not running, then ask what it can do. */
@@ -145,14 +164,45 @@ export class PythonWorker {
   }
 
   /** Optional offline faster-whisper path. It never downloads a model. */
-  async transcribeAudio(path: string, model: string, signal?: AbortSignal): Promise<WorkerResult<TranscribedAudio>> {
-    return this.send<TranscribedAudio>('transcribe_audio', { path, model }, 90_000, signal);
+  async transcribeAudio(path: string, model: string, modelPath: string | null, signal?: AbortSignal): Promise<WorkerResult<TranscribedAudio>> {
+    const result = await this.send<TranscribedAudio>('transcribe_audio', { path, model, model_path: modelPath }, 90_000, signal);
+    this.scheduleVoiceModelUnload();
+    return result;
+  }
+
+  async synthesizeKokoro(
+    text: string,
+    voice: string,
+    speed: number,
+    modelPath: string,
+    voicesPath: string,
+    outputPath: string,
+    signal?: AbortSignal,
+  ): Promise<WorkerResult<SynthesizedAudio>> {
+    const result = await this.send<SynthesizedAudio>('synthesize_kokoro', {
+      text, voice, speed, model_path: modelPath, voices_path: voicesPath, output_path: outputPath,
+    }, 90_000, signal);
+    this.scheduleVoiceModelUnload();
+    return result;
+  }
+
+  async unloadVoiceModels(): Promise<WorkerResult<{ unloaded: boolean }>> {
+    if (this.voiceUnloadTimer) clearTimeout(this.voiceUnloadTimer);
+    this.voiceUnloadTimer = null;
+    return this.send<{ unloaded: boolean }>('unload_voice_models', {}, 5_000);
+  }
+
+  get hasPendingRequests(): boolean {
+    return this.pending.size > 0;
   }
 
   /** Stop the worker. Safe to call when it is not running. */
   async shutdown(): Promise<void> {
     const child = this.child;
     if (!child) return;
+
+    if (this.voiceUnloadTimer) clearTimeout(this.voiceUnloadTimer);
+    this.voiceUnloadTimer = null;
 
     try {
       await this.send('shutdown', {}, 2_000);
@@ -277,10 +327,15 @@ export class PythonWorker {
     }
 
     this.starting = new Promise<void>((resolve, reject) => {
-      const child = spawn(availability.pythonPath ?? 'python', ['-u', this.resolveScript()], {
-        cwd: this.resolveWorkerDir(),
+      const args = availability.packagedExecutable ? [] : ['-u', this.resolveScript()];
+      const child = spawn(availability.pythonPath ?? 'python', args, {
+        cwd: availability.packagedExecutable ? (this.options.packagedWorkerPath ? join(this.options.packagedWorkerPath, '..') : this.resolveWorkerDir()) : this.resolveWorkerDir(),
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          ...(this.options.modelRoot ? { PIXEL_VOICE_MODEL_ROOT: this.options.modelRoot } : {}),
+        },
       });
 
       child.stdout.setEncoding('utf8');
@@ -404,14 +459,32 @@ export class PythonWorker {
     const child = this.child;
     if (!child) return;
     this.child = null;
+    if (this.voiceUnloadTimer) clearTimeout(this.voiceUnloadTimer);
+    this.voiceUnloadTimer = null;
     this.buffer = '';
     this.failAllPending({ code: 'CANCELLED', message });
     terminateProcessTree(child);
   }
 
+  private scheduleVoiceModelUnload(): void {
+    if (this.voiceUnloadTimer) clearTimeout(this.voiceUnloadTimer);
+    this.voiceUnloadTimer = setTimeout(() => {
+      this.voiceUnloadTimer = null;
+      if (this.isRunning && this.pending.size === 0) void this.unloadVoiceModels();
+    }, VOICE_MODEL_IDLE_UNLOAD_MS);
+    this.voiceUnloadTimer.unref();
+  }
+
   private resolvePython(): string | null {
+    if (this.options.requirePackagedWorker) {
+      const bundled = this.options.packagedWorkerPath;
+      return bundled && existsSync(bundled) ? bundled : null;
+    }
     const configured = this.options.pythonPath ?? process.env.PIXEL_PYTHON;
-    if (configured && configured.trim().length > 0) return configured;
+    if (configured && configured.trim().length > 0) {
+      if (configured === 'python' || configured === 'py') return configured;
+      if (existsSync(configured)) return configured;
+    }
 
     const candidates = [
       join(process.resourcesPath ?? '', 'python', 'python.exe'),
