@@ -2,7 +2,82 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
-## Current uncommitted checkpoint — Experience Polish 5.0 and official Pix
+## Current uncommitted checkpoint — Experience 5.1 & Tools 5.2
+
+Reviewed source base: `47d1db1284c7860ec52ddf1f6dd50bf532a2f8b4` on `main`.
+Changes remain uncommitted for the user to commit and push; no release was
+published.
+
+- The failed Windows CI run `44542308139` passed JSONL framing and failed in
+  frozen voice runtime initialization. Source inspection found phonemizer was
+  not explicitly configured for the packaged eSpeak NG library/data from
+  `espeakng-loader`, a plausible cause that still needs confirmation against a
+  frozen Windows binary. The worker now configures those paths and retains the
+  DLL search handle; failure reports name the initialization stage and redact
+  absolute paths. Local unit coverage verifies configuration and diagnostics.
+  A Python 3.12 frozen build and a new GitHub run are still required to confirm
+  the native dependency repair.
+  The [Windows CI #29 run](https://github.com/cypskip-create/Pixel/actions/runs/44542308139)
+  is on this exact base SHA. Steps through native-helper compilation passed;
+  unpacked/portable/NSIS packaging failed, then the workflow uploaded its log
+  and test artifact. The log reports only generic `RUNTIME_SMOKE_FAILED` /
+  `RuntimeError`, not the exact failing native import or call.
+- Global Settings/Workspace interaction tokens now use a neutral charcoal
+  palette with blue controls (`#4299F5`, hover `#60A9FA`). Pix’s approved mint
+  colors are separate. Workspace Settings now has General, Voice, Privacy &
+  Memory, and Tools & Integrations pages. Mode selection, checked controls,
+  primary permission action and focus states use blue; Settings keeps the
+  neutral selected row with a restrained blue icon/edge indicator.
+- The compact Island assistant identity uses Pix while the P stays in the
+  Pixel brand lockup. Companion state now incorporates terminal task success
+  or failure briefly and allows current streaming/voice activity to override a
+  prior task outcome.
+- TTS playback state is now owned by the main-process voice service and
+  broadcast to Island, Workspace and Settings renderers through typed,
+  narrow preload methods. This lets Pix speak in every app surface during
+  actual playback; the initial-state query cannot overwrite a newer live
+  playback event. The focused hook test passes. Actual audio/UI timing remains
+  unverified in the desktop application.
+- Pixel Board adds an editable in-Workspace SVG scene with pen, highlighter,
+  line, arrow, rectangle, circle, text, numbered markers, selection/move,
+  erase, undo/redo, local draft recovery, `.pixelboard` import/export and
+  user-triggered SVG/PNG export. This is not the requested desktop overlay:
+  the native guidance overlay stays click-through, and cross-app persistent
+  drawing, PDF export, screenshot insertion and coordinate mouse input remain
+  unimplemented.
+- The requested critical-risk policy and one-switch per-task screen observation
+  authorization are not implemented. Existing per-tool approval, grants,
+  target verification, input lease and emergency-stop behavior remain in force.
+- Conversation transcript avatars now use still Pix artwork for history and
+  the real current assistant expression for an active response.
+- The Workspace Settings category selection now persists across visits where
+  renderer local storage is available; the selected row uses a neutral fill
+  with a blue icon and edge marker.
+- Final changed-code validation on this host: `npm run typecheck` passed;
+  `npm test -- --reporter=dot` passed **839 tests, skipped 27, failed 0
+  (866 total; 57 files passed, 1 skipped)**; `npm run test:voice-worker`
+  passed **12/12**; `npm run build:native` compiled and ran its protocol smoke;
+  `npm run build` passed.
+- `npm run test:preload-sandbox` failed before writing its report: Electron
+  exited `2147483651` (`0x80000003`) on a repeat run after rebuilding the
+  current bundle. `npm run build:voice-worker` could not
+  run because the `py` launcher has no Python 3.12 runtime. Therefore no
+  frozen-worker test, packaged app, installer, laptop screenshot or new
+  Actions run is claimed.
+
+### Experience 5.1 Validation
+
+The failed run `44542308139` remains the latest available CI evidence; no
+workflow was triggered because the user will commit and push. The desktop
+Settings, Pix animation, Island, and Pixel Board were not screenshot-tested in
+this run. Pixel Board is an in-Workspace editable vector canvas, not a desktop
+overlay. Four-tier critical-risk policy, reduced repeated Agent approvals,
+per-task screen-observation authorization, cross-app annotation, screenshot
+insertion, PDF export and coordinate pointer actions remain unimplemented.
+See [`docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
+for the evidence table and exact laptop commands.
+
+## Previous checkpoint — Experience Polish 5.0 and official Pix (historical)
 
 Reviewed base: `6ac637e2149872e112b78177b3dcda41c2c8c764` on
 `codex/interaction-engine-3`. Working changes are uncommitted; the user will

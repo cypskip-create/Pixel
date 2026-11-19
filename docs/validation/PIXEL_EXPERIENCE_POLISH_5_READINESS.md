@@ -1,4 +1,70 @@
-# Experience Polish 5.0 readiness report
+# Experience 5.1 & Tools 5.2 readiness report
+
+Date: 2026-11-19
+Reviewed base SHA: `47d1db1284c7860ec52ddf1f6dd50bf532a2f8b4` (`main`)
+Current HEAD: same base SHA; changes are uncommitted.
+CI state: latest supplied run `44542308139` is still failed; no new run was
+triggered. No commit, push, installer publication or release was made.
+
+The run was Windows CI run 29 on this base SHA. Its typecheck, worker-safety,
+sandbox-preload, full-suite and native-helper steps passed; only the unpacked/
+portable/NSIS packaging step failed. The artifact-upload step succeeded. The
+packaging log reports `RUNTIME_SMOKE_FAILED` / `RuntimeError` but does not name
+the failing import or native initialization call. [Run details and logs](https://github.com/cypskip-create/Pixel/actions/runs/44542308139).
+
+## Current checkpoint evidence
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed |
+| `npm test -- --reporter=dot` | **839 passed, 27 skipped, 0 failed (866 total; 57 files passed, 1 skipped)** |
+| `tests/voice-playback-state.test.tsx` | **1/1 passed**; current playback event wins over a stale initial query |
+| `npm run test:voice-worker` | **12/12 passed** on local Python 3.15; not the supported frozen Python 3.12 build |
+| `npm run build:native` | Passed; helper compiled and its build-script protocol smoke completed |
+| `npm run build` | Passed: main/preload, renderer and icon build |
+| `npm run test:preload-sandbox` | **Failed** on repeat; rebuilt Electron sandbox smoke exited `2147483651` (`0x80000003`) before writing a report |
+| `npm run build:voice-worker` | **Blocked**; `py -3.12` has no suitable runtime on this host |
+| Workspace/Settings/Island screenshots | Not captured; visual acceptance unverified |
+| Frozen voice worker / unpacked / portable / NSIS | Not built or verified |
+| GitHub Actions after these changes | No run; commit/push is user-owned |
+
+The full suite skipped 17 browser tests because Playwright Chromium is absent,
+7 NSIS tests because `makensis` is absent, and 3 opt-in native foreground
+integration tests. The renderer does not receive native GUI evidence from the
+Vitest run.
+
+The main-process voice service now broadcasts actual TTS playback start/stop
+to all active app renderers, and the shared hook exposes this to Workspace Pix
+as well as the Island. The live event takes precedence over its initial state
+query. The focused regression test and full suite pass, but state timing against
+real Windows audio and visible Pix expressions still needs laptop acceptance.
+
+This working tree implements blue interactive charcoal tokens, Workspace
+Settings category navigation, Pix in the compact Island and active transcript,
+task-outcome expression priority, and an editable in-Workspace Pixel Board.
+The board's `.pixelboard`, SVG and PNG exports are user initiated. It is not a
+Windows desktop overlay. The requested risk-tier execution policy, per-task
+screen-observation authorization, interactive desktop annotation, window
+coordinate actions and save/reopen through the main process remain incomplete.
+
+The latest GitHub failure's protocol frame is no longer the reported error;
+the supplied run failed later in frozen runtime initialization with
+`RUNTIME_SMOKE_FAILED` / `RuntimeError`. Source inspection found that the
+worker did not explicitly configure phonemizer to use its bundled eSpeak
+library/data. This is a plausible cause, not a verified root cause. The worker
+now configures the paths, keeps the Windows DLL directory handle alive, and
+reports a sanitized stage. Only a frozen Python 3.12 build and a new Windows
+Actions run can verify the repair.
+
+## Historical Experience Polish 5.0 record
+
+The following section documents the prior checkpoint and is retained for
+history. Its commit, test totals, CI result and feature statuses are not the
+current 5.1 results above.
+
+---
+
+## Experience Polish 5.0 (historical)
 
 Date: 2026-11-19  
 Base commit reviewed: `6ac637e2149872e112b78177b3dcda41c2c8c764`  
@@ -122,7 +188,7 @@ installer was built in this turn.
 | Pix canonical geometry and application placements | Implemented; component tests/build pass; visual screenshot comparison is unverified |
 | Pix assistant-state mapping and idle scheduler | Implemented and unit-tested; real timing/performance/hidden-window visual checks unverified |
 | Cursor Buddy separation and ready acknowledgement | Implemented and unit-tested; native appearance, focus, click-through, display edges and lifecycle unverified |
-| Sage switch semantics and visual states | Implemented and covered by component tests; Windows scaling/contrast screenshot review unverified |
+| Blue switch semantics and visual states | Implemented and covered by component tests; Windows scaling/contrast screenshot review unverified |
 | Bounded file search/metadata/create/copy/rename | Implemented with permission checks and postcondition tests |
 | Expanded clipboard workflows | Missing |
 | New broad app-control or multi-step daily orchestration | Missing in this checkpoint; existing allowlisted launch/browser/UIA/document tools remain |

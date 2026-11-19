@@ -14,6 +14,7 @@ import { WorkspaceComposer } from '@/components/WorkspaceComposer';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { MemoryPanel } from '@/components/MemoryPanel';
 import { PermissionCard } from '@/components/PermissionCard';
+import { PixelBoard } from '@/components/PixelBoard';
 import { PixelMark } from '@/components/PixelMark';
 import { PixMascot } from '@/components/PixMascot';
 import { SettingsPanel } from '@/components/SettingsPanel';
@@ -22,6 +23,7 @@ import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/Worksp
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
+import { useVoicePlaybackState } from '@/hooks/useVoicePlaybackState';
 import { safeSubscribe } from '@/lib/bridge';
 import { taskDisplayState, selectActiveTask, isTaskActive } from '@/lib/task-presentation';
 import { MicrophoneCapture } from '@/lib/audioCapture';
@@ -50,6 +52,7 @@ export function Workspace(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
   const [listening, setListening] = useState(false);
+  const speaking = useVoicePlaybackState();
   const [pushToTalkState, setPushToTalkState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting'>('idle');
   const [recentOutcome, setRecentOutcome] = useState<TaskRecord | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -74,6 +77,7 @@ export function Workspace(): React.JSX.Element {
     error: chat.error !== null || settingsError !== null,
     listening: listening || pushToTalkState === 'recording',
     transcribing: pushToTalkState === 'stopping' || pushToTalkState === 'transcribing',
+    speaking,
     executing: activeTask !== null,
     taskOutcome,
   });
@@ -378,7 +382,7 @@ export function Workspace(): React.JSX.Element {
 
   const viewTitle: Record<WorkspaceView, string> = {
     chat: 'Workspace', projects: 'Projects', tasks: 'Tasks & Activity', skills: 'Skills & Routines',
-    memory: 'Memory', tools: 'Tools', settings: 'Settings',
+    memory: 'Memory', tools: 'Tools', board: 'Pixel Board', settings: 'Settings',
   };
   const pendingApproval = permission ? (
     <div className="workspace-approval" aria-label="Approval required">
@@ -486,6 +490,7 @@ export function Workspace(): React.JSX.Element {
           {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'tools' ? <ToolsView tools={tools} /> : null}
+          {view === 'board' ? <PixelBoard emergencyStopped={stopped} /> : null}
           {view === 'settings' ? <div className="workspace-settings"><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={() => setView('chat')} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></div> : null}
         </main>
 

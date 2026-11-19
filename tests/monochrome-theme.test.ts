@@ -36,20 +36,20 @@ describe('charcoal Pixel design system', () => {
   const allRendererSource = files.map((file) => readFileSync(file, 'utf8')).join('\n');
   const css = readFileSync(join(rendererRoot, 'index.css'), 'utf8');
 
-  it('defines the charcoal surfaces and the approved restrained sage, amber and red accents', () => {
+  it('defines charcoal surfaces, blue interactive accents, and independent Pix/status colors', () => {
     for (const [token, value] of [
-      ['--color-app-bg', '#0E1013'],
-      ['--color-sidebar', '#1A1E23'],
-      ['--color-surface', '#20252A'],
-      ['--color-surface-raised', '#2A3138'],
-      ['--color-hover', '#333A40'],
-      ['--color-selected', '#394147'],
-      ['--color-border', '#3A4147'],
-      ['--color-ink', '#E6E9ED'],
-      ['--color-ink-soft', '#C6CACD'],
-      ['--color-ink-dim', '#9AA1A6'],
-      ['--color-accent', '#A7D7C2'],
-      ['--color-accent-hover', '#D6EDE3'],
+      ['--color-app-bg', '#171717'],
+      ['--color-sidebar', '#252525'],
+      ['--color-surface', '#343434'],
+      ['--color-surface-raised', '#202020'],
+      ['--color-hover', '#414141'],
+      ['--color-selected', '#494949'],
+      ['--color-border', '#444444'],
+      ['--color-ink', '#F3F3F3'],
+      ['--color-ink-soft', '#D3D3D3'],
+      ['--color-ink-dim', '#ABABAB'],
+      ['--color-accent', '#4299F5'],
+      ['--color-accent-hover', '#60A9FA'],
       ['--color-warning', '#D5AB72'],
       ['--color-destructive', '#D88B83'],
       ['--pix-face', '#0E1013'],
@@ -67,7 +67,8 @@ describe('charcoal Pixel design system', () => {
     const approvedTints = new Set([
       '0e1013', '101113', '1a1e23', '20252a', '2a3138', '333a40', '394147', '3a4147', '515a61',
       'e6e9ed', 'c6cacd', '9aa1a6', 'd2d7db', 'a7d7c2', 'd6ede3', 'd5ab72', 'd88b83',
-      '9be5c7', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',
+      '4299f5', '60a9fa', '1d70c9', '185ea9', '171717', '252525', '343434', '202020', '414141', '494949', '444444', '595959', 'f3f3f3', 'd3d3d3', 'ababab', 'd8d8d8',
+      '9be5c7', '8cb8a5', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',
       'f1f3f3', 'e7eaea', 'f7f9f9', 'e3e7e7', 'd7dedd', 'c8d0ce', '9aa6a2', 'f5f7f6',
       '161b1a', '414947', '68716e',
     ]);

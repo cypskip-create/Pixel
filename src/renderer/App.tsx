@@ -20,12 +20,12 @@ import {
 import { mergeVoiceTranscriptIntoDraft } from '@shared/companion/pushToTalkSubmission';
 import { parseExplicitSearchCommand } from '@shared/browserSearch';
 import { getModeDescriptor } from '@shared/types';
-import { Avatar } from '@/components/Avatar';
 import { CursorBuddy } from '@/components/CursorBuddy';
 import { InputBar } from '@/components/InputBar';
 import { ConversationTranscript } from '@/components/ConversationTranscript';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
+import { PixMascot } from '@/components/PixMascot';
 import { RecentChatsPanel } from '@/components/RecentChatsPanel';
 import { ResponseBubble } from '@/components/ResponseBubble';
 import { SettingsPanel } from '@/components/SettingsPanel';
@@ -36,6 +36,7 @@ import { useChat } from '@/hooks/useChat';
 import { useMotionPolicy } from '@/hooks/useMotion';
 import { usePresentationLayout } from '@/hooks/usePresentationLayout';
 import { useSettings } from '@/hooks/useSettings';
+import { useVoicePlaybackState } from '@/hooks/useVoicePlaybackState';
 import { readBridge, safeSubscribe } from '@/lib/bridge';
 import { resolveSurface } from '@/lib/surface';
 import { MicrophoneCapture } from '@/lib/audioCapture';
@@ -179,17 +180,19 @@ function Companion(): React.JSX.Element {
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [permissionPending, setPermissionPending] = useState(false);
   const [task, setTask] = useState<TaskRecord | null>(null);
+  const [taskOutcome, setTaskOutcome] = useState<'success' | 'error' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [listening, setListening] = useState(false);
   const [pushToTalkState, setPushToTalkState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting'>('idle');
   const [microphoneLevel, setMicrophoneLevel] = useState(0);
-  const [speaking, setSpeaking] = useState(false);
+  const speaking = useVoicePlaybackState();
   const [speechConfirmed, setSpeechConfirmed] = useState(false);
   const [searchPending, setSearchPending] = useState(false);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const hoverTimer = useRef<number | null>(null);
   const leaveTimer = useRef<number | null>(null);
+  const taskOutcomeTimer = useRef<number | null>(null);
 
   const dispatchIsland = useCallback((event: DynamicIslandEvent) => {
     setIsland((current) => reduceDynamicIsland(current, event));
@@ -225,6 +228,7 @@ function Companion(): React.JSX.Element {
   useEffect(() => () => {
     if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
     if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
+    if (taskOutcomeTimer.current !== null) window.clearTimeout(taskOutcomeTimer.current);
   }, []);
 
   const mode = settings.companion.mode;
@@ -526,10 +530,20 @@ function Companion(): React.JSX.Element {
     let mounted = true;
     const unsubscribe = safeSubscribe<TaskRecord>(api.onUpdate, (record) => {
       setTask(record);
-      if (record.status === 'cancelled' || record.status === 'completed' || record.status === 'failed') {
+      if (record.status === 'cancelled' || record.status === 'completed' || record.status === 'failed' || record.status === 'blocked') {
+        setTaskOutcome(record.status === 'completed' ? 'success' : record.status === 'cancelled' ? null : 'error');
         window.setTimeout(() => setTask((current) =>
           current?.id === record.id && current.status === record.status ? null : current,
         ), 4000);
+        if (taskOutcomeTimer.current !== null) window.clearTimeout(taskOutcomeTimer.current);
+        if (record.status !== 'cancelled') {
+          taskOutcomeTimer.current = window.setTimeout(() => {
+            taskOutcomeTimer.current = null;
+            setTaskOutcome(null);
+          }, 1400);
+        }
+      } else {
+        setTaskOutcome(null);
       }
     });
     void api.list().then((records) => {
@@ -790,7 +804,6 @@ function Companion(): React.JSX.Element {
 
     const shell = window.cypsShell;
     if (!shell || typeof shell.voiceSpeak !== 'function') return;
-    setSpeaking(true);
     setSpeechConfirmed(false);
     void shell
       .voiceSpeak(chat.content)
@@ -800,8 +813,7 @@ function Companion(): React.JSX.Element {
       })
       .catch((error: unknown) => {
         showNotice(error instanceof Error ? error.message : 'Speech playback failed.');
-      })
-      .finally(() => setSpeaking(false));
+      });
   }, [chat.streaming, chat.content, settings.companion.speakReplies, settings.voice.ttsEnabled, showNotice]);
 
   const runTaskAction = useCallback(
@@ -903,6 +915,7 @@ function Companion(): React.JSX.Element {
     transcribing: pushToTalkState === 'stopping' || pushToTalkState === 'transcribing',
     executing: hasActiveTask,
     speaking,
+    taskOutcome,
   });
   const compactAssistantState: AssistantState = island.state === 'RESPONSE_AVAILABLE'
     ? 'success'
@@ -968,7 +981,7 @@ function Companion(): React.JSX.Element {
         >
           {pushToTalkState === 'recording' ? (
             <span className="island-ptt-indicator" aria-hidden="true">
-              <PixelMark size={17} />
+              <PixMascot size={20} state="listening" reducedMotion={reducedMotion} decorative />
               <span className="island-ptt-wave">{[3, 6, 4, 8, 5, 7, 3].map((height, index) => {
                 const amplitude = Math.max(0.12, microphoneLevel);
                 return <i key={index} style={{ height: `${Math.max(2, Math.round((height + 2) * amplitude))}px` }} />;
@@ -976,8 +989,7 @@ function Companion(): React.JSX.Element {
             </span>
           ) : (
             <>
-              <PixelMark size={19} />
-              <span aria-hidden="true" className="absolute bottom-[7px] right-[48px] rounded-full border-2 border-[var(--color-surface)]"><Avatar state={compactAssistantState} size={9} /></span>
+              <PixMascot size={21} state={compactAssistantState} reducedMotion={reducedMotion} decorative />
             </>
           )}
         </button>
@@ -1083,6 +1095,8 @@ function Companion(): React.JSX.Element {
               content={chat.content}
               reasoning={chat.reasoning}
               streaming={chat.streaming}
+              assistantState={assistantState}
+              reducedMotion={reducedMotion}
               error={chat.error}
               persistence={chat.persistence}
               onStop={chat.stop}

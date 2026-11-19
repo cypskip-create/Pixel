@@ -120,6 +120,8 @@ export const CHANNELS = {
   voiceListen: 'voice:listen',
   voiceCancel: 'voice:cancel',
   voiceSpeak: 'voice:speak',
+  voicePlaybackState: 'voice:playbackState',
+  voicePlaybackGet: 'voice:playbackGet',
   voicePttState: 'voice:pttState',
   voicePttSubmit: 'voice:pttSubmit',
   voicePttStopCapture: 'voice:pttStopCapture',

@@ -218,8 +218,9 @@ The floating companion keeps a transparent native window so its rounded shape
 works over the desktop; visible panels use opaque black/charcoal fills. The
 shared semantic palette is documented in
 [`PIXEL_DESIGN_TOKENS.md`](PIXEL_DESIGN_TOKENS.md). The Workspace and Island use
-the same black/charcoal surface tokens, with restrained sage selected/live
-states and warm semantic warning/error colors.
+the same black/charcoal surface tokens. Blue is reserved for selected controls,
+focus and interactive states; Pix's mint is isolated to character artwork.
+Warning and error cues retain their semantic colors.
 The companion and Workspace select the `none` system backdrop and do not apply
 CSS `backdrop-filter`, Mica or Acrylic. The lower companion toolbar remains an
 unboxed row; the approved P geometry and controls remain.
@@ -231,9 +232,19 @@ Its one SVG geometry renders the silver rounded-square shell, near-black face,
 folded mint upper-right corner, mint eyes, small arms and feet. `state` maps the
 existing `AssistantState` into idle, listening, thinking, working, speaking,
 success, concerned or stopped expressions. Workspace header/empty-chat/current
-response and expanded-Island placements reuse this component at different
-sizes; historical message avatars are static. The official P mark remains a
-separate brand asset. Settings provides a preview of Pix expressions.
+response and compact/expanded Island identity placements reuse this component
+at different sizes; historical message avatars are static. The official P
+mark remains a separate brand asset elsewhere. Settings provides an
+independent preview of Pix expressions.
+
+Workspace Settings has a supported category rail for General, Voice,
+Privacy & Memory, and Tools & Integrations. The selected page is stored in
+renderer local storage and falls back to General if storage is unavailable.
+Its selected row remains neutral charcoal with a blue edge/icon cue. Pixel
+Board is an editable In-Workspace SVG scene with local draft recovery,
+`.pixelboard` import/export, and SVG/PNG export. Replacing the local draft
+prompts before import/new-board. The board is separate from the passive desktop
+guidance overlay and does not draw over other Windows applications.
 
 `src/renderer/hooks/useCompanionAnimation.ts` owns the bounded idle blink
 scheduler. It pauses while the document is hidden, observes both Pixel's

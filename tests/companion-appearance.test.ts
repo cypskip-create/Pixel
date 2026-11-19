@@ -11,10 +11,10 @@ describe('floating companion appearance', () => {
     const windows = read('src/main/window.ts');
     const mainWindow = windows.slice(windows.indexOf('createMainWindow()'), windows.indexOf('createSettingsWindow()'));
 
-    expect(css).toContain('--color-app-bg: #0E1013');
-    expect(css).toContain('--color-sidebar: #1A1E23');
-    expect(css).toContain('--color-surface: #20252A');
-    expect(css).toContain('--color-surface-raised: #2A3138');
+    expect(css).toContain('--color-app-bg: #171717');
+    expect(css).toContain('--color-sidebar: #252525');
+    expect(css).toContain('--color-surface: #343434');
+    expect(css).toContain('--color-surface-raised: #202020');
     expect(css).toContain('@utility pixel-surface');
     expect(css).toContain('background: var(--color-surface);');
     expect(css).not.toContain('--color-glass');

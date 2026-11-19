@@ -4,9 +4,10 @@ import {
   PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings, Sparkles, Trash2,
   Wrench, X,
 } from 'lucide-react';
+import { PenLine } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
 
-export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'skills' | 'memory' | 'tools' | 'settings';
+export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'skills' | 'memory' | 'tools' | 'board' | 'settings';
 
 const LIBRARY_ITEMS: Array<{ id: Exclude<WorkspaceView, 'chat' | 'settings'>; label: string; icon: typeof FolderKanban }> = [
   { id: 'projects', label: 'Projects', icon: FolderKanban },
@@ -14,6 +15,7 @@ const LIBRARY_ITEMS: Array<{ id: Exclude<WorkspaceView, 'chat' | 'settings'>; la
   { id: 'skills', label: 'Skills & Routines', icon: Sparkles },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'tools', label: 'Tools', icon: Wrench },
+  { id: 'board', label: 'Pixel Board', icon: PenLine },
 ];
 
 interface WorkspaceSidebarProps {

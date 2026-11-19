@@ -30,10 +30,10 @@ export function deriveAssistantState(input: CompanionStateSignals): AssistantSta
   if (input.error) return 'error';
   if (input.pointing) return 'pointing';
   if (input.executing) return 'executing';
-  if (input.taskOutcome) return input.taskOutcome;
   if (input.listening) return 'listening';
   if (input.transcribing) return 'transcribing';
   if (input.speaking) return 'speaking';
   if (input.streaming) return input.hasAnswer ? 'responding' : 'thinking';
+  if (input.taskOutcome) return input.taskOutcome;
   return 'idle';
 }

@@ -57,6 +57,8 @@ declare global {
       }>;
       voiceCancel(): Promise<number>;
       voiceSpeak(text: string): Promise<{ ok: boolean; error?: string; backend?: string; generationMs?: number; playbackMs?: number; elapsedMs?: number }>;
+      onVoicePlaybackState(handler: (speaking: boolean) => void): () => void;
+      voicePlaybackActive(): Promise<boolean>;
     };
   }
 }

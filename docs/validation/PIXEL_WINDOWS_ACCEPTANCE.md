@@ -1,23 +1,96 @@
 # Pixel Windows acceptance procedure
 
-## Experience Polish 5.0 and official Pix — 2026-11-19
+## Experience 5.1 & Tools 5.2 — current uncommitted changes (2026-11-19)
 
-Current source, test totals, CI diagnosis and local limitations are recorded in
+Current automated evidence and blockers are in
 [`PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](PIXEL_EXPERIENCE_POLISH_5_READINESS.md).
-The latest local full suite passed **834 tests**, skipped **27** (17 Chromium,
-7 NSIS, 3 opt-in foreground integration), and failed **0** when test fixture
-homes were redirected to a writable temporary profile. Typecheck, production
-build, Python worker unit tests and native helper build passed. The current
-tree's Electron sandbox smoke, GUI, screenshots, packaged builds and new CI
-run are not verified. The separate GPU/renderer child-process issue remains
-unresolved and is not attributed to the voice JSONL fix.
+This worktree passed typechecking, production build, native-helper build and
+the full Vitest suite (**839 passed, 27 skipped, 0 failed; 866 total; 57 files
+passed, 1 skipped**). The
+Python worker tests passed **12/12**. The sandboxed Electron smoke failed with
+`0x80000003` before a report; the Python 3.12 frozen worker could not be built
+because no suitable interpreter is installed. Settings/Workspace screenshots,
+the packaged application, installer and new Actions run remain unverified.
 
-Run the exact laptop-side commands and perform mascot, Cursor Buddy, visual,
-filesystem and packaged-GPU acceptance from the readiness report before
-calling this checkpoint complete. Keep `npm run dev`'s `--disable-gpu` as a
-development diagnostic; compare `npm run dev:gpu` and packaged GPU startup
-separately. Do not use an existing Pixel process from another checkout as
-evidence for the current source tree.
+Only one Codex Settings reference screenshot and the approved Pix concept were
+available in the current attachment set. Compare Settings to the supplied
+image at 100%, 125% and 150% Windows scaling where available. The selected
+interactive accent should be blue while the charcoal panels and Pix's mint
+artwork remain separate. Do not treat a DOM render as Windows visual
+acceptance.
+
+### Current-tree commands
+
+Run on the target Windows laptop after committing/pushing the user's changes:
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test -- --reporter=dot
+npm run test:voice-worker
+npm run build:native
+npm run build
+npm run test:preload-sandbox
+npm run build:voice-worker
+npm run pack
+npm run dist
+```
+
+The test run skips browser tests if Chromium was not installed and NSIS tests
+if `makensis` is not available. Do not count skips as passes. Preserve the
+terminal output and the CI run URL; `pack`/`dist` must not publish a release.
+
+### Settings, Pix and Dynamic Island
+
+1. Launch the current checkout (not another Pixel installation) and capture
+   Settings General and Appearance at 100%, 125% and 150% where available.
+2. Confirm the content stays charcoal, selected mode/radio and ON controls are
+   blue, OFF controls remain neutral, focus is visible, and labels/helper text
+   are readable. Visit every implemented Settings category and use keyboard
+   navigation.
+3. Capture the Workspace header, empty conversation, assistant response,
+   compact Island and expanded transcript. Confirm Pix occupies the compact
+   Island assistant slot, the P remains in Pixel's brand lockup, historical
+   transcript avatars do not animate, and the active transcript Pix follows
+   recording/thinking/execution/speaking/outcome state.
+4. Test `Reduce motion`, hidden/background pause, one-shot task success/error,
+   approval waiting and emergency stop. Confirm the Island does not resize or
+   shift when Pix changes expression. Cursor Buddy must remain pointer-shaped
+   and separate.
+
+### Pixel Board in Workspace
+
+The current Pixel Board is an in-Workspace editable SVG scene, not a desktop
+annotation overlay. Its local draft and explicit exports can be checked now;
+cross-app marks, PDF, screenshot insertion, native save dialogs and window
+coordinate alignment are not implemented.
+
+1. Open Library → Pixel Board; add pen/highlighter strokes, line, arrow,
+   rectangle, circle, text and step marker.
+2. Select and move an object; delete it; test eraser, undo and redo.
+3. Reload Workspace and confirm the local draft is restored. Export `.pixelboard`,
+   SVG and PNG. Reimport the `.pixelboard` document and verify object edits and
+   geometry remain available.
+4. Use reduced motion and emergency stop while the board is open; verify the
+   board does not capture input outside its Workspace surface.
+
+### Scope/security acceptance still required
+
+The current tree intentionally preserves existing per-tool approval policy.
+The requested risk-tier policy, Agent screen-observation session grant,
+interactive desktop drawing and coordinate-based mouse action have not been
+implemented, so the corresponding acceptance steps below are not applicable
+as passing claims. Do not test these by using an existing session grant as if
+it covered an unrelated target. Run the existing screen guidance/UIA flows and
+confirm their permissions, target identity, postcondition, cancellation and
+emergency stop remain intact.
+
+Keep `npm run dev`'s `--disable-gpu` as a development diagnostic. Compare
+`npm run dev:gpu` and packaged GPU startup separately; do not attribute either
+result to the voice-worker change.
+
+## Historical acceptance records
 
 ## Tools 4.2 acceptance status — 2026-11-19
 

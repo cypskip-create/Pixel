@@ -152,7 +152,7 @@ function ModeRow({
         'transition-colors duration-[var(--cyps-duration-fast)]',
         'disabled:cursor-not-allowed disabled:opacity-50',
         selected
-          ? 'bg-neutral-500/18 ring-1 ring-inset ring-neutral-400/40'
+          ? 'bg-[color-mix(in_srgb,var(--color-accent)_11%,transparent)] ring-1 ring-inset ring-[var(--color-accent)]/55'
           : 'hover:bg-white/8',
       ].join(' ')}
     >
@@ -160,10 +160,10 @@ function ModeRow({
         aria-hidden="true"
         className={[
           'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
-          selected ? 'border-neutral-300 bg-neutral-400/25' : 'border-[var(--color-ink-dim)]',
+          selected ? 'border-[var(--color-accent)] bg-[var(--color-accent)]' : 'border-[var(--color-ink-dim)]',
         ].join(' ')}
       >
-        {selected ? <Check size={11} strokeWidth={3} className="text-neutral-100" /> : null}
+        {selected ? <Check size={11} strokeWidth={3} className="text-[var(--color-accent-foreground)]" /> : null}
       </span>
 
       <span className="min-w-0 flex-1">

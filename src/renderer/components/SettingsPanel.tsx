@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, X } from 'lucide-react';
+import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
 import type { AppSettings, AssistantState, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
@@ -33,6 +33,18 @@ export type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
 
+type SettingsPage = 'general' | 'voice' | 'privacy' | 'tools';
+const SETTINGS_PAGE_KEY = 'pixel.settings.workspace-page.v1';
+
+function initialSettingsPage(): SettingsPage {
+  if (typeof window === 'undefined') return 'general';
+  try {
+    const value = window.localStorage.getItem(SETTINGS_PAGE_KEY);
+    if (value === 'voice' || value === 'privacy' || value === 'tools') return value;
+  } catch { /* Settings still opens when browser storage is unavailable. */ }
+  return 'general';
+}
+
 /**
  * Compact settings sheet.
  *
@@ -57,6 +69,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     workspaceLayout = false,
   } = props;
   const [advanced, setAdvanced] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialSettingsPage);
   const [cursorPreview, setCursorPreview] = useState(false);
   const [pixPreviewState, setPixPreviewState] = useState<AssistantState>('idle');
   const [automationOpen, setAutomationOpen] = useState(false);
@@ -360,12 +373,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
   return (
     <section
       aria-label="Pixel settings"
-      className={`pixel-surface-raised animate-slide-down flex ${workspaceLayout ? 'w-full max-w-[720px]' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
+      className={`pixel-surface-raised animate-slide-down flex ${workspaceLayout ? 'w-full max-w-[1120px]' : 'w-[460px]'} flex-col overflow-hidden rounded-[var(--cyps-radius)]`}
       style={workspaceLayout ? { minHeight: 0, height: '100%' } : { maxHeight: 'min(calc(100vh - 24px), 520px)' }}
     >
       <header className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
         <PixelMark size={16} />
-        <h2 className="flex-1 text-[12.5px] font-semibold text-[var(--color-ink)]">{workspaceLayout ? 'Pixel Settings' : 'Companion'}</h2>
+        <h2 className={`flex-1 font-semibold text-[var(--color-ink)] ${workspaceLayout ? 'text-[24px]' : 'text-[12.5px]'}`}>{workspaceLayout ? 'Settings' : 'Companion'}</h2>
         {saving ? (
           <span role="status" aria-live="polite" className="text-[10px] text-[var(--color-ink-dim)]">
             Saving…
@@ -376,7 +389,23 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </IconButton>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-3 py-2.5">
+      <div className={workspaceLayout ? 'workspace-settings-layout' : 'flex-1 overflow-y-auto px-3 py-2.5'} data-settings-page={workspaceLayout ? settingsPage : undefined}>
+        {workspaceLayout ? (
+          <nav className="workspace-settings-nav" aria-label="Settings categories">
+            <h3>Settings</h3>
+            {([
+              ['general', 'General', Gauge],
+              ['voice', 'Voice', Mic],
+              ['privacy', 'Privacy & Memory', ShieldCheck],
+              ['tools', 'Tools & Integrations', SlidersHorizontal],
+            ] as const).map(([id, label, Icon]) => (
+              <button key={id} type="button" aria-current={settingsPage === id ? 'page' : undefined} className={settingsPage === id ? 'is-active' : ''} onClick={() => { setSettingsPage(id); try { window.localStorage.setItem(SETTINGS_PAGE_KEY, id); } catch { /* Selection is still active for this visit. */ } setAutomationOpen(false); setMemoryOpen(false); setPermissionsOpen(false); }}>
+                <Icon size={16} aria-hidden="true" /> <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+        ) : null}
+        <div className={workspaceLayout ? 'workspace-settings-content' : ''}>
         {error !== null ? (
           <p
             role="alert"
@@ -393,7 +422,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         ) : memoryOpen ? (
           <MemoryPanel onBack={() => setMemoryOpen(false)} />
         ) : <>
-        <Group icon={Gauge} title="Behaviour">
+        <Group icon={Gauge} title="Behavior & Companion" category="general">
           <div className="pb-1.5">
             <ModeSwitcher
               current={settings.companion.mode}
@@ -537,7 +566,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           />
         </Group>
 
-        <Group icon={Keyboard} title="Keys">
+        <Group icon={Keyboard} title="Keyboard shortcuts" category="general">
           <Row label="Summon or hide Pixel">
             <Accelerator value={settings.globalAccelerator} />
           </Row>
@@ -567,7 +596,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </p>
         </Group>
 
-        <Group icon={Globe2} title="Browser search">
+        <Group icon={Globe2} title="Browser search" category="tools">
           <Row label="Default search engine">
             <select
               aria-label="Default search engine"
@@ -583,7 +612,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <p className="px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">Explicit search requests open in your default browser.</p>
         </Group>
 
-        <Group icon={Mic} title="Voice">
+        <Group icon={Mic} title="Voice" category="voice">
           <Toggle
             label="Voice output"
             hint="Speak answers aloud."
@@ -729,7 +758,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </p>
         </Group>
 
-        <Group icon={ShieldCheck} title="Privacy">
+        <Group icon={ShieldCheck} title="Privacy & Memory" category="privacy">
           <Row label="Screenshots need approval">
             <span className="text-[11px] font-medium text-neutral-200">Always on</span>
           </Row>
@@ -773,6 +802,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <button
           type="button"
           onClick={() => setAutomationOpen(true)}
+          data-settings-category="tools"
           className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-neutral-300/20 bg-neutral-300/8 px-2.5 py-2 text-left text-[10.5px] font-medium text-neutral-100 hover:bg-neutral-300/14"
         >
           <ListChecks size={12} aria-hidden="true" />
@@ -782,6 +812,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <button
           type="button"
           onClick={() => setAdvanced((value) => !value)}
+          data-settings-category="general"
           aria-expanded={advanced}
           className="no-drag mt-1 w-full rounded-xl px-2 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-dim)] hover:bg-white/6 hover:text-[var(--color-ink-soft)]"
         >
@@ -789,7 +820,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </button>
 
         {advanced ? (
-          <div className="mt-1 rounded-xl border border-[var(--color-border)] bg-black/15 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-[var(--color-ink-dim)]">
+          <div data-settings-category="general" className="mt-1 rounded-xl border border-[var(--color-border)] bg-black/15 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-[var(--color-ink-dim)]">
             <p>provider: {settings.provider.provider}</p>
             <p>primary: {settings.provider.primaryModel}</p>
             <p>reasoning: {settings.provider.reasoningModel}</p>
@@ -801,6 +832,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </div>
         ) : null}
         </>}
+        </div>
       </div>
     </section>
   );
@@ -1074,14 +1106,16 @@ function connectionFailureMessage(code?: CypsErrorCode): string {
 function Group({
   icon: Icon,
   title,
+  category,
   children,
 }: {
   icon: typeof Gauge;
   title: string;
+  category: 'general' | 'voice' | 'privacy' | 'tools';
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-2.5">
+    <div className="workspace-settings-group mb-4" data-settings-category={category}>
       <h3 className="mb-1 flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ink-dim)]">
         <Icon size={11} strokeWidth={2.5} aria-hidden="true" />
         {title}

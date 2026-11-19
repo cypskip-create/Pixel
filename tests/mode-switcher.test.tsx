@@ -70,6 +70,9 @@ describe('operating mode popover', () => {
 
     expect(rendered.querySelectorAll('[role="menu"]')).toHaveLength(1);
     expect(rendered.querySelectorAll('[role="menuitemradio"]')).toHaveLength(3);
+    const selected = rendered.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]');
+    expect(selected?.className).toContain('ring-[var(--color-accent)]');
+    expect(selected?.querySelector('span')?.className).toContain('border-[var(--color-accent)]');
     expect(rendered.textContent).toContain('Guide');
     expect(rendered.textContent).toContain('Hybrid');
     expect(rendered.textContent).toContain('Agent');

@@ -25,6 +25,7 @@ import csv
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -403,23 +404,55 @@ def unload_voice_models(_params: Dict[str, Any]) -> Dict[str, bool]:
 
 def runtime_smoke_test(_params: Dict[str, Any]) -> Dict[str, Any]:
     """Import the frozen native speech stack without loading model weights."""
+    stage = "import_ctranslate2"
     try:
         import ctranslate2
+
+        stage = "load_onnxruntime_cpu"
         import onnxruntime
-        from faster_whisper import WhisperModel
-        from kokoro_onnx import Kokoro
-        from phonemizer.backend import EspeakBackend
 
         providers = onnxruntime.get_available_providers()
         if "CPUExecutionProvider" not in providers:
             raise RuntimeError("ONNX Runtime CPU provider is missing.")
+
+        stage = "import_faster_whisper"
+        from faster_whisper import WhisperModel
+
+        stage = "import_kokoro"
+        from kokoro_onnx import Kokoro
+
+        # phonemizer normally looks for a machine-wide eSpeak NG install on
+        # Windows. The frozen worker carries espeakng-loader instead, so point
+        # phonemizer at that exact bundled DLL and its adjacent data directory.
+        # Keep AddDllDirectory's handle alive for the lifetime of the process.
+        stage = "configure_bundled_espeak"
+        import espeakng_loader
+        from phonemizer.backend.espeak.wrapper import EspeakWrapper
+
+        espeak_library = espeakng_loader.get_library_path()
+        espeak_data = espeakng_loader.get_data_path()
+        if os.name == "nt":
+            _retain_espeak_dll_directory(espeak_library)
+        EspeakWrapper.set_library(espeak_library)
+        EspeakWrapper.set_data_path(espeak_data)
+
+        stage = "initialize_phonemizer_backend"
+        from phonemizer.backend import EspeakBackend
+
         phonemes = EspeakBackend(language="en-us").phonemize(["Pixel voice runtime smoke test."])
         if not phonemes or not phonemes[0].strip():
             raise RuntimeError("eSpeak did not produce phonemes.")
     except Exception as exc:
+        # Keep the protocol diagnostic useful while avoiding arbitrary native
+        # exception messages that may contain local paths or request data.
+        detail = str(exc)
+        detail = re.sub(r"(?i)\b[A-Z]:\\[^\s\"']+", "<path>", detail)
+        detail = re.sub(r"(?<![\w:])/(?:[^/\s]+/)*[^/\s]+", "<path>", detail)
+        detail = " ".join(detail.split())[:240]
+        suffix = f": {detail}" if detail else ""
         raise WorkerError(
             "RUNTIME_SMOKE_FAILED",
-            f"The packaged voice runtime could not load a native dependency ({type(exc).__name__}).",
+            f"Packaged voice runtime failed at {stage} ({type(exc).__name__}){suffix}.",
         ) from None
 
     return {
@@ -431,6 +464,21 @@ def runtime_smoke_test(_params: Dict[str, Any]) -> Dict[str, Any]:
         "kokoro": callable(Kokoro),
         "espeakReady": True,
     }
+
+
+_ESPEAK_DLL_DIRECTORY_HANDLES: list[Any] = []
+_ESPEAK_DLL_DIRECTORIES: set[str] = set()
+
+
+def _retain_espeak_dll_directory(library_path: str) -> None:
+    """Make a bundled native library's siblings discoverable on Windows."""
+    directory = os.path.dirname(os.path.abspath(library_path))
+    if directory not in _ESPEAK_DLL_DIRECTORIES:
+        handle = os.add_dll_directory(directory)
+        # os.add_dll_directory returns an opaque handle; retain it rather than
+        # closing it immediately so dependent native DLLs remain resolvable.
+        _ESPEAK_DLL_DIRECTORY_HANDLES.append(handle)
+        _ESPEAK_DLL_DIRECTORIES.add(directory)
 
 
 OPS: Dict[str, Callable[[Dict[str, Any]], Any]] = {

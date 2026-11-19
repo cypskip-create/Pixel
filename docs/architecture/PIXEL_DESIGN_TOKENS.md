@@ -1,40 +1,41 @@
 # Pixel charcoal design tokens
 
-Updated: 2026-11-19. Pixel's UI uses black and charcoal surfaces across the
-floating Island, Workspace, Settings and popovers. Muted sage is reserved for
-selected interaction and verified/live states. Pix itself uses the approved
-silver-and-mint character palette. The optional light theme remains neutral.
+Updated: 2026-11-19. Pixel uses charcoal surfaces across the floating Island,
+Workspace, Settings and popovers. Blue is the interactive accent for controls,
+focus and selection. Pix retains its approved independent silver-and-mint
+character artwork. Status colors remain semantic and do not inherit the blue
+interaction accent.
 
 ## Dark palette
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--color-app-bg` | `#0E1013` | Main Workspace canvas |
-| `--color-sidebar` | `#1A1E23` | Sidebar and secondary panel |
-| `--color-surface` | `#20252A` | Standard/primary panel |
-| `--color-surface-raised` | `#2A3138` | Elevated panels and controls |
-| `--color-hover` | `#333A40` | Hover surface |
-| `--color-selected` | `#394147` | Selected/active surface |
-| `--color-border` | `#3A4147` | Border and divider |
-| `--color-border-strong` | `#515A61` | Emphasized border |
-| `--color-popover` | `#20252A` | Menus and popovers |
-| `--color-ink` | `#E6E9ED` | Primary text |
-| `--color-ink-soft` | `#C6CACD` | Secondary text |
-| `--color-ink-dim` | `#9AA1A6` | Muted text |
-| `--color-icon` / `--color-brand-foreground` | `#D2D7DB` | Pixel mark and general icon foreground |
-| `--color-accent` | `#A7D7C2` | Selected controls, focus and live/success details |
-| `--color-accent-hover` | `#D6EDE3` | Interactive accent hover |
-| `--color-accent-foreground` | `#101113` | Foreground on sage controls |
+| `--color-app-bg` | `#171717` | Main Workspace canvas |
+| `--color-sidebar` | `#252525` | Sidebar and secondary panel |
+| `--color-surface` | `#343434` | Standard grouped panel |
+| `--color-surface-raised` | `#202020` | Raised surfaces |
+| `--color-hover` | `#414141` | Hover surface |
+| `--color-selected` | `#494949` | Neutral selected navigation row with blue icon/edge cue |
+| `--color-border` | `#444444` | Border and divider |
+| `--color-border-strong` | `#595959` | Emphasized border |
+| `--color-popover` | `#252525` | Menus and popovers |
+| `--color-ink` | `#F3F3F3` | Primary text |
+| `--color-ink-soft` | `#D3D3D3` | Secondary text |
+| `--color-ink-dim` | `#ABABAB` | Muted text |
+| `--color-icon` / `--color-brand-foreground` | `#D8D8D8` | Pixel mark and general icon foreground |
+| `--color-accent` | `#4299F5` | Interactive controls, focus and selected mode |
+| `--color-accent-hover` | `#60A9FA` | Interactive accent hover |
+| `--color-accent-foreground` | `#FFFFFF` | Foreground on blue controls |
 | `--color-warning` / `--color-approval` | `#D5AB72` | Warning/approval cue with label/icon |
 | `--color-destructive` / `--color-error` | `#D88B83` | Error, recording and destructive cue |
 | `--color-disabled` | `#777E82` | Disabled controls |
-| `--color-working` | `#A7D7C2` | Active work indication |
+| `--color-working` | `#8CB8A5` | Active work indication |
 | `--color-state-idle` | `#B8BEC2` | Idle character state |
-| `--color-state-listening` | `#A7D7C2` | Listening state |
-| `--color-state-thinking` | `#A7D7C2` | Thinking state |
-| `--color-state-speaking` | `#A7D7C2` | Speaking state |
-| `--color-state-working` | `#A7D7C2` | Working state |
-| `--color-state-success` | `#A7D7C2` | Completed state |
+| `--color-state-listening` | `#8CB8A5` | Listening state |
+| `--color-state-thinking` | `#8CB8A5` | Thinking state |
+| `--color-state-speaking` | `#8CB8A5` | Speaking state |
+| `--color-state-working` | `#8CB8A5` | Working state |
+| `--color-state-success` | `#8CB8A5` | Completed state |
 | `--color-state-error` | `#D88B83` | Error state |
 | `--color-state-paused` | `#D5AB72` | Paused state |
 
@@ -73,8 +74,8 @@ The old light-theme values (`rgb(248 250 253 / 0.9)`,
 and `#5b6779`) are replaced by the neutral light overrides in
 `src/renderer/index.css`.
 
-Most status colors remain grayscale. Sage marks selected/live and verified
-success states; errors and warnings use their distinct semantic treatment.
+Blue is reserved for interactive controls. Pix's mint remains character art;
+success, working and voice-state cues keep their existing semantic treatment.
 Approval, errors, success and recording remain identifiable through labels,
 icons, outlines, shape and motion as well as color; color is never their only
 signal.
@@ -105,12 +106,13 @@ renderer, `--pix-face` is `#0E1013`, `--pix-shell` is `#E6E9ED`,
 `--pix-shell-shadow` is `#AEB5BC`, `--pix-fold` is `#A7D7C2`,
 `--pix-fold-highlight` and `--pix-eye-highlight` are `#D6EDE3`, and
 `--pix-eye` is `#9BE5C7`. These values are scoped to the SVG character and its
-small state details. The application interaction accent is `#A7D7C2` in the
-dark theme; its hover is `#D6EDE3`, with `#101113` foreground. The light theme
-uses a darker sage for contrast.
+small state details. The application interaction accent is blue (`#4299F5` in
+the dark theme, `#1D70C9` in light theme); mascot colors are not tied to that
+token.
 
 Settings switches use the accent only when enabled. Disabled tracks remain
 charcoal with a light thumb; both states expose native checkbox behavior,
 `role="switch"`, `aria-checked`, keyboard operation and a visible focus ring.
 Automated tests cover semantics and selected theme rules; actual display
-contrast and screenshots at Windows 100% and 125% scaling remain pending.
+contrast and screenshots against the supplied Codex Settings reference at
+Windows scaling factors remain pending.

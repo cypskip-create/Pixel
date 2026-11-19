@@ -60,6 +60,7 @@ export interface SpeechResult {
 
 export class VoiceService {
   private speaking = false;
+  private playbackActive = false;
   private readonly activeControllers = new Set<AbortController>();
   private capabilityCache: VoiceCapability | null = null;
   private capabilityPending: Promise<VoiceCapability> | null = null;
@@ -267,7 +268,7 @@ export class VoiceService {
   }
 
   /** Speak through the explicitly selected local engine; never silently switch engines. */
-  async speak(text: string, settings?: VoiceSettings): Promise<SpeechResult> {
+  async speak(text: string, settings?: VoiceSettings, onPlaybackState?: (speaking: boolean) => void): Promise<SpeechResult> {
     if (process.platform !== 'win32') {
       return { ok: false, error: 'Speech is only supported on Windows.' };
     }
@@ -277,6 +278,13 @@ export class VoiceService {
     if (this.speaking) return { ok: false, error: 'Pixel is already speaking. Stop the current reply before starting another.' };
 
     this.speaking = true;
+    let playbackActive = false;
+    const setPlaybackActive = (active: boolean): void => {
+      if (playbackActive === active) return;
+      playbackActive = active;
+      this.playbackActive = active;
+      try { onPlaybackState?.(active); } catch { /* UI state reporting must not interrupt local speech. */ }
+    };
     const speakStartedAt = performance.now();
     const controller = new AbortController();
     this.activeControllers.add(controller);
@@ -306,7 +314,11 @@ export class VoiceService {
             if (!generated.ok) return { ok: false, error: generated.error.message };
             generationMs += generated.result.processingMs ?? 0;
             const playbackStarted = performance.now();
-            await runPowerShell(PLAY_WAV_SCRIPT, 120_000, controller.signal, { CYPS_AUDIO_FILE: outputPath });
+            try {
+              await runPowerShell(PLAY_WAV_SCRIPT, 120_000, controller.signal, { CYPS_AUDIO_FILE: outputPath }, () => setPlaybackActive(true));
+            } finally {
+              setPlaybackActive(false);
+            }
             playbackMs += performance.now() - playbackStarted;
           } finally {
             try { unlinkSync(outputPath); } catch { /* temporary speech is always best-effort cleaned */ }
@@ -315,15 +327,20 @@ export class VoiceService {
         return { ok: true, backend: 'Kokoro ONNX', generationMs, playbackMs: Math.round(playbackMs), elapsedMs: Math.round(performance.now() - speakStartedAt) };
       }
       const rate = Math.max(-10, Math.min(10, Math.round(((settings?.ttsRate ?? 1) - 1) * 25)));
-      await runPowerShell(SPEAK_SCRIPT, 300_000, controller.signal, {
-        CYPS_SPEAK_TEXT: clean,
-        CYPS_SPEAK_VOICE: settings?.ttsVoice ?? '',
-        CYPS_SPEAK_RATE: String(rate),
-      });
+      try {
+        await runPowerShell(SPEAK_SCRIPT, 300_000, controller.signal, {
+          CYPS_SPEAK_TEXT: clean,
+          CYPS_SPEAK_VOICE: settings?.ttsVoice ?? '',
+          CYPS_SPEAK_RATE: String(rate),
+        }, () => setPlaybackActive(true));
+      } finally {
+        setPlaybackActive(false);
+      }
       return { ok: true, backend: 'Windows System.Speech', elapsedMs: Math.round(performance.now() - speakStartedAt) };
     } catch (error) {
       return { ok: false, error: message(error) };
     } finally {
+      setPlaybackActive(false);
       this.speaking = false;
       this.activeControllers.delete(controller);
     }
@@ -331,6 +348,10 @@ export class VoiceService {
 
   isSpeaking(): boolean {
     return this.speaking;
+  }
+
+  isPlaybackActive(): boolean {
+    return this.playbackActive;
   }
 }
 
@@ -529,6 +550,7 @@ function runPowerShell(
   timeoutMs: number,
   signal?: AbortSignal,
   extraEnv: NodeJS.ProcessEnv = {},
+  onStarted?: () => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     // A signal that is already aborted never fires its listener, so check first.
@@ -550,6 +572,7 @@ function runPowerShell(
         else resolve(typeof stdout === 'string' ? stdout : '');
       },
     );
+    child.once('spawn', () => onStarted?.());
 
     signal?.addEventListener(
       'abort',

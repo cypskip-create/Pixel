@@ -133,7 +133,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
           disabled={pending}
           onClick={() => decide(true, 'once')}
           autoFocus
-          className="no-drag flex-1 rounded-xl border border-neutral-400/45 bg-neutral-500/25 px-3 py-2 text-[12px] font-semibold text-neutral-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/40 disabled:opacity-50"
+          className="no-drag flex-1 rounded-xl border border-transparent bg-[var(--color-accent)] px-3 py-2 text-[12px] font-semibold text-[var(--color-accent-foreground)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
         >
           Allow Once
         </button>
@@ -141,7 +141,7 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
           type="button"
           disabled={pending}
           onClick={() => decide(false, 'once')}
-          className="no-drag rounded-xl border border-neutral-400/40 bg-neutral-500/18 px-3 py-2 text-[12px] font-semibold text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/32 disabled:opacity-50"
+          className="no-drag rounded-xl border border-[color-mix(in_srgb,var(--color-destructive)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-destructive)_10%,transparent)] px-3 py-2 text-[12px] font-semibold text-[var(--color-ink)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-[color-mix(in_srgb,var(--color-destructive)_18%,transparent)] disabled:opacity-50"
         >
           Deny
         </button>

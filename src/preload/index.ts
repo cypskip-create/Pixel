@@ -341,6 +341,10 @@ const shell = {
   /** Speak text aloud with the installed Windows voice. */
   voiceSpeak: (text: string) =>
     ipcRenderer.invoke(CH.voiceSpeak, text) as Promise<{ ok: boolean; error?: string; backend?: string; generationMs?: number; playbackMs?: number; elapsedMs?: number }>,
+  /** Actual local audio playback transitions, broadcast to Pixel windows. */
+  onVoicePlaybackState: (handler: (speaking: boolean) => void): (() => void) =>
+    subscribe(CH.voicePlaybackState, handler),
+  voicePlaybackActive: () => ipcRenderer.invoke(CH.voicePlaybackGet) as Promise<boolean>,
 };
 
 contextBridge.exposeInMainWorld('cypsShell', shell);

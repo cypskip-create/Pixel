@@ -17,15 +17,24 @@ are stored durably; work interrupted by restart is restored as paused and is
 never resumed automatically. State-changing actions that lack postcondition
 evidence finish as **Needs verification**.
 
-The current uncommitted Experience Polish 5.0 working tree adds the official
-Pix mascot (silver shell, dark face, folded mint corner) to Workspace and the
-expanded Island, with a separate pointer-shaped Cursor Buddy. It also adds a
-bounded, home-scoped file search/metadata/folder/copy/rename subset and changes
-Settings switches to accessible, clearly distinct sage-on and charcoal-off
-states. These changes are not yet backed by a new GitHub Actions run, packaged
-build or laptop screenshots. See the
-[`Experience Polish 5.0 readiness report`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
+The current uncommitted Experience 5.1 working tree keeps the official Pix
+mascot and separate pointer-shaped Cursor Buddy, changes interactive controls
+from sage to blue while retaining Pix's mint artwork, adds category navigation
+to Workspace Settings, and places Pix in the compact Island assistant identity
+slot. Pixel Board adds an editable in-Workspace drawing scene with local draft
+recovery and `.pixelboard`, SVG and PNG export. It does not draw over Windows
+applications; the existing desktop guidance overlay remains passive. The
+frozen voice worker now configures its bundled eSpeak runtime explicitly, but
+the Windows frozen executable has not been rebuilt here. These changes have
+not yet been verified by a new GitHub Actions run, packaged build or laptop
+screenshots. See the
+[`Experience 5.1 readiness report`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
 for exact status and acceptance commands.
+
+The existing per-tool approvals and emergency-stop controls remain the source
+of computer-use authorization. The requested four-tier risk policy, reduced
+repeat approvals for Agent screen observation, interactive desktop drawing,
+and coordinate-based pointer fallback are not part of this change.
 
 Recent Chats restores conversations saved while `privacy.persistHistory` is
 enabled. Stored transcripts contain sanitized user-facing messages; disabling
@@ -64,7 +73,7 @@ when requested. Approval cards remain visible with the conversation; the mode
 selector and message composer stay compact until needed.
 
 Pixel uses a shared black-and-charcoal surface system across the Workspace and
-floating Island, with a restrained sage interactive accent and silver/mint Pix
+floating Island, with blue interactive controls and separate silver/mint Pix
 artwork. Visible surfaces are opaque; Windows Acrylic, Mica and CSS backdrop
 blur are not used. The approved P geometry is rendered in grayscale within the
 app. `npm run dev:gpu` is available for separate GPU

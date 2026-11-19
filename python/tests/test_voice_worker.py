@@ -80,21 +80,76 @@ class LocalVoiceBoundaryTests(unittest.TestCase):
             def phonemize(self, lines):
                 return ["pɪksəl"] if lines else []
 
+        configured = {}
+
+        class EspeakWrapper:
+            @staticmethod
+            def set_library(path):
+                configured["library"] = path
+
+            @staticmethod
+            def set_data_path(path):
+                configured["data"] = path
+
+        phonemizer = types.ModuleType("phonemizer")
+        phonemizer_backend = types.ModuleType("phonemizer.backend")
+        phonemizer_backend.EspeakBackend = EspeakBackend
+        phonemizer_espeak = types.ModuleType("phonemizer.backend.espeak")
+        phonemizer_wrapper = types.ModuleType("phonemizer.backend.espeak.wrapper")
+        phonemizer_wrapper.EspeakWrapper = EspeakWrapper
+
         modules = {
             "ctranslate2": types.SimpleNamespace(__version__="test"),
             "onnxruntime": types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"]),
             "faster_whisper": types.SimpleNamespace(WhisperModel=type("WhisperModel", (), {})),
             "kokoro_onnx": types.SimpleNamespace(Kokoro=type("Kokoro", (), {})),
-            "phonemizer": types.ModuleType("phonemizer"),
-            "phonemizer.backend": types.SimpleNamespace(EspeakBackend=EspeakBackend),
+            "espeakng_loader": types.SimpleNamespace(
+                get_library_path=lambda: "bundled/espeak-ng.dll",
+                get_data_path=lambda: "bundled/espeak-ng-data",
+            ),
+            "phonemizer": phonemizer,
+            "phonemizer.backend": phonemizer_backend,
+            "phonemizer.backend.espeak": phonemizer_espeak,
+            "phonemizer.backend.espeak.wrapper": phonemizer_wrapper,
         }
-        with patch.dict(sys.modules, modules):
+        with patch.dict(sys.modules, modules), patch.object(worker, "_retain_espeak_dll_directory"):
             result = worker.runtime_smoke_test({})
 
         self.assertTrue(result["onnxCpuProvider"])
         self.assertTrue(result["fasterWhisper"])
         self.assertTrue(result["kokoro"])
         self.assertTrue(result["espeakReady"])
+        self.assertEqual(configured, {"library": "bundled/espeak-ng.dll", "data": "bundled/espeak-ng-data"})
+
+    def test_runtime_smoke_reports_the_failing_native_initialization_stage(self):
+        class BrokenEspeakWrapper:
+            @staticmethod
+            def set_library(_path):
+                raise RuntimeError("unable to load C:\\private\\eSpeak\\espeak-ng.dll")
+
+        modules = {
+            "ctranslate2": types.SimpleNamespace(__version__="test"),
+            "onnxruntime": types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"]),
+            "faster_whisper": types.SimpleNamespace(WhisperModel=type("WhisperModel", (), {})),
+            "kokoro_onnx": types.SimpleNamespace(Kokoro=type("Kokoro", (), {})),
+            "espeakng_loader": types.SimpleNamespace(
+                get_library_path=lambda: "bundled/espeak-ng.dll",
+                get_data_path=lambda: "bundled/espeak-ng-data",
+            ),
+            "phonemizer": types.ModuleType("phonemizer"),
+            "phonemizer.backend": types.ModuleType("phonemizer.backend"),
+            "phonemizer.backend.espeak": types.ModuleType("phonemizer.backend.espeak"),
+            "phonemizer.backend.espeak.wrapper": types.SimpleNamespace(EspeakWrapper=BrokenEspeakWrapper),
+        }
+        with patch.dict(sys.modules, modules):
+            with patch.object(worker.os, "name", "posix"):
+                with self.assertRaises(worker.WorkerError) as caught:
+                    worker.runtime_smoke_test({})
+
+        self.assertEqual(caught.exception.code, "RUNTIME_SMOKE_FAILED")
+        self.assertIn("configure_bundled_espeak", caught.exception.message)
+        self.assertIn("RuntimeError", caught.exception.message)
+        self.assertNotIn("C:\\private", caught.exception.message)
 
     def test_runtime_smoke_rejects_missing_onnx_cpu_provider(self):
         modules = {

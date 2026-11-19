@@ -44,6 +44,7 @@ describe('companion state', () => {
     expect(deriveAssistantState({ ...base, taskOutcome: 'error' })).toBe('error');
     expect(deriveAssistantState({ ...base, taskOutcome: 'success', permission: true })).toBe('waiting_for_approval');
     expect(deriveAssistantState({ ...base, taskOutcome: 'success', stopped: true })).toBe('stopped');
+    expect(deriveAssistantState({ ...base, taskOutcome: 'success', streaming: true })).toBe('thinking');
   });
 
   it('returns to idle when no active signal remains', () => {

@@ -1,6 +1,6 @@
 # Pixel security model
 
-Updated: 2026-11-19 — Experience Polish 5.0 (adds bounded home-scoped file tools; retains Tools 4.2 controls).
+Updated: 2026-11-19 — Experience 5.1 (blue Settings states, compact Island Pix, local Pixel Board, and frozen-worker diagnostics; existing permission boundaries retained).
 
 ## Trust boundaries
 
@@ -17,10 +17,11 @@ Updated: 2026-11-19 — Experience Polish 5.0 (adds bounded home-scoped file too
 | Provider key | Electron `safeStorage` encrypts the DeepSeek key (DPAPI on Windows); if encryption is unavailable, Pixel refuses to persist it. The renderer never receives the plaintext key. | This is a provider API-key store, not a general-purpose credential vault. |
 | Screen capture and guidance | Capture requires the existing explicit screen approval. Window IDs remain opaque in the renderer; native capture revalidates exact window/process identity. The visual overlay accepts a revalidated unique UIA control, remains passive/click-through, expires, and clears on stale target, lock or emergency stop. | Vision output is model interpretation. Native capture and the visible overlay have not passed target-laptop acceptance; current native integration fails before producing a screenshot in this host. |
 | New everyday file operations | Experience Polish 5.0 search, metadata, directory creation, copy and rename are main-process tools in the existing registry. New paths are constrained to home scope; search is bounded and skips hidden, sensitive-name and symlink entries. Mutations avoid overwrite and verify destination postconditions. | No new clipboard read/write workflow was added. Real Pixel approval-card interaction and multi-step daily task UI remain unverified. |
+| Pixel Board | Board scene documents are validated in the renderer, drafts remain in the local Pixel profile, and explicit `.pixelboard`, SVG and PNG exports use user-triggered downloads. | The board is inside Workspace; it does not annotate another application's desktop, persist via main-owned files, capture screenshots, or provide PDF export. |
 
 ## Approval behavior
 
-- **High risk:** each operation asks again. The UI exposes Always Allow, Allow Once and Deny; Always Allow is disabled when policy disallows it, and main-process validation rejects forged/ineligible decisions.
+- **High risk:** an operation asks unless an existing eligible once/session grant matches it. The UI exposes Always Allow, Allow Once and Deny; Always Allow is disabled when policy disallows it, and main-process validation rejects forged/ineligible decisions.
 - **Always Allow:** only allow-listed application launches (Notepad, Calculator, Paint) and HTTPS browser navigation to the exact origin can persist. Other tools cannot receive a standing grant. A grant binds exact tool identity and target scope, is versioned, independently revocable, and only restored after current-policy validation.
 - **Once:** stored only in the main-process registry and consumed by the action path.
 - **Stop:** emergency stop blocks future tool dispatch, revokes stored and active grants, rejects a pending prompt, cancels the current task and terminates controllable workers.
@@ -35,6 +36,13 @@ require approval. Display and region capture requests are correlated to exact
 display IDs; ambiguous or stale identity fails closed. Captured images remain
 in memory in the screen service and are not persisted to chat/task history by
 default.
+
+The requested four-tier critical-risk classifier and automatic Agent/Hybrid
+execution matrix are not implemented in this checkpoint. Modes retain the
+existing registry policy and explicit grant system. There is no new per-task
+screen-observation session toggle; ordinary captures remain approval-gated.
+The desktop guidance renderer remains passive/click-through; interactive
+desktop drawing and coordinate-based pointer fallback are not exposed.
 
 ## Secret handling
 

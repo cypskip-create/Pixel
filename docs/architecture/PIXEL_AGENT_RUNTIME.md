@@ -50,6 +50,23 @@ verifies the destination before source deletion; a failed copy verification
 leaves the source intact. Clipboard orchestration and additional unrestricted
 application-control interfaces were not added in this checkpoint.
 
+## Experience 5.1 board and policy boundary
+
+`PixelBoard` is currently a renderer-owned Workspace vector editor. It supports
+bounded scene objects, local profile draft recovery, explicit `.pixelboard`
+save/open and SVG/PNG downloads. The scene is not an agent tool and does not
+write through the main process, annotate another application's window, or
+provide PDF/screenshot import. The separate desktop guidance overlay remains
+passive and UIA-bound.
+
+The requested four-tier consequence classifier and automatic Hybrid/Agent
+approval matrix are not implemented. Tool authorization still follows
+`ToolDefinition.requiresApproval`, `changesState`, mode restrictions, and
+explicit once/session grants. Reuse remains limited by the existing grant
+scope rules; a new Agent screen-observation session grant has not been added.
+No policy change in this checkpoint turns observation or computer control into
+silent background access.
+
 ## Durable state and restart behavior
 
 SQLite migration 6 includes task snapshots/events, project memories, versioned skills and durable routine occurrences. Each task snapshot is Zod-validated, written transactionally with a compact status/step event, and redacted before storage. A malformed task row is skipped rather than preventing other rows from loading.
@@ -66,7 +83,7 @@ Task snapshots preserve a sanitized request and result, step metadata, budget co
 - Browser actions share a session and close it during cancellation/shutdown. Actions already completed on a website or in Windows cannot be rolled back.
 - The native C# helper is attached to `ToolExecutors`. It observes the foreground title and bounded UIA name/AutomationId matches, and it can invoke only one exact, unique, enabled `InvokePattern` element in the same foreground window named in the approval. Every invocation includes an expected exact visible UIA control state (`present` or `absent`); the helper confirms that state did not already hold before activation. `verify_ui_state` checks the postcondition in the same exact foreground window. Incomplete UIA trees fail closed. The helper does not type or click by coordinates.
 - `DesktopInputLease` serializes `type_text` and `invoke_ui_element`. Text entry requires an expected window title and checks it inside the Windows input process immediately before sending. A focus change can still race after that check.
-- The optional cursor companion uses bounded shared spring and work-area placement functions in an independent 36 DIP transparent, non-focusable, click-through BrowserWindow; its pointer artwork is 28 DIP. It is hidden while the Island is expanded/hidden, a Pixel Settings or Workspace window is visible, or the session is locked/suspended. Resume snaps to the current pointer. It does not use desktop input or screen capture.
+- The optional cursor companion uses bounded shared spring and work-area placement functions in an independent 36 DIP transparent, non-focusable, click-through BrowserWindow; its pointer artwork is 28 DIP. It continues across Workspace and Island state, is hidden while Pixel Settings is visible or the session is locked/suspended, and snaps to the current pointer on resume. It does not use desktop input or screen capture.
 
 ## Screen observation and visual guidance
 

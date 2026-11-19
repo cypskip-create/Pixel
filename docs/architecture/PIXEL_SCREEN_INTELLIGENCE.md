@@ -69,6 +69,7 @@ Region crops must be contained by, or intersect only, one monitor. Pixel clips a
 - Visual analysis is model-inferred and marked as such. The current highlight tool only accepts exact UI Automation controls; it does not turn model-guessed coordinates into verified targets.
 - UI Automation only sees controls exposed by the target app. An inaccessible control is reported as not found or ambiguous; Pixel will not draw a guessed highlight.
 - A real Pixel GUI startup, overlay click-through, emergency-stop cleanup and Notepad/Windows Settings end-to-end run have not passed in this environment. See \`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md\`.
+- The new Pixel Board is an editable scene inside Workspace with local draft recovery and user-triggered \`.pixelboard\`, SVG and PNG downloads. It does not draw over another application. The desktop guidance overlay remains passive; interactive overlay editing, persistent desktop annotations, screenshot insertion, PDF export and coordinate-click fallback were not added in this checkpoint.
 
 ## References
 

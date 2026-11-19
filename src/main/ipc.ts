@@ -1337,10 +1337,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (typeof text !== 'string' || text.trim().length === 0) {
       return { ok: false, error: 'There is nothing to say.' };
     }
-    const result = await voice.speak(text, settings.get().voice);
+    const result = await voice.speak(text, settings.get().voice, (speaking) => {
+      context.sendToRenderer(CHANNELS.voicePlaybackState, speaking);
+    });
     audit.record('system', result.ok ? 'Spoke a reply' : 'Speech failed', result.ok ? 'ok' : 'error');
     return result;
   });
+  registerHandler(CHANNELS.voicePlaybackGet, () => voice.isPlaybackActive());
 
   /* ------------------------------- audit ----------------------------- */
 

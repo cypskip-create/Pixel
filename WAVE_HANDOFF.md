@@ -1,8 +1,51 @@
 # Pixel implementation handoff
 
+## Current uncommitted checkpoint — Experience 5.1 & Tools 5.2
+
+Reviewed base: `47d1db1284c7860ec52ddf1f6dd50bf532a2f8b4` (`main`). The user
+will commit and push; no commit, push, workflow trigger or release was created.
+
+- Windows Actions run `44542308139` (run 29 on this base SHA) passed through
+  typecheck, worker safety, sandbox preload, full suite and native-helper
+  compilation. Packaging failed at the frozen runtime smoke with
+  `RUNTIME_SMOKE_FAILED` / `RuntimeError`; artifact upload then succeeded. The
+  log does not identify the failing native call. Source inspection found no
+  explicit eSpeak path setup, a plausible cause. The worker now configures
+  bundled paths, retains the Windows DLL-directory handle and reports a
+  redacted stage. Python unit coverage passes; the frozen Windows binary and a
+  new Actions run still need verification.
+- Workspace Settings now has supported, persisted category navigation. Charcoal
+  values align with the supplied Codex screenshot; blue is used for controls
+  and a small selected-nav indicator, while Pix's mint art remains unchanged.
+  Screenshots and scaling comparison are still outstanding.
+- The compact Island uses animated Pix in the assistant identity slot, while
+  the Pixel P stays in the brand lockup. Task terminal states now briefly feed
+  Pix success/error expression and active signals keep higher priority.
+- Actual TTS playback start/stop now originates in the main-process voice
+  service and is broadcast through typed preload methods to Island, Workspace
+  and Settings windows. A focused test verifies late initial-state responses
+  cannot overwrite live playback changes; real Windows audio/UI timing remains
+  unverified.
+- Pixel Board is an in-Workspace editable vector board with local draft
+  recovery, object creation/move/remove, undo/redo, `.pixelboard` save/open,
+  and SVG/PNG export. It does not annotate the Windows desktop. The
+  click-through guidance overlay remains separate and passive.
+- The four-tier critical-action policy, per-task Agent observation toggle,
+  interactive desktop drawing, screenshot insertion, PDF export and
+  coordinate-based input are not implemented. Existing security controls have
+  not been weakened.
+- Final changed-code checks: typecheck and production build passed; Vitest
+  **839 passed, 27 skipped, 0 failed (866 total; 57 files passed, 1 skipped)**;
+  Python worker tests **12/12**; native helper compiled and its protocol smoke
+  completed. The sandbox preload smoke failed with `0x80000003`, and the
+  Python 3.12 frozen build, NSIS, Actions rerun, packaged GPU behavior and real
+  Windows screenshots remain unverified.
+
+See [`docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md) for the previous 5.0 record and updated 5.1 follow-up.
+
 Updated: 2026-11-19
 
-## Current handoff — Experience Polish 5.0 and official Pix
+## Historical handoff — Experience Polish 5.0 and official Pix
 
 Base SHA reviewed: `6ac637e2149872e112b78177b3dcda41c2c8c764`.
 Branch: `codex/interaction-engine-3`. All work below remains uncommitted for
