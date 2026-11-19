@@ -18,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { terminateProcessTree } from '../services/process';
 import type { PythonWorker } from '../services/python-worker';
+import type { VoiceSettings } from '../../shared/types';
+import type { VoiceModelManager } from './models';
 
 /** Longest single dictation window. */
 export const MAX_LISTEN_MS = 20_000;
@@ -32,7 +34,13 @@ export interface VoiceCapability {
 export interface RecognitionResult {
   ok: boolean;
   text: string;
-  confidence: number;
+  /** Present only when the active recognizer reports a real confidence value. */
+  confidence?: number;
+  language?: string;
+  model?: string;
+  backend?: string;
+  audioSeconds?: number;
+  processingMs?: number;
   error?: string;
   /** True when the recognizer heard nothing rather than failing. */
   noSpeech?: boolean;
@@ -44,12 +52,12 @@ export class VoiceService {
   private capabilityCache: VoiceCapability | null = null;
   private capabilityPending: Promise<VoiceCapability> | null = null;
 
-  constructor(private readonly pythonWorker?: PythonWorker) {
+  constructor(private readonly pythonWorker?: PythonWorker, private readonly voiceModels?: VoiceModelManager) {
     // A forced process exit can bypass finally; delete only Pixel's generated
     // short-lived voice buffers from an earlier run when the service restarts.
     try {
       for (const name of readdirSync(tmpdir())) {
-        const match = /^pixel-voice-(\d+)-[a-f0-9-]+\.wav$/i.exec(name);
+        const match = /^pixel-voice-(?:tts-)?(\d+)-[a-f0-9-]+\.wav$/i.exec(name);
         if (match && Number(match[1]) !== process.pid) {
           try { unlinkSync(join(tmpdir(), name)); } catch { /* leave files owned by another active Pixel process */ }
         }
@@ -62,6 +70,23 @@ export class VoiceService {
     const controllers = [...this.activeControllers];
     for (const controller of controllers) controller.abort();
     return controllers.length;
+  }
+
+  hasActiveOperations(): boolean {
+    return this.activeControllers.size > 0;
+  }
+
+  async installedSystemVoices(): Promise<string[]> {
+    if (process.platform !== 'win32') return [];
+    try {
+      const output = await runPowerShell(VOICES_SCRIPT, 10_000);
+      const parsed: unknown = JSON.parse(output.trim());
+      return Array.isArray(parsed)
+        ? parsed.filter((name): name is string => typeof name === 'string' && name.length <= 160).slice(0, 64)
+        : [];
+    } catch {
+      return [];
+    }
   }
 
   /** Probe the machine once and cache the answer. */
@@ -85,29 +110,34 @@ export class VoiceService {
     }
 
     try {
-      const [systemResult, pythonResult] = await Promise.allSettled([
+      const [systemResult, pythonResult, modelResult, ttsAssets] = await Promise.allSettled([
         runPowerShell(CAPABILITY_SCRIPT, 15_000).then(parseCapability),
         this.pythonWorker?.capabilities() ?? Promise.resolve(null),
+        this.voiceModels?.list() ?? Promise.resolve([]),
+        this.voiceModels?.getTtsAssets() ?? Promise.resolve(null),
       ]);
       const system = systemResult.status === 'fulfilled' ? systemResult.value : null;
       const python = pythonResult.status === 'fulfilled' && pythonResult.value?.ok
         ? pythonResult.value.result
         : null;
       const fasterWhisper = python?.optional.faster_whisper === true;
-      const speechToText = Boolean(system?.speechToText || fasterWhisper);
-      const textToSpeech = Boolean(system?.textToSpeech);
+      const models = modelResult.status === 'fulfilled' ? modelResult.value : [];
+      const localSttReady = fasterWhisper && models.some((item) => item.kind === 'stt' && item.valid);
+      const localTtsReady = ttsAssets.status === 'fulfilled' && ttsAssets.value !== null && python?.optional.kokoro_onnx === true;
+      const speechToText = Boolean(system?.speechToText || localSttReady);
+      const textToSpeech = Boolean(system?.textToSpeech || localTtsReady);
       if (!speechToText && !textToSpeech) {
         return {
           speechToText: false,
           textToSpeech: false,
-          reason: 'No local speech recognizer or voice is available for this Windows account.',
+          reason: 'No downloaded local speech model, compatible worker, Windows recognizer or system voice is available.',
         };
       }
       return {
         speechToText,
         textToSpeech,
-        ...(fasterWhisper && !system?.speechToText
-          ? { reason: 'Offline faster-whisper is installed. Pixel will check for the selected local model when you transcribe.' }
+        ...(localSttReady && !system?.speechToText
+          ? { reason: 'A downloaded offline speech model is available in Pixel.' }
           : undefined),
       };
     } catch (error) {
@@ -125,7 +155,7 @@ export class VoiceService {
    */
   async listen(options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<RecognitionResult> {
     if (process.platform !== 'win32') {
-      return { ok: false, text: '', confidence: 0, error: 'Voice input is only supported on Windows.' };
+      return { ok: false, text: '', error: 'Voice input is only supported on Windows.' };
     }
 
     const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 8_000, 1_000), MAX_LISTEN_MS);
@@ -143,13 +173,12 @@ export class VoiceService {
         return {
           ok: false,
           text: '',
-          confidence: 0,
           error: 'The speech recognizer returned nothing usable.',
         };
       }
       return parsed;
     } catch (error) {
-      return { ok: false, text: '', confidence: 0, error: message(error) };
+      return { ok: false, text: '', error: message(error) };
     } finally {
       options.signal?.removeEventListener('abort', onParentAbort);
       this.activeControllers.delete(controller);
@@ -159,11 +188,11 @@ export class VoiceService {
   /** Transcribe a short, in-memory mono 16 kHz PCM WAV captured by the renderer. */
   async transcribeWav(input: Uint8Array, signal?: AbortSignal, model = 'base.en'): Promise<RecognitionResult> {
     if (process.platform !== 'win32') {
-      return { ok: false, text: '', confidence: 0, error: 'Voice input is only supported on Windows.' };
+      return { ok: false, text: '', error: 'Voice input is only supported on Windows.' };
     }
     const validation = validateVoiceWav(input);
-    if (validation) return { ok: false, text: '', confidence: 0, error: validation };
-    if (signal?.aborted) return { ok: false, text: '', confidence: 0, error: 'Transcription was cancelled.' };
+    if (validation) return { ok: false, text: '', error: validation };
+    if (signal?.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
 
     const file = join(tmpdir(), `pixel-voice-${process.pid}-${randomUUID()}.wav`);
     const controller = new AbortController();
@@ -173,31 +202,38 @@ export class VoiceService {
 
     try {
       writeFileSync(file, Buffer.from(input), { flag: 'wx', mode: 0o600 });
-      if (this.pythonWorker && !controller.signal.aborted) {
+      if (this.pythonWorker && this.voiceModels && !controller.signal.aborted) {
         try {
-          const capabilities = await this.pythonWorker.capabilities();
-          if (capabilities.ok && capabilities.result.optional.faster_whisper === true) {
-            const preferredModel = resolveWhisperModel(model);
-            const whisper = await this.pythonWorker.transcribeAudio(file, preferredModel, controller.signal);
+          const preferredModel = resolveWhisperModel(model);
+          const modelPath = await this.voiceModels.getSttModelPath(preferredModel);
+          if (modelPath) {
+            const capabilities = await this.pythonWorker.capabilities();
+            if (!capabilities.ok || capabilities.result.optional.faster_whisper !== true) {
+              return { ok: false, text: '', error: 'Pixel’s packaged local speech runtime is unavailable. Reinstall Pixel to repair it.' };
+            }
+            const whisper = await this.pythonWorker.transcribeAudio(file, preferredModel, modelPath, controller.signal);
             if (whisper.ok) {
               const text = whisper.result.text.trim().replace(/\s+/g, ' ');
-              if (text.length < 2) return { ok: false, text: '', confidence: 0, noSpeech: true, error: 'No speech was detected.' };
-              return { ok: true, text, confidence: 0 };
+              if (text.length < 2) return { ok: false, text: '', noSpeech: true, error: 'No speech was detected.' };
+              return {
+                ok: true, text,
+                ...(whisper.result.language ? { language: whisper.result.language } : {}),
+                model: preferredModel,
+                backend: whisper.result.backend ?? 'faster-whisper/cpu-int8',
+                ...(typeof whisper.result.audioSeconds === 'number' ? { audioSeconds: whisper.result.audioSeconds } : {}),
+                ...(typeof whisper.result.processingMs === 'number' ? { processingMs: whisper.result.processingMs } : {}),
+              };
             }
-            if (whisper.error.code === 'NO_TEXT') {
-              return { ok: false, text: '', confidence: 0, noSpeech: true, error: whisper.error.message };
-            }
-            if (whisper.error.code === 'CANCELLED' || controller.signal.aborted) {
-              return { ok: false, text: '', confidence: 0, error: 'Transcription was cancelled.' };
-            }
-            // A missing model or failed optional backend falls through to the
-            // Windows local recognizer. No model is downloaded automatically.
+            if (whisper.error.code === 'NO_TEXT') return { ok: false, text: '', noSpeech: true, error: whisper.error.message };
+            if (whisper.error.code === 'CANCELLED' || controller.signal.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
+            return { ok: false, text: '', error: whisper.error.message };
           }
-        } catch {
-          // Optional Python inference does not prevent the Windows fallback.
+        } catch (error) {
+          if (controller.signal.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
+          return { ok: false, text: '', error: message(error) };
         }
       }
-      if (controller.signal.aborted) return { ok: false, text: '', confidence: 0, error: 'Transcription was cancelled.' };
+      if (controller.signal.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
       const output = await runPowerShell(
         buildWaveRecognitionScript(MAX_LISTEN_MS),
         MAX_LISTEN_MS + 10_000,
@@ -205,9 +241,9 @@ export class VoiceService {
         { CYPS_AUDIO_FILE: file },
       );
       const parsed = parseRecognition(output);
-      return parsed ?? { ok: false, text: '', confidence: 0, error: 'The speech recognizer returned nothing usable.' };
+      return parsed ? { ...parsed, backend: 'Windows System.Speech' } : { ok: false, text: '', error: 'The speech recognizer returned nothing usable.' };
     } catch (error) {
-      return { ok: false, text: '', confidence: 0, error: message(error) };
+      return { ok: false, text: '', error: message(error) };
     } finally {
       signal?.removeEventListener('abort', onParentAbort);
       this.activeControllers.delete(controller);
@@ -215,8 +251,8 @@ export class VoiceService {
     }
   }
 
-  /** Speak text with the installed system voice. */
-  async speak(text: string): Promise<{ ok: boolean; error?: string }> {
+  /** Speak through the explicitly selected local engine; never silently switch engines. */
+  async speak(text: string, settings?: VoiceSettings): Promise<{ ok: boolean; error?: string }> {
     if (process.platform !== 'win32') {
       return { ok: false, error: 'Speech is only supported on Windows.' };
     }
@@ -225,14 +261,40 @@ export class VoiceService {
     if (clean.length > 2_000) {
       return { ok: false, error: 'That text is too long to speak in one go.' };
     }
+    if (this.speaking) return { ok: false, error: 'Pixel is already speaking. Stop the current reply before starting another.' };
 
     this.speaking = true;
     const controller = new AbortController();
     this.activeControllers.add(controller);
     try {
-      // The text is passed through the environment so it cannot break out of
-      // the PowerShell command.
-      await runPowerShell(SPEAK_SCRIPT, 60_000, controller.signal, { CYPS_SPEAK_TEXT: clean });
+      if (settings?.ttsEngine === 'kokoro') {
+        if (!this.pythonWorker || !this.voiceModels) return { ok: false, error: 'Pixel’s neural speech runtime is unavailable.' };
+        const assets = await this.voiceModels.getTtsAssets();
+        if (!assets) return { ok: false, error: 'Download the Kokoro voice model in Settings before selecting it.' };
+        const outputPath = join(tmpdir(), `pixel-voice-tts-${process.pid}-${randomUUID()}.wav`);
+        try {
+          const generated = await this.pythonWorker.synthesizeKokoro(
+            clean,
+            settings.ttsVoice ?? 'af_heart',
+            settings.ttsRate,
+            assets.modelPath,
+            assets.voicesPath,
+            outputPath,
+            controller.signal,
+          );
+          if (!generated.ok) return { ok: false, error: generated.error.message };
+          await runPowerShell(PLAY_WAV_SCRIPT, 120_000, controller.signal, { CYPS_AUDIO_FILE: outputPath });
+          return { ok: true };
+        } finally {
+          try { unlinkSync(outputPath); } catch { /* temporary speech is always best-effort cleaned */ }
+        }
+      }
+      const rate = Math.max(-10, Math.min(10, Math.round(((settings?.ttsRate ?? 1) - 1) * 25)));
+      await runPowerShell(SPEAK_SCRIPT, 60_000, controller.signal, {
+        CYPS_SPEAK_TEXT: clean,
+        CYPS_SPEAK_VOICE: settings?.ttsVoice ?? '',
+        CYPS_SPEAK_RATE: String(rate),
+      });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: message(error) };
@@ -329,9 +391,26 @@ export const SPEAK_SCRIPT = [
   '$ErrorActionPreference = "Stop";',
   'Add-Type -AssemblyName System.Speech;',
   '$tts = [System.Speech.Synthesis.SpeechSynthesizer]::new();',
+  'if ($env:CYPS_SPEAK_VOICE) { $tts.SelectVoice($env:CYPS_SPEAK_VOICE); }',
+  '$tts.Rate = [Math]::Max(-10, [Math]::Min(10, [int]$env:CYPS_SPEAK_RATE));',
   '$tts.Speak($env:CYPS_SPEAK_TEXT);',
   '$tts.Dispose();',
   'Write-Output "SPOKEN"',
+].join(' ');
+
+export const PLAY_WAV_SCRIPT = [
+  '$ErrorActionPreference = "Stop";',
+  '$player = [System.Media.SoundPlayer]::new($env:CYPS_AUDIO_FILE);',
+  'try { $player.Load(); $player.PlaySync(); } finally { $player.Dispose(); }',
+].join(' ');
+
+export const VOICES_SCRIPT = [
+  '$ErrorActionPreference = "Stop";',
+  'Add-Type -AssemblyName System.Speech;',
+  '$tts = [System.Speech.Synthesis.SpeechSynthesizer]::new();',
+  '$names = @($tts.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name });',
+  '$tts.Dispose();',
+  'ConvertTo-Json -InputObject $names -Compress',
 ].join(' ');
 
 /* -------------------------------------------------------------------- *
@@ -352,7 +431,7 @@ export function parseCapability(output: string): { speechToText: boolean; textTo
 export function parseRecognition(output: string): RecognitionResult | null {
   const trimmed = output.trim();
   if (trimmed.includes('NORESULT')) {
-    return { ok: false, text: '', confidence: 0, noSpeech: true, error: 'No speech was detected.' };
+    return { ok: false, text: '', noSpeech: true, error: 'No speech was detected.' };
   }
 
   const match = /RESULT\|(.*)\|([\d.]+)/.exec(trimmed);
@@ -361,13 +440,13 @@ export function parseRecognition(output: string): RecognitionResult | null {
   const text = match[1].trim();
   const confidence = Number(match[2]);
   if (text.length === 0) {
-    return { ok: false, text: '', confidence: 0, noSpeech: true, error: 'No speech was detected.' };
+    return { ok: false, text: '', noSpeech: true, error: 'No speech was detected.' };
   }
 
   return {
     ok: true,
     text,
-    confidence: Number.isFinite(confidence) ? confidence : 0,
+    confidence: Number.isFinite(confidence) ? confidence : undefined,
   };
 }
 

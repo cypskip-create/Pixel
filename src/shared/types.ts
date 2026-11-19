@@ -241,15 +241,37 @@ export type VisualMode = (typeof VISUAL_MODES)[number];
 export const ANIMATION_LEVELS = ['full', 'reduced', 'off'] as const;
 export type AnimationLevel = (typeof ANIMATION_LEVELS)[number];
 
+export type VoiceSttModel = 'tiny.en' | 'base.en' | 'small.en';
+export type VoiceSynthesisEngine = 'system' | 'kokoro';
+
+export interface VoiceModelInfo {
+  id: VoiceSttModel | 'kokoro-v1.0-int8';
+  label: string;
+  kind: 'stt' | 'tts';
+  sizeBytes: number;
+  downloaded: boolean;
+  valid: boolean;
+  license: string;
+  source: string;
+}
+
+export interface VoiceModelProgress {
+  id: VoiceModelInfo['id'];
+  receivedBytes: number;
+  totalBytes: number;
+  percent: number;
+}
+
 export interface VoiceSettings {
   /** Push-to-talk keybinding (Electron accelerator syntax). */
   pushToTalkAccelerator: string;
   /** Selected microphone device id, or null for system default. */
   inputDeviceId: string | null;
   /** Local speech-to-text model size for faster-whisper. */
-  sttModel: string;
+  sttModel: VoiceSttModel;
   /** Speak replies using local TTS. */
   ttsEnabled: boolean;
+  ttsEngine: VoiceSynthesisEngine;
   ttsVoice: string | null;
   ttsRate: number;
 }
@@ -325,6 +347,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     inputDeviceId: null,
     sttModel: 'base.en',
     ttsEnabled: false,
+    ttsEngine: 'system',
     ttsVoice: null,
     ttsRate: 1,
   },
@@ -380,6 +403,13 @@ export function mergeSettings(partial: unknown): AppSettings {
   if (!MODES.includes(base.companion.mode)) base.companion.mode = DEFAULT_MODE;
   if (migrateCursorPresentation) base.companion.cursorCompanionEnabled = true;
   sanitiseCompanion(base.companion);
+  if (!['tiny.en', 'base.en', 'small.en'].includes(base.voice.sttModel)) base.voice.sttModel = DEFAULT_SETTINGS.voice.sttModel;
+  if (typeof base.voice.ttsEnabled !== 'boolean') base.voice.ttsEnabled = DEFAULT_SETTINGS.voice.ttsEnabled;
+  if (!['system', 'kokoro'].includes(base.voice.ttsEngine)) base.voice.ttsEngine = DEFAULT_SETTINGS.voice.ttsEngine;
+  if (typeof base.voice.inputDeviceId !== 'string' || base.voice.inputDeviceId.trim().length === 0) base.voice.inputDeviceId = null;
+  if (typeof base.voice.ttsVoice !== 'string' || base.voice.ttsVoice.trim().length === 0 ||
+      base.voice.ttsVoice.length > 160 || /[\u0000-\u001f\u007f]/.test(base.voice.ttsVoice)) base.voice.ttsVoice = null;
+  base.voice.ttsRate = finiteWithin(base.voice.ttsRate, 0.7, 1.3, DEFAULT_SETTINGS.voice.ttsRate);
 
   return base;
 }

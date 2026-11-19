@@ -2,7 +2,49 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
-## Current checkpoint — Tools 4.1 screen intelligence and visual guidance
+## Current checkpoint — Voice Engine 4.0 local implementation
+
+Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Source HEAD before
+these working-tree edits: `1e822c92222a8ca13cc94546eff7d7da5a8f7b60`. Changes
+are uncommitted; no checkpoint commit, push or release was made.
+
+- Added a supervised local voice worker path, allowlisted integrity-checked
+  optional faster-whisper and Kokoro model downloads, model status/removal and
+  progress UI, Windows/system and Kokoro speech selection, cancellation, and a
+  typed `window.cypsShell` boundary. Existing Pixel recording/PTT, manual
+  dictation, monochrome UI, permissions, emergency stop and provider flow are
+  retained.
+- The selected STT implementation is the existing Python worker extended with
+  faster-whisper, rather than Handy's Rust/transcribe.cpp runtime. The worker
+  is intended to be bundled as an on-demand PyInstaller onedir executable;
+  models remain optional downloads in Electron user data. Kokoro ONNX is the
+  optional neural TTS implementation; Windows System.Speech remains an
+  explicit system engine. No speech API is used, and synthesis errors do not
+  silently switch engines.
+- `npm run typecheck`: passed. `npm run build`: passed (main, sandbox preload,
+  renderer and icon). Full Vitest: **793 passed, 0 failed, 27 skipped (820
+  total; 49 files passed, 1 skipped)**. Skips: 17 Chromium-dependent browser
+  cases (Playwright Chromium absent), 7 NSIS cases (`makensis` absent), and 3
+  opt-in native foreground desktop tests. `npm run build:native` passed. Python
+  worker boundary suite: **4 passed, 0 failed**; `python -m compileall -q
+  python/pixel_worker python/tests` passed.
+- The packaged voice worker was **not built**. `npm run build:voice-worker`
+  stopped before creating its environment because the host has Python 3.15.2
+  only; the script and pinned runtime require Python 3.12 x64. Consequently no
+  current-tree unpacked app, portable executable or installer was built, and
+  the packaged worker's DLL discovery and app launch are unverified.
+- No Handy or candidate-engine benchmark, model inference, real microphone or
+  speaker test, offline run, or actual Windows GUI acceptance was performed
+  for this tree. There is no CI run for the uncommitted edits. Do not treat
+  capability probes or unit tests as real-device speech evidence. See
+  [`docs/validation/PIXEL_VOICE_READINESS.md`](docs/validation/PIXEL_VOICE_READINESS.md)
+  and [`docs/validation/PIXEL_VOICE_ACCEPTANCE.md`](docs/validation/PIXEL_VOICE_ACCEPTANCE.md)
+  for evidence, limitations and exact laptop steps.
+
+Sections below describe earlier checkpoints; their HEADs and test totals are
+historical and do not describe this current working tree.
+
+## Previous checkpoint — Tools 4.1 screen intelligence and visual guidance
 
 Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Local HEAD:
 `ea110700e37173b2a88708bf617b2b17dbeed9bf`. The working tree contains the
@@ -57,7 +99,7 @@ See [`docs/architecture/PIXEL_SCREEN_INTELLIGENCE.md`](docs/architecture/PIXEL_S
 and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
 for implementation boundaries, exact commands and the target-laptop procedure.
 
-## Current checkpoint — Monochrome design and cursor companion repair
+## Previous checkpoint — Monochrome design and cursor companion repair
 
 Branch: `codex/interaction-engine-3`. Current local HEAD: `7f10c058c70545f760923eb5b01b5da7764ca773`. Its tree (`9ff6f70cd0b0dd92cfb22d50e89c7d6168460cf5`) matches latest reviewed `main` commit `fce3128f42dd540e15f85c13a300105727784e02` before these local edits. This checkpoint is implemented in the working tree and remains uncommitted; the user will commit and push. No files, settings, history or credentials were reset.
 

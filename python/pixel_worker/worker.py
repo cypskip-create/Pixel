@@ -25,7 +25,10 @@ import io
 import json
 import os
 import sys
+import tempfile
+import time
 import traceback
+import wave
 from functools import lru_cache
 from typing import Any, Callable, Dict
 
@@ -80,6 +83,7 @@ def capabilities() -> Dict[str, Any]:
     caps["optional"]["ocr"] = probe("pytesseract") and probe("PIL")
     caps["optional"]["embeddings"] = probe("sentence_transformers") or probe("onnxruntime")
     caps["optional"]["faster_whisper"] = probe("faster_whisper")
+    caps["optional"]["kokoro_onnx"] = probe("kokoro_onnx")
 
     if pymupdf:
         caps["formats"].append("pdf")
@@ -258,8 +262,27 @@ def extract(params: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _controlled_model_path(raw: Any, model_id: str, filename: str | None = None) -> str:
+    root = os.environ.get("PIXEL_VOICE_MODEL_ROOT")
+    if not root or not isinstance(raw, str) or not raw:
+        raise WorkerError("MODEL_UNAVAILABLE", "Download the selected local voice model in Pixel Settings first.")
+    root_path = os.path.realpath(root)
+    expected_dir = os.path.realpath(os.path.join(root_path, model_id))
+    candidate = os.path.realpath(raw)
+    try:
+        inside_root = os.path.commonpath([root_path, candidate]) == root_path
+    except ValueError:
+        inside_root = False
+    expected = os.path.realpath(os.path.join(expected_dir, filename)) if filename else expected_dir
+    if not inside_root or candidate != expected:
+        raise WorkerError("BAD_REQUEST", "The requested model path is outside Pixel's voice-model directory.")
+    if not os.path.exists(candidate):
+        raise WorkerError("MODEL_UNAVAILABLE", "The selected local voice model is missing. Download or reinstall it in Pixel Settings.")
+    return candidate
+
+
 @lru_cache(maxsize=1)
-def _load_whisper_model(model_name: str) -> Any:
+def _load_whisper_model(model_path: str) -> Any:
     try:
         from faster_whisper import WhisperModel
     except Exception as exc:
@@ -269,7 +292,7 @@ def _load_whisper_model(model_name: str) -> Any:
     os.environ["HF_HUB_OFFLINE"] = "1"
     try:
         return WhisperModel(
-            model_name,
+            model_path,
             device="cpu",
             compute_type="int8",
             cpu_threads=max(1, min(os.cpu_count() or 1, 4)),
@@ -279,7 +302,7 @@ def _load_whisper_model(model_name: str) -> Any:
     except Exception as exc:
         raise WorkerError(
             "CAPABILITY_MISSING",
-            f"The local faster-whisper model '{model_name}' is not installed in the offline model cache.",
+            "The downloaded local speech model could not be loaded.",
         ) from exc
 
 
@@ -291,7 +314,13 @@ def transcribe_audio(params: Dict[str, Any]) -> Dict[str, Any]:
     if model_name not in {"tiny.en", "base.en", "small.en"}:
         raise WorkerError("BAD_REQUEST", "Choose tiny.en, base.en, or small.en for local English transcription.")
 
-    model = _load_whisper_model(model_name)
+    model_path = _controlled_model_path(params.get("model_path"), model_name)
+    for required in ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt"):
+        if not os.path.isfile(os.path.join(model_path, required)):
+            raise WorkerError("MODEL_UNAVAILABLE", "The selected local speech model is incomplete. Reinstall it in Pixel Settings.")
+
+    started = time.perf_counter()
+    model = _load_whisper_model(model_path)
     try:
         segments, info = model.transcribe(
             path,
@@ -306,7 +335,69 @@ def transcribe_audio(params: Dict[str, Any]) -> Dict[str, Any]:
         raise WorkerError("DECODE_ERROR", "The local speech model could not decode this recording.") from exc
     if not text:
         raise WorkerError("NO_TEXT", "No speech was detected in the recording.")
-    return {"text": text, "language": getattr(info, "language", "en")}
+    return {
+        "text": text,
+        "language": getattr(info, "language", "en"),
+        "audioSeconds": getattr(info, "duration", None),
+        "processingMs": round((time.perf_counter() - started) * 1000),
+        "backend": "faster-whisper/cpu-int8",
+    }
+
+
+@lru_cache(maxsize=1)
+def _load_kokoro(model_path: str, voices_path: str) -> Any:
+    try:
+        from kokoro_onnx import Kokoro
+    except Exception as exc:
+        raise WorkerError("CAPABILITY_MISSING", "Pixel's neural speech runtime is not installed.") from exc
+    try:
+        return Kokoro(model_path, voices_path)
+    except Exception as exc:
+        raise WorkerError("MODEL_UNAVAILABLE", "The local neural speech model could not be loaded.") from None
+
+
+def synthesize_kokoro(params: Dict[str, Any]) -> Dict[str, Any]:
+    text = params.get("text")
+    voice = params.get("voice", "af_heart")
+    speed = params.get("speed", 1.0)
+    if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+        raise WorkerError("BAD_REQUEST", "Speech text must contain between 1 and 2000 characters.")
+    if voice not in {"af_heart", "af_sarah", "am_adam", "am_michael"}:
+        raise WorkerError("BAD_REQUEST", "Choose one of Pixel's supported Kokoro voices.")
+    if not isinstance(speed, (float, int)) or isinstance(speed, bool) or not 0.7 <= speed <= 1.3:
+        raise WorkerError("BAD_REQUEST", "Speech rate must be between 0.7 and 1.3.")
+
+    model_path = _controlled_model_path(params.get("model_path"), "kokoro-v1.0-int8", "kokoro-v1.0.int8.onnx")
+    voices_path = _controlled_model_path(params.get("voices_path"), "kokoro-v1.0-int8", "voices-v1.0.bin")
+    output_path = params.get("output_path")
+    if not isinstance(output_path, str) or os.path.realpath(os.path.dirname(output_path)) != os.path.realpath(tempfile.gettempdir()):
+        raise WorkerError("BAD_REQUEST", "Speech output must use Pixel's temporary audio directory.")
+    if not os.path.basename(output_path).startswith("pixel-voice-tts-") or not output_path.lower().endswith(".wav"):
+        raise WorkerError("BAD_REQUEST", "The temporary speech output name is invalid.")
+
+    started = time.perf_counter()
+    engine = _load_kokoro(model_path, voices_path)
+    try:
+        samples, sample_rate = engine.create(text.strip(), voice=voice, speed=float(speed), lang="en-us")
+        import numpy as np
+        pcm = (np.clip(np.asarray(samples, dtype=np.float32).reshape(-1), -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+        with wave.open(output_path, "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(int(sample_rate))
+            output.writeframes(pcm)
+    except Exception:
+        raise WorkerError("TTS_FAILED", "Kokoro could not synthesize this reply. No audio was played.") from None
+    duration = len(pcm) / (int(sample_rate) * 2)
+    return {"outputPath": output_path, "sampleRate": int(sample_rate), "durationSeconds": duration, "processingMs": round((time.perf_counter() - started) * 1000)}
+
+
+def unload_voice_models(_params: Dict[str, Any]) -> Dict[str, bool]:
+    _load_whisper_model.cache_clear()
+    _load_kokoro.cache_clear()
+    import gc
+    gc.collect()
+    return {"unloaded": True}
 
 
 OPS: Dict[str, Callable[[Dict[str, Any]], Any]] = {
@@ -314,6 +405,8 @@ OPS: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     "ping": lambda _params: {"pong": True},
     "extract": extract,
     "transcribe_audio": transcribe_audio,
+    "synthesize_kokoro": synthesize_kokoro,
+    "unload_voice_models": unload_voice_models,
 }
 
 

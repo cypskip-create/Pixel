@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, X } from 'lucide-react';
-import type { AppSettings, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode } from '@shared/types';
+import type { AppSettings, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
@@ -63,6 +63,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [microphoneTest, setMicrophoneTest] = useState(false);
   const [microphoneLevel, setMicrophoneLevel] = useState(0);
   const [microphoneError, setMicrophoneError] = useState<string | null>(null);
+  const [voiceModels, setVoiceModels] = useState<VoiceModelInfo[]>([]);
+  const [voiceModelProgress, setVoiceModelProgress] = useState<VoiceModelProgress | null>(null);
+  const [voiceSystemVoices, setVoiceSystemVoices] = useState<string[]>([]);
+  const [voiceAction, setVoiceAction] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const microphoneCapture = useRef<MicrophoneCapture | null>(null);
   const microphoneTestTimer = useRef<number | null>(null);
 
@@ -74,7 +80,16 @@ export function SettingsPanel(props: SettingsPanelProps) {
     if (shortcutStatus) void shortcutStatus.then((status) => { if (mounted) setPushToTalkStatus(status); }).catch(() => undefined);
     const voiceStatus = shell.voiceCapability?.();
     if (voiceStatus) void voiceStatus.then((status) => { if (mounted) setSpeechCapability(status); }).catch(() => undefined);
-    return () => { mounted = false; };
+    const modelList = shell.voiceModelsList?.();
+    if (modelList) void modelList.then((models) => { if (mounted) setVoiceModels(models); }).catch(() => {
+      if (mounted) setVoiceError('Voice model status is unavailable.');
+    });
+    const systemVoices = shell.voiceVoicesList?.();
+    if (systemVoices) void systemVoices.then((voices) => { if (mounted) setVoiceSystemVoices(voices); }).catch(() => undefined);
+    const unsubscribeProgress = shell.onVoiceModelsProgress?.((progress) => {
+      if (mounted) setVoiceModelProgress(progress);
+    });
+    return () => { mounted = false; unsubscribeProgress?.(); };
   }, [settings.voice.pushToTalkAccelerator]);
 
   useEffect(() => () => {
@@ -153,6 +168,68 @@ export function SettingsPanel(props: SettingsPanelProps) {
   }, [closeSettings]);
 
   const modeDescriptor = getModeDescriptor(settings.companion.mode);
+  const selectedSttModel = voiceModels.find((model) => model.id === settings.voice.sttModel && model.kind === 'stt');
+  const kokoroModel = voiceModels.find((model) => model.id === 'kokoro-v1.0-int8');
+
+  const downloadVoiceModel = async (id: VoiceModelInfo['id']): Promise<void> => {
+    const download = window.cypsShell?.voiceModelDownload;
+    if (!download) { setVoiceError('Voice model management is unavailable in this Pixel build.'); return; }
+    setVoiceAction(id);
+    setVoiceError(null);
+    setVoiceNotice(null);
+    try {
+      const result = await download(id);
+      if (!result.ok) setVoiceError(result.error ?? 'Pixel could not download this model.');
+      else setVoiceNotice('Model downloaded and integrity checked.');
+      const models = await window.cypsShell?.voiceModelsList?.();
+      if (models) setVoiceModels(models);
+    } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : 'Pixel could not download this model.');
+    } finally {
+      setVoiceAction(null);
+      setVoiceModelProgress(null);
+    }
+  };
+
+  const removeVoiceModel = async (model: VoiceModelInfo): Promise<void> => {
+    if (!window.confirm(`Remove ${model.label} from this PC? Pixel will not delete your conversations or settings.`)) return;
+    const remove = window.cypsShell?.voiceModelRemove;
+    if (!remove) { setVoiceError('Voice model management is unavailable in this Pixel build.'); return; }
+    setVoiceAction(model.id);
+    setVoiceError(null);
+    setVoiceNotice(null);
+    try {
+      const result = await remove(model.id);
+      if (!result.ok) setVoiceError(result.error ?? 'Pixel could not remove this model.');
+      else setVoiceNotice('Voice model removed.');
+      const models = await window.cypsShell?.voiceModelsList?.();
+      if (models) setVoiceModels(models);
+    } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : 'Pixel could not remove this model.');
+    } finally {
+      setVoiceAction(null);
+    }
+  };
+
+  const cancelVoiceDownload = async (): Promise<void> => {
+    try { await window.cypsShell?.voiceModelCancelDownload?.(); }
+    catch { setVoiceError('Pixel could not cancel the model download.'); }
+  };
+
+  const testSelectedVoice = async (): Promise<void> => {
+    const speak = window.cypsShell?.voiceSpeak;
+    if (!speak) { setVoiceError('Voice output is unavailable in this Pixel build.'); return; }
+    setVoiceAction('test-voice');
+    setVoiceError(null);
+    setVoiceNotice(null);
+    try {
+      const result = await speak('Hello, this is a local Pixel voice test.');
+      if (result.ok) setVoiceNotice('Voice test completed.');
+      else setVoiceError(result.error ?? 'Pixel could not play the voice test.');
+    } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : 'Pixel could not play the voice test.');
+    } finally { setVoiceAction(null); }
+  };
 
   return (
     <section
@@ -377,14 +454,64 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <Row label="Local model">
             <select
               aria-label="Local speech model"
-              value={['tiny.en', 'base.en', 'small.en'].includes(settings.voice.sttModel) ? settings.voice.sttModel : 'base.en'}
-              onChange={(event) => onPatch({ voice: { sttModel: event.target.value } })}
+              value={settings.voice.sttModel}
+              onChange={(event) => onPatch({ voice: { sttModel: event.target.value as AppSettings['voice']['sttModel'] } })}
               className="no-drag max-w-[180px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
             >
-              <option value="tiny.en">Tiny English · fastest</option>
-              <option value="base.en">Base English · balanced</option>
-              <option value="small.en">Small English · more memory</option>
+              {voiceModels.filter((model) => model.kind === 'stt').map((model) => (
+                <option key={model.id} value={model.id}>{model.label}{model.downloaded ? ' · ready' : ' · not downloaded'}</option>
+              ))}
             </select>
+          </Row>
+          {selectedSttModel ? <div className="mx-1 flex items-center gap-2 pb-1">
+            {selectedSttModel.downloaded ? <>
+              <span role="status" className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Selected model is ready offline.</span>
+              <button type="button" disabled={voiceAction !== null} onClick={() => void removeVoiceModel(selectedSttModel)} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Remove</button>
+            </> : <>
+              <span className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Optional download · about {Math.round(selectedSttModel.sizeBytes / 1_000_000)} MB</span>
+              <button type="button" disabled={voiceAction !== null} onClick={() => void downloadVoiceModel(selectedSttModel.id)} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Download model</button>
+            </>}
+          </div> : null}
+          {voiceModelProgress ? <div className="mx-1 flex items-center gap-2 pb-1" role="status">
+            <span className="text-[10px] text-[var(--color-ink-dim)]">Downloading {voiceModelProgress.percent}%</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-neutral-300" style={{ width: `${voiceModelProgress.percent}%` }} /></div>
+            <button type="button" onClick={() => void cancelVoiceDownload()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8">Cancel</button>
+          </div> : null}
+          <Row label="Speech engine">
+            <select aria-label="Speech output engine" value={settings.voice.ttsEngine} onChange={(event) => onPatch({ voice: { ttsEngine: event.target.value as AppSettings['voice']['ttsEngine'], ttsVoice: null } })} className="no-drag max-w-[205px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]">
+              <option value="system">Windows system voice</option>
+              <option value="kokoro">Kokoro neural voice</option>
+            </select>
+          </Row>
+          {settings.voice.ttsEngine === 'kokoro' ? <>
+            <Row label="Neural voice">
+              <select aria-label="Kokoro voice" value={settings.voice.ttsVoice ?? 'af_heart'} onChange={(event) => onPatch({ voice: { ttsVoice: event.target.value } })} className="no-drag max-w-[205px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]">
+                <option value="af_heart">Heart · US English</option>
+                <option value="af_sarah">Sarah · US English</option>
+                <option value="am_adam">Adam · US English</option>
+                <option value="am_michael">Michael · US English</option>
+              </select>
+            </Row>
+            <div className="mx-1 flex items-center gap-2 pb-1">
+              {kokoroModel?.downloaded ? <>
+                <span role="status" className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Kokoro model ready · offline after download.</span>
+                <button type="button" disabled={voiceAction !== null} onClick={() => void removeVoiceModel(kokoroModel)} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Remove</button>
+              </> : <>
+                <span className="flex-1 text-[10px] text-[var(--color-ink-dim)]">Optional download · about 143 MB.</span>
+                <button type="button" disabled={voiceAction !== null} onClick={() => void downloadVoiceModel('kokoro-v1.0-int8')} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">Download Kokoro</button>
+              </>}
+            </div>
+          </> : <Row label="System voice">
+            <select aria-label="Windows system voice" value={settings.voice.ttsVoice ?? ''} onChange={(event) => onPatch({ voice: { ttsVoice: event.target.value || null } })} className="no-drag max-w-[205px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]">
+              <option value="">System default</option>
+              {voiceSystemVoices.map((voice) => <option key={voice} value={voice}>{voice}</option>)}
+            </select>
+          </Row>}
+          <Row label="Speech rate">
+            <div className="flex items-center gap-2">
+              <input aria-label="Speech rate" type="range" min="0.7" max="1.3" step="0.1" value={settings.voice.ttsRate} onChange={(event) => onPatch({ voice: { ttsRate: Number(event.target.value) } })} className="no-drag w-24 accent-neutral-300" />
+              <span className="w-8 text-right text-[10px] text-[var(--color-ink-dim)]">{settings.voice.ttsRate.toFixed(1)}×</span>
+            </div>
           </Row>
           <div className="mx-1 flex items-center gap-2 pb-1">
             <button
@@ -400,9 +527,15 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </div>
           </div>
           {microphoneError ? <p role={microphoneError.includes('stopped') ? 'status' : 'alert'} className="px-1 text-[10px] text-[var(--color-ink-dim)]">{microphoneError}</p> : null}
+          <div className="mx-1 flex items-center gap-2 pb-1">
+            <button type="button" disabled={voiceAction !== null} onClick={() => void testSelectedVoice()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8 disabled:opacity-50">{voiceAction === 'test-voice' ? 'Playing test…' : 'Test voice'}</button>
+            <button type="button" onClick={() => void window.cypsShell?.voiceCancel?.()} className="no-drag rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)] hover:bg-white/8">Stop voice</button>
+          </div>
+          {voiceError ? <p role="alert" className="px-1 text-[10px] text-neutral-200">{voiceError}</p> : null}
+          {voiceNotice ? <p role="status" className="px-1 text-[10px] text-neutral-200">{voiceNotice}</p> : null}
           <p className="px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">
             {speechCapability === null ? 'Checking local speech recognition…' : speechCapability.speechToText
-              ? 'Uses local faster-whisper (CPU int8, only when its model is already cached); otherwise falls back to Windows Speech. Models are never downloaded automatically.'
+              ? 'Local English models run offline in Pixel. Downloads are optional, verified and kept in your user data. Windows Speech remains the fallback when no model is installed.'
               : speechCapability.reason ?? 'Local speech recognition is unavailable.'}
           </p>
         </Group>

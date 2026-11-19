@@ -43,6 +43,8 @@ import type {
   ToolCatalogEntry,
   ScreenWindowTarget,
   VisualGuidanceSnapshot,
+  VoiceModelInfo,
+  VoiceModelProgress,
 } from '../shared/types';
 
 export { CHANNELS } from '../shared/channels';
@@ -275,10 +277,20 @@ const shell = {
     ipcRenderer.invoke(CH.voiceTranscribeWav, audio) as Promise<{
       ok: boolean;
       text: string;
-      confidence: number;
+      confidence?: number;
       error?: string;
       noSpeech?: boolean;
     }>,
+
+  voiceModelsList: () => ipcRenderer.invoke(CH.voiceModelsList) as Promise<VoiceModelInfo[]>,
+  voiceVoicesList: () => ipcRenderer.invoke(CH.voiceVoicesList) as Promise<string[]>,
+  voiceModelDownload: (id: VoiceModelInfo['id']) =>
+    ipcRenderer.invoke(CH.voiceModelDownload, id) as Promise<{ ok: boolean; error?: string }>,
+  voiceModelCancelDownload: () => ipcRenderer.invoke(CH.voiceModelCancelDownload) as Promise<boolean>,
+  voiceModelRemove: (id: VoiceModelInfo['id']) =>
+    ipcRenderer.invoke(CH.voiceModelRemove, id) as Promise<{ ok: boolean; error?: string }>,
+  onVoiceModelsProgress: (handler: (progress: VoiceModelProgress | null) => void): (() => void) =>
+    subscribe(CH.voiceModelsProgress, handler),
 
   voiceCaptureAcquire: () => ipcRenderer.invoke(CH.voiceCaptureAcquire) as Promise<boolean>,
   voiceCaptureRelease: () => ipcRenderer.invoke(CH.voiceCaptureRelease) as Promise<boolean>,
@@ -301,7 +313,7 @@ const shell = {
     ipcRenderer.invoke(CH.voiceListen, timeoutMs) as Promise<{
       ok: boolean;
       text: string;
-      confidence: number;
+      confidence?: number;
       error?: string;
       noSpeech?: boolean;
     }>,

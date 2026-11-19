@@ -2,7 +2,38 @@
 
 Updated: 2026-11-19
 
-## Current handoff — Tools 4.1 screen intelligence and visual guidance
+## Current handoff — Voice Engine 4.0
+
+Branch: `codex/interaction-engine-3`. Current local HEAD before these
+uncommitted voice changes: `1e822c92222a8ca13cc94546eff7d7da5a8f7b60`. No
+commit, push or release was made.
+
+- Voice implementation now extends Pixel's existing worker and recording flow
+  with optional Pixel-managed faster-whisper STT models, optional Kokoro ONNX
+  synthesis, an explicit Windows system voice option, model management in
+  Settings, cancellation, local playback and typed UI IPC. Pixel remains the
+  user-facing app. Existing PTT, manual dictation, permission, emergency-stop,
+  DeepSeek and monochrome interfaces are retained.
+- Validation on this host: typecheck passed; full Vitest **793 passed, 27
+  skipped, 0 failed (820 total; 49 files passed, 1 skipped)**; Python worker
+  tests **4/4 passed**; Python compileall passed; `npm run build` and
+  `npm run build:native` passed.
+  Vitest skips are 17 missing-Chromium browser cases, 7 missing-NSIS cases, and
+  3 opt-in native foreground cases.
+- `npm run build:voice-worker` did not produce a bundle: only Python 3.15.2 is
+  installed; the packaged voice build requires Python 3.12 x64. No current-tree
+  `pack`/`dist` output or installer inspection was done. Windows microphone,
+  speaker, model inference, offline, GUI and install acceptance remain
+  unverified. Windows CI has not run for these uncommitted changes.
+- Read [`docs/validation/PIXEL_VOICE_READINESS.md`](docs/validation/PIXEL_VOICE_READINESS.md)
+  for implementation categories and exact evidence; use
+  [`docs/validation/PIXEL_VOICE_ACCEPTANCE.md`](docs/validation/PIXEL_VOICE_ACCEPTANCE.md)
+  for the Python 3.12 build commands and laptop-side acceptance sequence.
+  Continue voice validation before starting Tools 4.2 or another feature wave.
+
+Sections below record earlier checkpoints and their historical test totals.
+
+## Previous checkpoint — Tools 4.1 screen intelligence and visual guidance
 
 - Branch: `codex/interaction-engine-3`; local HEAD
   `ea110700e37173b2a88708bf617b2b17dbeed9bf`. The working tree is

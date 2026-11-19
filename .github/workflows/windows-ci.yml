@@ -12,7 +12,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       PLAYWRIGHT_BROWSERS_PATH: '0'
     steps:
@@ -72,6 +72,12 @@ jobs:
         shell: pwsh
         run: |
           npm run typecheck 2>&1 | Tee-Object artifacts/logs/typecheck.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test local voice worker safety and recovery
+        shell: pwsh
+        run: |
+          python -m unittest discover -s python/tests -v 2>&1 | Tee-Object artifacts/logs/voice-worker-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Exercise the sandboxed preload bridge

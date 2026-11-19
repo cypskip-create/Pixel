@@ -3,6 +3,7 @@ import {
   CAPABILITY_SCRIPT,
   MAX_LISTEN_MS,
   SPEAK_SCRIPT,
+  PLAY_WAV_SCRIPT,
   VoiceService,
   buildRecognitionScript,
   buildWaveRecognitionScript,
@@ -11,6 +12,7 @@ import {
   validateVoiceWav,
 } from '../src/main/voice/voice';
 import { encodePcm16Wav } from '../src/renderer/lib/audioCapture';
+import { mergeSettings } from '../src/shared/types';
 
 describe('parseCapability', () => {
   it('reads recognizer and voice counts', () => {
@@ -24,6 +26,21 @@ describe('parseCapability', () => {
   it('returns null when Windows prints something unexpected', () => {
     expect(parseCapability('Some error occurred')).toBeNull();
     expect(parseCapability('')).toBeNull();
+  });
+});
+
+describe('voice settings validation', () => {
+  it('keeps installed Windows voice names, bounds speech rate and rejects unknown engines/models', () => {
+    const settings = mergeSettings({ voice: {
+      sttModel: 'remote-model',
+      ttsEngine: 'cloud',
+      ttsVoice: 'Microsoft David - English (United States)',
+      ttsRate: 9,
+    } });
+    expect(settings.voice.sttModel).toBe('base.en');
+    expect(settings.voice.ttsEngine).toBe('system');
+    expect(settings.voice.ttsVoice).toBe('Microsoft David - English (United States)');
+    expect(settings.voice.ttsRate).toBe(1.3);
   });
 });
 
@@ -115,7 +132,11 @@ describe('capability and speak scripts', () => {
 
   it('the speak script reads its text from the environment', () => {
     expect(SPEAK_SCRIPT).toContain('$env:CYPS_SPEAK_TEXT');
+    expect(SPEAK_SCRIPT).toContain('$env:CYPS_SPEAK_VOICE');
+    expect(SPEAK_SCRIPT).toContain('$env:CYPS_SPEAK_RATE');
     expect(SPEAK_SCRIPT).toContain('Speak');
+    expect(PLAY_WAV_SCRIPT).toContain('PlaySync');
+    expect(PLAY_WAV_SCRIPT).toContain('$env:CYPS_AUDIO_FILE');
   });
 });
 
