@@ -57,13 +57,14 @@ describe('sandbox preload bundle', () => {
   it('writes the bundled file at the path used by each secure companion window', () => {
     expect(appSource).toContain("join(mainDir(), '..', 'preload', 'index.js')");
     expect(windowSource).toContain("join(mainDir, '..', 'preload', 'index.js')");
-    expect([...windowSource.matchAll(/contextIsolation: true/g)]).toHaveLength(4);
-    expect([...windowSource.matchAll(/nodeIntegration: false/g)]).toHaveLength(4);
-    expect([...windowSource.matchAll(/sandbox: true/g)]).toHaveLength(4);
-    expect([...windowSource.matchAll(/webSecurity: true/g)]).toHaveLength(4);
+    expect([...windowSource.matchAll(/contextIsolation: true/g)]).toHaveLength(5);
+    expect([...windowSource.matchAll(/nodeIntegration: false/g)]).toHaveLength(5);
+    expect([...windowSource.matchAll(/sandbox: true/g)]).toHaveLength(5);
+    expect([...windowSource.matchAll(/webSecurity: true/g)]).toHaveLength(5);
     expect(windowSource).toContain('focusable: false');
     expect(windowSource).toContain('win.setIgnoreMouseEvents(true, { forward: true })');
     expect(windowSource).toContain("this.loadRenderer(win, '?window=workspace')");
+    expect(windowSource).toContain("this.loadRenderer(win, '?window=guidance')");
   });
 
   it('runs the bundler for development, builds and Windows packaging', () => {

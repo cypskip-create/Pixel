@@ -13,8 +13,15 @@
 import { BrowserWindow, screen } from 'electron';
 import type { Display, WebContents, WebFrameMain } from 'electron';
 import { join } from 'node:path';
-import type { CompanionSettings, Surface } from '../shared/types';
-import type { WorkspaceWindowState } from '../shared/types';
+import type {
+  CompanionSettings,
+  ScreenWindowTarget,
+  Surface,
+  VisualGuidanceAnnotation,
+  VisualGuidanceShape,
+  VisualGuidanceSnapshot,
+  WorkspaceWindowState,
+} from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { isTrustedRendererUrl } from './windowPolicy';
 import type { Point } from '../shared/companion/geometry';
@@ -69,6 +76,24 @@ export class WindowManager {
   private mainVisibleRequested = true;
   private cursorWindow: BrowserWindow | null = null;
   private cursorWindowReady = false;
+  private guidanceWindow: BrowserWindow | null = null;
+  private guidanceWindowReady = false;
+  private guidanceTimer: ReturnType<typeof setInterval> | null = null;
+  private guidanceRefreshPromise: Promise<void> | null = null;
+  private guidanceRefreshRequested = false;
+  private guidanceGeneration = 0;
+  private guidanceTarget: ScreenWindowTarget | null = null;
+  private readonly guidanceEntries = new Map<string, {
+    selector: string;
+    role?: string;
+    annotation: VisualGuidanceAnnotation;
+    expiresAt: number;
+  }>();
+  private guidanceValidator: ((target: ScreenWindowTarget, selector: string, role?: string) => Promise<{
+    status: 'foreground' | 'background' | 'stale';
+    bounds?: { x: number; y: number; width: number; height: number };
+  }>) | null = null;
+  private guidanceVisible = false;
   private surface: Surface = 'idle';
   private anchorDisplayId: string | null = null;
   private topOffset = DEFAULT_OFFSET_FROM_TOP;
@@ -171,6 +196,236 @@ export class WindowManager {
     this.loadRenderer(win);
     this.main = win;
     return win;
+  }
+
+  setGuidanceTargetValidator(
+    validator: (target: ScreenWindowTarget, selector: string, role?: string) => Promise<{
+      status: 'foreground' | 'background' | 'stale';
+      bounds?: { x: number; y: number; width: number; height: number };
+    }>,
+  ): void {
+    this.guidanceValidator = validator;
+  }
+
+  async showVisualGuidance(request: {
+    target: ScreenWindowTarget;
+    selector: string;
+    role?: string;
+    shape: VisualGuidanceShape;
+    label?: string;
+    step?: number;
+    durationMs: number;
+    bounds: { x: number; y: number; width: number; height: number };
+  }): Promise<'visible' | 'waiting_foreground' | 'unavailable'> {
+    if (this.sessionLocked || !this.guidanceValidator || !validGuidanceRequest(request)) return 'unavailable';
+    if (this.guidanceTarget && !sameTarget(this.guidanceTarget, request.target)) this.clearVisualGuidance();
+    if (!this.guidanceEntries.has(request.selector) && this.guidanceEntries.size >= 8) return 'unavailable';
+    this.guidanceGeneration += 1;
+    this.guidanceTarget = { ...request.target };
+    const annotation: VisualGuidanceAnnotation = {
+      id: request.selector,
+      shape: request.shape,
+      bounds: { ...request.bounds },
+      ...(request.label ? { label: request.label } : {}),
+      ...(request.step ? { step: request.step } : {}),
+    };
+    this.guidanceEntries.set(request.selector, {
+      selector: request.selector,
+      ...(request.role ? { role: request.role } : {}),
+      annotation,
+      expiresAt: Date.now() + Math.max(3_000, Math.min(30_000, request.durationMs)),
+    });
+    this.createGuidanceWindow();
+    if (!this.guidanceTimer) {
+      this.guidanceTimer = setInterval(() => { void this.refreshGuidance(); }, 650);
+      this.guidanceTimer.unref?.();
+    }
+    await this.refreshGuidance();
+    await this.waitForGuidanceReady(2_000);
+    await this.refreshGuidance();
+    if (!this.guidanceEntries.has(request.selector)) return 'unavailable';
+    return this.guidanceVisible && Boolean(this.guidanceWindow && !this.guidanceWindow.isDestroyed() && this.guidanceWindow.isVisible())
+      ? 'visible'
+      : 'waiting_foreground';
+  }
+
+  clearVisualGuidance(selector?: string): void {
+    this.guidanceGeneration += 1;
+    if (selector) this.guidanceEntries.delete(selector);
+    else this.guidanceEntries.clear();
+    if (this.guidanceEntries.size > 0) {
+      void this.refreshGuidance();
+      return;
+    }
+    this.guidanceTarget = null;
+    this.guidanceVisible = false;
+    if (this.guidanceTimer) clearInterval(this.guidanceTimer);
+    this.guidanceTimer = null;
+    const win = this.guidanceWindow;
+    this.guidanceWindow = null;
+    this.guidanceWindowReady = false;
+    if (win && !win.isDestroyed()) win.close();
+  }
+
+  private createGuidanceWindow(): void {
+    if (this.guidanceWindow && !this.guidanceWindow.isDestroyed()) return;
+    const win = new BrowserWindow({
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      resizable: false,
+      movable: false,
+      focusable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      show: false,
+      alwaysOnTop: true,
+      webPreferences: {
+        preload: this.deps.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        spellcheck: false,
+      },
+    });
+    win.setAlwaysOnTop(true, 'floating');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+    win.setFocusable(false);
+    win.setIgnoreMouseEvents(true, { forward: true });
+    win.once('ready-to-show', () => {
+      if (this.guidanceWindow !== win || win.isDestroyed()) return;
+      this.guidanceWindowReady = true;
+      void this.refreshGuidance();
+    });
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', (event, url) => {
+      if (!isTrustedRendererUrl(url, this.deps.rendererIndexPath, this.deps.devServerUrl)) event.preventDefault();
+    });
+    win.on('closed', () => {
+      if (this.guidanceWindow !== win) return;
+      this.guidanceWindow = null;
+      this.guidanceWindowReady = false;
+      this.guidanceVisible = false;
+      this.guidanceEntries.clear();
+      this.guidanceTarget = null;
+      if (this.guidanceTimer) clearInterval(this.guidanceTimer);
+      this.guidanceTimer = null;
+    });
+    this.loadRenderer(win, '?window=guidance');
+    this.guidanceWindow = win;
+  }
+
+  private async waitForGuidanceReady(timeoutMs: number): Promise<boolean> {
+    if (this.guidanceWindowReady) return true;
+    const win = this.guidanceWindow;
+    if (!win || win.isDestroyed()) return false;
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ready: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        win.removeListener('closed', onClosed);
+        resolve(ready);
+      };
+      const onClosed = (): void => finish(false);
+      const timer = setTimeout(() => finish(this.guidanceWindowReady), timeoutMs);
+      win.once('ready-to-show', () => finish(true));
+      win.once('closed', onClosed);
+    });
+  }
+
+  private refreshGuidance(): Promise<void> {
+    const running = this.guidanceRefreshPromise;
+    if (running) {
+      this.guidanceRefreshRequested = true;
+      return running.then(async () => {
+        if (!this.guidanceRefreshRequested) return;
+        this.guidanceRefreshRequested = false;
+        await this.refreshGuidance();
+      });
+    }
+    const current = this.updateGuidance();
+    this.guidanceRefreshPromise = current.finally(() => { this.guidanceRefreshPromise = null; });
+    return this.guidanceRefreshPromise;
+  }
+
+  private async updateGuidance(): Promise<void> {
+    if (this.sessionLocked || !this.guidanceTarget || !this.guidanceValidator || this.guidanceEntries.size === 0) {
+      this.clearVisualGuidance();
+      return;
+    }
+    const generation = this.guidanceGeneration;
+    const target = { ...this.guidanceTarget };
+    const entries = [...this.guidanceEntries.entries()];
+    try {
+      const now = Date.now();
+      for (const [id, entry] of this.guidanceEntries) {
+        if (entry.expiresAt <= now) this.guidanceEntries.delete(id);
+      }
+      if (this.guidanceEntries.size === 0) {
+        this.clearVisualGuidance();
+        return;
+      }
+
+      let allForeground = true;
+      for (const [id, entry] of entries) {
+        const status = await this.guidanceValidator(target, entry.selector, entry.role);
+        if (generation !== this.guidanceGeneration) return;
+        if (status.status === 'stale' || !status.bounds || status.bounds.width <= 0 || status.bounds.height <= 0) {
+          this.guidanceEntries.delete(id);
+          continue;
+        }
+        entry.annotation.bounds = { ...status.bounds };
+        if (status.status !== 'foreground') allForeground = false;
+      }
+      if (this.guidanceEntries.size === 0) {
+        this.clearVisualGuidance();
+        return;
+      }
+      if (generation !== this.guidanceGeneration) return;
+      if (!allForeground) {
+        this.guidanceVisible = false;
+        this.publishGuidance({ visible: false, bounds: null, annotations: [...this.guidanceEntries.values()].map((entry) => entry.annotation) });
+        return;
+      }
+      const annotations = [...this.guidanceEntries.values()].map((entry) => entry.annotation);
+      const bounds = boundsForGuidance(annotations);
+      this.guidanceVisible = true;
+      this.publishGuidance({ visible: true, bounds, annotations });
+    } catch {
+      // A failed identity/UIA recheck cannot leave a potentially stale outline.
+      if (generation === this.guidanceGeneration) this.clearVisualGuidance();
+    }
+  }
+
+  private publishGuidance(snapshot: VisualGuidanceSnapshot): void {
+    const win = this.guidanceWindow;
+    if (!win || win.isDestroyed() || !this.guidanceWindowReady) return;
+    try {
+      if (snapshot.visible && snapshot.bounds) {
+        const current = win.getBounds();
+        if (!sameBounds(current, snapshot.bounds)) win.setBounds(snapshot.bounds, false);
+        win.webContents.send(CHANNELS.screenGuidanceUpdate, snapshot);
+        if (!win.isVisible()) {
+          win.setIgnoreMouseEvents(true, { forward: true });
+          win.showInactive();
+        }
+      } else {
+        win.webContents.send(CHANNELS.screenGuidanceUpdate, snapshot);
+        if (win.isVisible()) win.hide();
+      }
+    } catch {
+      this.clearVisualGuidance();
+    }
   }
 
   createSettingsWindow(): BrowserWindow {
@@ -572,6 +827,7 @@ export class WindowManager {
   setSessionLocked(locked: boolean): void {
     if (this.sessionLocked === locked) return;
     this.sessionLocked = locked;
+    if (locked) this.clearVisualGuidance();
     this.syncCursorWindow(true);
   }
 
@@ -773,6 +1029,7 @@ export class WindowManager {
         win.setBounds(anchoredTopCenterBounds(this.anchorDisplay().workArea, bounds, this.topOffset));
       }
       this.syncCursorWindow(true);
+      void this.refreshGuidance();
     };
 
     // Re-anchor to the selected display; if it was removed, safely fall back.
@@ -821,6 +1078,7 @@ export class WindowManager {
 
   dispose(): void {
     this.sessionLocked = true;
+    this.clearVisualGuidance();
     this.stopCursorFollow();
     this.workspace?.close();
     this.workspace = null;
@@ -845,6 +1103,50 @@ function sameBounds(
   right: { x: number; y: number; width: number; height: number },
 ): boolean {
   return left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
+}
+
+function validGuidanceRequest(request: {
+  target: ScreenWindowTarget;
+  selector: string;
+  shape: VisualGuidanceShape;
+  durationMs: number;
+  bounds: { x: number; y: number; width: number; height: number };
+}): boolean {
+  const target = request.target;
+  const bounds = request.bounds;
+  return Boolean(target && target.windowId && target.title && target.processName && Number.isInteger(target.pid) && target.pid > 0 &&
+    request.selector.trim().length > 0 &&
+    (request.shape === 'rectangle' || request.shape === 'circle' || request.shape === 'arrow') &&
+    Number.isFinite(request.durationMs) && request.durationMs >= 3_000 &&
+    [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) && bounds.width > 0 && bounds.height > 0);
+}
+
+function sameTarget(left: ScreenWindowTarget, right: ScreenWindowTarget): boolean {
+  return left.windowId === right.windowId && left.title === right.title && left.pid === right.pid &&
+    left.processName.toLocaleLowerCase() === right.processName.toLocaleLowerCase();
+}
+
+function boundsForGuidance(annotations: VisualGuidanceAnnotation[]): { x: number; y: number; width: number; height: number } {
+  const padding = 14;
+  const topLabelPadding = annotations.some((item) => item.label || item.step)
+    ? 36
+    : annotations.some((item) => item.shape === 'arrow') ? 28 : padding;
+  let left = Math.min(...annotations.map((item) => item.bounds.x)) - padding;
+  let top = Math.min(...annotations.map((item) => item.bounds.y)) - topLabelPadding;
+  let right = Math.max(...annotations.map((item) => item.bounds.x + item.bounds.width)) + padding;
+  let bottom = Math.max(...annotations.map((item) => item.bounds.y + item.bounds.height)) + padding;
+
+  const display = screen.getDisplayMatching({ x: left, y: top, width: right - left, height: bottom - top });
+  left = Math.max(left, display.bounds.x);
+  top = Math.max(top, display.bounds.y);
+  right = Math.min(right, display.bounds.x + display.bounds.width);
+  bottom = Math.min(bottom, display.bounds.y + display.bounds.height);
+  return {
+    x: Math.round(left),
+    y: Math.round(top),
+    width: Math.max(1, Math.round(right - left)),
+    height: Math.max(1, Math.round(bottom - top)),
+  };
 }
 
 /**

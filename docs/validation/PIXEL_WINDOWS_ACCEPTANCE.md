@@ -2,6 +2,107 @@
 
 This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that Pixel now starts on the target Windows laptop and its sandbox preload smoke test passes. This procedure includes the focused foreground-context integration. Record only behavior observed directly on the tested machine; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local build and test evidence.
 
+## Tools 4.1 — exact capture and visual guidance (2026-11-19)
+
+### Current evidence
+
+The source implementation and unit coverage are present, but this checkpoint is
+not release-verified. `npm run typecheck` passed; the focused screen,
+agent-tool and overlay tests passed **31/31**; the full suite passed **782**,
+failed **0**, and skipped **27** (**809 total; 48 files passed, 1 skipped**).
+The skips are 17 browser cases (Playwright Chromium absent), 7 NSIS checks
+(`makensis` absent) and 3 opt-in native foreground integration checks.
+`npm run build` and `npm run build:native` passed.
+
+The native integration was run with Notepad focused on a newly created blank
+fixture and failed **3/3** with `The observed window or process is no longer
+available.` This means exact native capture, UI Automation discovery and the
+actual overlay are **not verified** here. Do not interpret the TypeScript,
+unit tests or native compilation as evidence that the end-to-end flow works.
+Electron development GUI startup and packaged GPU behavior also remain
+unverified in this host.
+
+### Target-laptop commands
+
+Run in a PowerShell window at the repository root. Keep the harmless test app
+visible and focused for the native integration check.
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test -- --reporter=dot --testTimeout=15000
+npm run build
+npm run build:native
+npm run test:native-foreground -- --reporter=dot
+```
+
+The native integration should pass all three checks: real foreground metadata,
+exact identity resolution and a PNG captured from that exact foreground
+window. If it reports `The observed window or process is no longer available`,
+save the complete output and stop; do not treat later UIA or overlay behavior
+as verified. Do not paste screenshots or window titles containing private
+information into logs.
+
+For a development launch, first check whether the required Vite port is already
+in use. If it is occupied, identify the owner and close only a stale Pixel
+development process; do not terminate an unrelated listener. Use two
+PowerShell windows:
+
+```powershell
+# Terminal 1
+npm run dev:renderer -- --host 127.0.0.1 --port 5199 --strictPort
+```
+
+```powershell
+# Terminal 2
+npm run dev:electron
+```
+
+Do not change sandbox, context isolation, node integration or web security
+settings to make the test pass. Keep `--disable-gpu` as the normal development
+diagnostic; investigate `npm run dev:gpu` separately and keep packaged GPU
+child-process failures separate from capture behavior.
+
+### Capture-to-highlight acceptance
+
+1. Open a new harmless Notepad document and keep Notepad foreground. Ask Pixel
+   which application is active. Confirm the title/process identity matches
+   Notepad. Approve the explicit screen-observation request when prompted.
+2. Ask Pixel to find one uniquely named accessible menu or control. Confirm
+   the response identifies UI Automation as its source and reports an exact
+   name/AutomationId, role, bounds and observation time. If the control is
+   absent, ambiguous or unavailable, confirm Pixel asks for a more specific
+   target instead of guessing coordinates.
+3. Ask Pixel to highlight that exact control with a short label. Confirm the
+   white/light-grey rectangle, circle or arrow is aligned with the real control
+   and the charcoal label is readable. Verify Pixel says it did not click.
+   Click the control manually and confirm the overlay does not block clicks,
+   scrolling or typing.
+4. Move and resize Notepad. Confirm the highlight follows the revalidated UIA
+   bounds. Switch to another application, close Notepad, lock the session and
+   trigger emergency stop in separate runs. Confirm the overlay hides or
+   clears, and never appears over the unrelated foreground app.
+5. Repeat with Windows Settings using one uniquely accessible control. Do not
+   change system settings; use navigation-only inspection. Confirm a stale or
+   ambiguous target fails closed.
+6. On multiple monitors, record each display's bounds and scaling. Inspect a
+   negative-coordinate display and a region clipped at the right/bottom edge.
+   Confirm metadata gives the intended display, actual image dimensions and
+   scale; a cross-monitor region must return an actionable failure.
+7. Keep an annotation visible while streaming a long harmless conversation.
+   Confirm the Island does not steal focus or flicker, the Workspace remains
+   conversation-first and the underlying app remains clickable.
+8. Confirm capture is request-driven: no periodic/background screenshots are
+   produced. Confirm no image or annotation is written to chat/task history by
+   default, and ordinary read-only inspection does not authorize clicking or
+   typing.
+
+Save command output and a small set of redacted screenshots in the designated
+validation artifact directory. Record a pass/fail/unverified result per step,
+Windows build, display layout/scaling, current commit and artifact paths. Only
+mark a GUI item passed after observing it on that actual Windows desktop.
+
 ## Latest checkpoint: monochrome theme and cursor companion (2026-11-18)
 
 The renderer now uses a shared grayscale palette and the optional cursor

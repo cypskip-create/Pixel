@@ -55,6 +55,14 @@ Task snapshots preserve a sanitized request and result, step metadata, budget co
 - `DesktopInputLease` serializes `type_text` and `invoke_ui_element`. Text entry requires an expected window title and checks it inside the Windows input process immediately before sending. A focus change can still race after that check.
 - The optional cursor companion uses bounded shared spring and work-area placement functions in an independent 36 DIP transparent, non-focusable, click-through BrowserWindow; its pointer artwork is 28 DIP. It is hidden while the Island is expanded/hidden, a Pixel Settings or Workspace window is visible, or the session is locked/suspended. Resume snaps to the current pointer. It does not use desktop input or screen capture.
 
+## Screen observation and visual guidance
+
+- `analyze_screen` reuses the screen permission path and returns capture identity, time, target bounds, display ID, scale and actual pixel dimensions. Window capture uses the native helper's exact opaque window reference; display/region capture correlates by Electron display ID. Regions use global virtual-desktop DIP and cross-display or stale-layout requests fail instead of guessing.
+- `find_ui_elements` returns accessibility-backed controls with source and observation time. Vision descriptions are labeled as model interpretation, not UIA verification. Empty vision output and failed capture are errors. A provider without image support returns unavailable rather than fabricated analysis.
+- `screen_highlight_control` requires a complete selected-window identity and one exact, unique UI Automation name or AutomationId. It draws only the current accessible control bounds in a separate, transparent, sandboxed, passive window. The user must approve the high-risk guidance request. The tool never clicks or types; `screen_clear_annotations` is narrowly scoped and safe.
+- The overlay repeatedly validates the target, foreground state and control bounds, expires within 3–30 seconds and clears on stale targets, lock and emergency stop. It receives a narrow typed update subscription only; it has no native handle, unrestricted IPC or window-creation API.
+- Unit/build evidence is recorded in `PROGRESS.md`. The native foreground integration currently fails in this environment before capture with `The observed window or process is no longer available`; the real Pixel GUI and annotation workflow remain unverified until target-laptop acceptance passes.
+
 ## Runtime ceilings
 
 The executor caps a request at eight model/tool turns, a five-minute wall clock and 30 seconds per tool. The task carries a 32,000-token estimate. Token accounting is approximate, and retries are not currently enabled. Tool output is clipped before model reuse. These are local execution bounds, not a provider billing guarantee.

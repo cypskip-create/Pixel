@@ -438,6 +438,46 @@ export interface ImageAttachment {
   label?: string;
 }
 
+/** Opaque target identity returned by the Windows foreground/UIA observer. */
+export interface ScreenWindowTarget {
+  windowId: string;
+  title: string;
+  processName: string;
+  pid: number;
+}
+
+export interface ScreenCaptureMetadata {
+  captureId: string;
+  capturedAt: number;
+  targetType: 'window' | 'display' | 'region';
+  targetWindow?: ScreenWindowTarget;
+  bounds: { x: number; y: number; width: number; height: number };
+  coordinateSpace: 'electron_dip';
+  displayId: string;
+  scaleFactor: number;
+  pixelScale: { x: number; y: number };
+  source: 'native_print_window' | 'electron_display_capture';
+  cached: false;
+  status: 'captured';
+}
+
+export type VisualGuidanceShape = 'rectangle' | 'circle' | 'arrow';
+
+/** Screen-space geometry is Electron DIP, matching all renderer window bounds. */
+export interface VisualGuidanceAnnotation {
+  id: string;
+  shape: VisualGuidanceShape;
+  bounds: { x: number; y: number; width: number; height: number };
+  label?: string;
+  step?: number;
+}
+
+export interface VisualGuidanceSnapshot {
+  visible: boolean;
+  bounds: { x: number; y: number; width: number; height: number } | null;
+  annotations: VisualGuidanceAnnotation[];
+}
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -856,7 +896,10 @@ export interface CypsBridge {
   };
   screen: {
     listDisplays(): Promise<DiagnosticsSnapshot['displays']>;
+    listExternalWindows(): Promise<{ windows: ScreenWindowTarget[]; truncated: boolean }>;
     captureActiveWindow(): Promise<CaptureResult>;
+    captureLastExternalWindow(): Promise<CaptureResult>;
+    captureSelectedWindow(target: ScreenWindowTarget): Promise<CaptureResult>;
     captureDisplay(displayId?: string): Promise<CaptureResult>;
     captureRegion(region: {
       x: number;
@@ -864,6 +907,7 @@ export interface CypsBridge {
       width: number;
       height: number;
     }): Promise<CaptureResult>;
+    onGuidanceUpdate(handler: (snapshot: VisualGuidanceSnapshot) => void): () => void;
   };
   system: {
     diagnostics(): Promise<DiagnosticsSnapshot>;
@@ -932,6 +976,7 @@ export type DeepSeekSettingsPatch = {
 export interface CaptureResult {
   ok: boolean;
   image?: ImageAttachment;
+  metadata?: ScreenCaptureMetadata;
   error?: CypsError;
   /** Window title for active-window captures. */
   windowTitle?: string;

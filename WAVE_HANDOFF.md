@@ -1,6 +1,39 @@
 # Pixel implementation handoff
 
-Updated: 2026-11-18
+Updated: 2026-11-19
+
+## Current handoff — Tools 4.1 screen intelligence and visual guidance
+
+- Branch: `codex/interaction-engine-3`; local HEAD
+  `ea110700e37173b2a88708bf617b2b17dbeed9bf`. The working tree is
+  uncommitted for the user to commit and push. Nothing was published.
+- Screen capture now selects exact native window identity instead of relying
+  on Electron capture-source ordering. Window captures use the native helper;
+  display/region capture matches display IDs, records actual dimensions and
+  scale, and refuses ambiguous cross-display regions or changes during
+  capture. Region coordinates are global virtual-desktop Electron DIP.
+- Vision results are identified as model interpretation; UI Automation control
+  details remain separately attributed. Empty vision output, stale targets,
+  ambiguous controls and failed captures do not produce a success claim.
+- The separate guidance window is sandboxed, transparent, click-through,
+  focusless and short-lived. It draws only around a revalidated, unique UIA
+  control. It expires and clears on stale identity, session lock and emergency
+  stop. There is no click/type action in the new guidance workflow.
+- Validation: typecheck passed; focused screen/agent/guidance tests **31/31**;
+  full suite **782 passed, 0 failed, 27 skipped (809 total; 48 files passed,
+  1 skipped)**; production build and native helper build passed. Skips:
+  17 browser cases (Chromium absent), 7 NSIS cases (`makensis` absent), 3
+  opt-in native integration cases.
+- The opt-in native integration was attempted with a harmless blank Notepad
+  fixture and failed **3/3** with `The observed window or process is no longer
+  available.` No real native capture or overlay behavior is verified in this
+  environment. Chromium and NSIS checks are skipped, not passed. The prior
+  development launch is blocked by occupied Vite port 5199 and Electron's
+  pre-app exit `0x80000003`; packaged GPU/renderer failures are separate and
+  unresolved.
+- Follow `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` on the target laptop.
+  Do not begin another feature wave until the foreground-helper failure is
+  diagnosed and the capture-to-highlight flow is observed end to end.
 
 ## Current handoff — Monochrome design and cursor companion
 

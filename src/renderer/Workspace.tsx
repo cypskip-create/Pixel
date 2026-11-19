@@ -229,7 +229,7 @@ export function Workspace(): React.JSX.Element {
   const attachScreenshot = useCallback(async () => {
     if (bridge.kind !== 'ready') return;
     try {
-      const result = await bridge.bridge.screen.captureActiveWindow();
+      const result = await bridge.bridge.screen.captureLastExternalWindow();
       if (result.ok && result.image) setAttachments((current) => [...current, result.image as ImageAttachment].slice(0, 4));
       else setNotice(result.error?.message ?? 'Pixel could not capture the active window.');
     } catch { setNotice('Pixel could not capture the active window.'); }

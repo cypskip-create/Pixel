@@ -18,8 +18,7 @@
 import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { arch, cpus, freemem, platform, release, totalmem } from 'node:os';
-import type { ImageAttachment } from '../../shared/types';
-import type { SearchProvider } from '../../shared/types';
+import type { CaptureResult, ImageAttachment, ScreenWindowTarget, SearchProvider, VisualGuidanceShape } from '../../shared/types';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../../shared/browserSearch';
 import { BrowserSession } from './browser';
 import { DesktopInputLease } from './inputLease';
@@ -93,9 +92,20 @@ export interface ExecutorDeps {
    * Capture access. Only called for `analyze_screen`, and only after the
    * permission flow has approved that specific call.
    */
-  captureDisplay?: (target: 'active_window' | 'display') => Promise<ImageAttachment | null>;
+  captureScreen?: (target: 'active_window' | 'last_external' | 'selected_window' | 'display', selected?: ScreenWindowTarget, displayId?: string) => Promise<CaptureResult>;
   /** Vision analysis of a captured image. */
   describeImage?: (image: ImageAttachment, question: string, signal?: AbortSignal) => Promise<string>;
+  showVisualGuidance?: (request: {
+    target: ScreenWindowTarget;
+    selector: string;
+    role?: string;
+    shape: VisualGuidanceShape;
+    label?: string;
+    step?: number;
+    durationMs: number;
+    bounds: { x: number; y: number; width: number; height: number };
+  }) => Promise<'visible' | 'waiting_foreground' | 'unavailable'>;
+  clearVisualGuidance?: (selector?: string) => void;
   /** Shared browser session, created lazily on first use. */
   browser?: BrowserSession;
   /** Wave 3 memory tools, scoped to the active project. */
@@ -238,6 +248,11 @@ export class ToolExecutors {
           return this.getSystemInfo();
         case 'analyze_screen':
           return await this.analyzeScreen(args, signal);
+        case 'screen_highlight_control':
+          return await this.highlightControl(args, signal);
+        case 'screen_clear_annotations':
+          this.deps.clearVisualGuidance?.(typeof args.selector === 'string' ? args.selector : undefined);
+          return { ok: true, content: 'Pixel visual guidance annotations were cleared.', detail: { cleared: true } };
         case 'get_foreground_window':
           return await this.getForegroundWindow(signal);
         case 'get_last_external_foreground_window':
@@ -338,9 +353,10 @@ export class ToolExecutors {
       typeof args.question === 'string' && args.question.trim().length > 0
         ? args.question.trim()
         : 'Describe what is on the screen.';
-    const target = args.target === 'active_window' ? 'active_window' : 'display';
+    const target = args.target === 'active_window' || args.target === 'last_external' ||
+      args.target === 'selected_window' ? args.target : 'display';
 
-    if (!this.deps.captureDisplay) {
+    if (!this.deps.captureScreen) {
       return {
         ok: false,
         content: 'Screen capture is not available in this build of Pixel.',
@@ -355,17 +371,123 @@ export class ToolExecutors {
       };
     }
 
-    const image = await this.deps.captureDisplay(target);
-    if (!image) {
-      return { ok: false, content: 'The screen could not be captured.', errorCode: 'FAILED' };
+    const hasAnyTargetIdentity = ['targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'].some((key) => args[key] !== undefined);
+    const hasTargetIdentity = typeof args.targetWindowId === 'string' && typeof args.expectedWindowTitle === 'string' &&
+      typeof args.expectedProcessId === 'number' && typeof args.expectedProcessName === 'string';
+    if (hasAnyTargetIdentity && !hasTargetIdentity) {
+      return { ok: false, content: 'The selected window identity is incomplete. Re-list windows and select one exact target.', errorCode: 'FAILED' };
+    }
+    if (target === 'selected_window' && !hasTargetIdentity) {
+      return { ok: false, content: 'Select one exact window from the current external-window list before capturing it.', errorCode: 'FAILED' };
+    }
+    const selected: ScreenWindowTarget | undefined = hasTargetIdentity ? {
+      windowId: args.targetWindowId as string,
+      title: args.expectedWindowTitle as string,
+      pid: args.expectedProcessId as number,
+      processName: args.expectedProcessName as string,
+    } : undefined;
+    const capture = await this.deps.captureScreen(target, selected, typeof args.displayId === 'string' ? args.displayId : undefined);
+    if (!capture.ok || !capture.image) {
+      return {
+        ok: false,
+        content: capture.error?.message ?? 'The screen could not be captured.',
+        errorCode: capture.error?.code === 'TIMEOUT'
+          ? 'TIMEOUT'
+          : capture.error?.code === 'UNAUTHORIZED'
+            ? 'DENIED'
+            : capture.error?.code === 'MODEL_CAPABILITY'
+              ? 'UNAVAILABLE'
+              : 'FAILED',
+        detail: capture.metadata ? { ...capture.metadata } : undefined,
+      };
     }
 
     if (signal?.aborted) return cancelledResult('analyze_screen');
-    const description = await this.deps.describeImage(image, question, signal);
+    const description = (await this.deps.describeImage(capture.image, question, signal)).trim();
+    if (!description) {
+      return { ok: false, content: 'The image was captured, but the configured vision model returned no description.', errorCode: 'FAILED', detail: capture.metadata ? { ...capture.metadata } : undefined };
+    }
+    const metadata = capture.metadata;
+    const observedTarget = metadata?.targetWindow
+      ? metadata.targetWindow.title + ' (' + metadata.targetWindow.processName + ', PID ' + metadata.targetWindow.pid + ')'
+      : (capture.displayLabel ?? 'display ' + (metadata?.displayId ?? 'unknown'));
+    const capturedAt = metadata ? new Date(metadata.capturedAt).toISOString() : 'unknown time';
     return {
       ok: true,
-      content: description,
-      detail: { target, width: image.width, height: image.height, question },
+      content: 'Captured ' + observedTarget + ' at ' + capturedAt + '. The following is vision-model interpretation, not UI Automation verification: ' + description,
+      detail: {
+        target,
+        width: capture.image.width,
+        height: capture.image.height,
+        question,
+        capture: metadata ? { ...metadata } : undefined,
+        observation: { source: 'vision_model', verified: false, capturedAt, uncertainty: 'Visual interpretation is model-inferred; individual control bounds are not verified.' },
+      },
+    };
+  }
+
+  private async highlightControl(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper || !this.deps.showVisualGuidance) {
+      return { ok: false, content: 'Windows UI Automation and the visual-guidance overlay are unavailable.', errorCode: 'UNAVAILABLE' };
+    }
+    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+    const target = selectedWindowTarget(args);
+    if (!selector || !target) {
+      return { ok: false, content: 'Provide an exact UI Automation selector and a complete selected-window identity.', errorCode: 'FAILED' };
+    }
+    const role = typeof args.role === 'string' ? args.role : undefined;
+    const shape: VisualGuidanceShape = args.shape === 'circle' || args.shape === 'arrow' ? args.shape : 'rectangle';
+    const label = typeof args.label === 'string' ? args.label.trim().slice(0, 100) : undefined;
+    const step = typeof args.step === 'number' && Number.isInteger(args.step) && args.step > 0 && args.step <= 99 ? args.step : undefined;
+    const durationMs = typeof args.durationMs === 'number' ? Math.max(3_000, Math.min(30_000, Math.trunc(args.durationMs))) : 8_000;
+    const found = await this.deps.nativeHelper.call('find_elements', {
+      text: selector,
+      ...(role ? { roles: [role] } : {}),
+      maxResults: 25,
+      targetWindowId: target.windowId,
+      expectedWindowTitle: target.title,
+      expectedProcessId: target.pid,
+      expectedProcessName: target.processName,
+    }, signal);
+    if (found.window.windowId !== target.windowId || found.window.pid !== target.pid ||
+      found.window.title !== target.title || found.window.processName.toLocaleLowerCase() !== target.processName.toLocaleLowerCase()) {
+      return { ok: false, content: 'The selected application identity changed during control search. No highlight was drawn.', errorCode: 'FAILED' };
+    }
+    const exact = found.elements.filter((element) =>
+      element.automationId === selector || element.name.localeCompare(selector, undefined, { sensitivity: 'accent' }) === 0);
+    if (exact.length !== 1 || exact[0].rect.width <= 0 || exact[0].rect.height <= 0) {
+      return {
+        ok: false,
+        content: exact.length === 0
+          ? 'Pixel could not verify an exact accessible control named or identified "' + selector + '". No highlight was drawn.'
+          : 'Pixel found ' + exact.length + ' exact matches for "' + selector + '". Choose a more specific accessible name or AutomationId; no highlight was drawn.',
+        errorCode: 'NOT_FOUND',
+        detail: { matchedCount: exact.length, source: 'ui_automation', verified: false },
+      };
+    }
+    if (signal?.aborted) return cancelledResult('screen_highlight_control');
+    const bounds = this.deps.toDipRect?.(exact[0].rect) ?? exact[0].rect;
+    const status = await this.deps.showVisualGuidance({
+      target, selector, ...(role ? { role } : {}), shape, ...(label ? { label } : {}), ...(step ? { step } : {}), durationMs, bounds,
+    });
+    if (status === 'unavailable') {
+      return { ok: false, content: 'Pixel verified the UI Automation control, but could not display the visual guidance. No action was taken.', errorCode: 'UNAVAILABLE' };
+    }
+    const visible = status === 'visible';
+    return {
+      ok: true,
+      content: visible
+        ? 'Pixel verified the exact ' + exact[0].role + ' control "' + exact[0].name + '" in ' + target.title + ' and highlighted its current bounds. You can interact with it yourself; Pixel did not click it.'
+        : 'Pixel verified the exact ' + exact[0].role + ' control "' + exact[0].name + '" in ' + target.title + '. The highlight will appear when that exact application is foreground; Pixel did not switch applications or click it.',
+      detail: {
+        source: 'ui_automation',
+        verified: true,
+        observedAt: found.window.observedAt,
+        annotationStatus: visible ? 'visible' : 'waiting_foreground',
+        target,
+        element: exact[0],
+        bounds,
+      },
     };
   }
 
@@ -473,6 +595,12 @@ export class ToolExecutors {
       elements,
       truncated: result.truncated,
       coordinateSpace: 'electron_dip',
+      observation: {
+        source: 'ui_automation',
+        verified: true,
+        observedAt: result.window.observedAt,
+        uncertainty: 'Only controls exposed in the Windows UI Automation tree are returned.',
+      },
     };
     const lines = elements.map((element, index) =>
       `${index + 1}. ${element.role} "${element.name || '(unnamed)'}"${element.automationId ? ` (AutomationId: ${element.automationId})` : ''}; enabled=${element.enabled}; bounds=${element.rect.x},${element.rect.y},${element.rect.width},${element.rect.height} DIP`,
@@ -1009,6 +1137,21 @@ function cancelledResult(name: string): ToolResult {
     ok: false,
     content: `"${name}" was cancelled before it finished.`,
     errorCode: 'CANCELLED',
+  };
+}
+
+function selectedWindowTarget(args: Record<string, unknown>): ScreenWindowTarget | null {
+  if (typeof args.targetWindowId !== 'string' || !args.targetWindowId ||
+    typeof args.expectedWindowTitle !== 'string' || !args.expectedWindowTitle ||
+    typeof args.expectedProcessName !== 'string' || !args.expectedProcessName ||
+    typeof args.expectedProcessId !== 'number' || !Number.isInteger(args.expectedProcessId) || args.expectedProcessId <= 0) {
+    return null;
+  }
+  return {
+    windowId: args.targetWindowId,
+    title: args.expectedWindowTitle,
+    processName: args.expectedProcessName,
+    pid: args.expectedProcessId,
   };
 }
 

@@ -41,6 +41,8 @@ import type {
   ProjectView,
   WorkspaceWindowState,
   ToolCatalogEntry,
+  ScreenWindowTarget,
+  VisualGuidanceSnapshot,
 } from '../shared/types';
 
 export { CHANNELS } from '../shared/channels';
@@ -142,12 +144,20 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.screenListDisplays) as Promise<
         DiagnosticsSnapshot['displays']
       >,
+    listExternalWindows: () =>
+      ipcRenderer.invoke(CH.screenListExternalWindows) as Promise<{ windows: ScreenWindowTarget[]; truncated: boolean }>,
     captureActiveWindow: () =>
       ipcRenderer.invoke(CH.screenCaptureActiveWindow) as Promise<CaptureResult>,
+    captureLastExternalWindow: () =>
+      ipcRenderer.invoke(CH.screenCaptureLastExternalWindow) as Promise<CaptureResult>,
+    captureSelectedWindow: (target: ScreenWindowTarget) =>
+      ipcRenderer.invoke(CH.screenCaptureSelectedWindow, target) as Promise<CaptureResult>,
     captureDisplay: (displayId?: string) =>
       ipcRenderer.invoke(CH.screenCaptureDisplay, displayId) as Promise<CaptureResult>,
     captureRegion: (region: { x: number; y: number; width: number; height: number }) =>
       ipcRenderer.invoke(CH.screenCaptureRegion, region) as Promise<CaptureResult>,
+    onGuidanceUpdate: (handler: (snapshot: VisualGuidanceSnapshot) => void) =>
+      subscribe(CH.screenGuidanceUpdate, handler),
   },
 
   system: {

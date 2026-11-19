@@ -20,6 +20,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -36,11 +38,15 @@ internal static class Program
     private const int BudgetMs = 1500;
     private const int DefaultResults = 8;
     private const int MaxResults = 25;
+    private const uint PrintWindowFullContent = 2;
+    private const int MaxCaptureDimension = 8192;
+    private const long MaxCapturePixels = 24000000;
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -295,6 +301,8 @@ internal static class Program
                 return ListExternalWindows();
             case "resolve_window_target":
                 return ResolveWindowTarget(args);
+            case "capture_window":
+                return CaptureWindow(args);
             case "find_elements":
                 return FindElements(args);
             case "verify_element_state":
@@ -452,6 +460,60 @@ internal static class Program
             { "processStartTicks", target.ProcessStartTicks.ToString() },
             { "window", PublicWindow(target) }
         };
+    }
+
+    // Captures only the exact, freshly revalidated HWND selected through the
+    // in-memory foreground observer. There is deliberately no fallback to a
+    // desktopCapturer source or another window if PrintWindow is unsupported.
+    private static object CaptureWindow(Dictionary<string, object> args)
+    {
+        WindowRecord selected = ResolveRecord(args);
+        bool requireForeground = args != null && args.ContainsKey("requireForeground") && Convert.ToBoolean(args["requireForeground"]);
+        if (requireForeground && GetForegroundWindow() != selected.Handle)
+            throw new InvalidOperationException("The foreground window changed after observation. Nothing was captured; re-observe the active application.");
+        if (selected.IsMinimized || !IsWindowVisible(selected.Handle))
+            throw new InvalidOperationException("The selected target window is minimized or hidden. Restore it and re-observe before capture.");
+        if (selected.Width < 2 || selected.Height < 2 || selected.Width > MaxCaptureDimension ||
+            selected.Height > MaxCaptureDimension || (long)selected.Width * selected.Height > MaxCapturePixels)
+            throw new InvalidOperationException("The selected target window has unavailable or unsupported capture dimensions.");
+
+        int width = selected.Width;
+        int height = selected.Height;
+        using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            IntPtr hdc = graphics.GetHdc();
+            bool captured;
+            try { captured = PrintWindow(selected.Handle, hdc, PrintWindowFullContent); }
+            finally { graphics.ReleaseHdc(hdc); }
+            if (!captured)
+                throw new InvalidOperationException("Windows did not provide pixels for the selected application. The window was not substituted.");
+
+            // A successful API return is not enough if the HWND was recycled,
+            // renamed or moved during capture.
+            WindowRecord current = RefreshTarget(selected);
+            if (current == null || current.ProcessId != selected.ProcessId ||
+                current.ProcessStartTicks != selected.ProcessStartTicks ||
+                !String.Equals(current.Title, selected.Title, StringComparison.Ordinal) ||
+                current.X != selected.X || current.Y != selected.Y ||
+                current.Width != selected.Width || current.Height != selected.Height)
+                throw new InvalidOperationException("The selected application changed during capture. Re-observe before trying again.");
+            if (requireForeground && GetForegroundWindow() != selected.Handle)
+                throw new InvalidOperationException("The foreground window changed during capture. The image was discarded.");
+
+            using (var output = new MemoryStream())
+            {
+                bitmap.Save(output, ImageFormat.Png);
+                byte[] bytes = output.ToArray();
+                if (bytes.Length > 16 * 1024 * 1024)
+                    throw new InvalidOperationException("The selected window image exceeded Pixel's safe in-memory capture limit.");
+                return new Dictionary<string, object> {
+                    { "window", PublicWindow(current) },
+                    { "width", width }, { "height", height },
+                    { "format", "image/png" }, { "base64", Convert.ToBase64String(bytes) }
+                };
+            }
+        }
     }
 
     private static WindowRecord ResolveRecord(Dictionary<string, object> args)
