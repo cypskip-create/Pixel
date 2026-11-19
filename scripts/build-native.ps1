@@ -24,7 +24,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 & $csc /nologo /target:exe /platform:x64 /optimize+ "/out:$out" "/lib:$wpf" `
   /reference:UIAutomationClient.dll /reference:UIAutomationTypes.dll `
-  /reference:WindowsBase.dll /reference:System.Web.Extensions.dll `
+  /reference:WindowsBase.dll /reference:System.Web.Extensions.dll /reference:System.Drawing.dll `
   $source
 if ($LASTEXITCODE -ne 0) { throw "Compilation failed (exit $LASTEXITCODE)." }
 

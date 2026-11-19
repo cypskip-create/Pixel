@@ -1,6 +1,61 @@
 # Pixel progress
 
-Updated: 2026-11-18. Version: 0.2.1.
+Updated: 2026-11-19. Version: 0.2.1.
+
+## Current checkpoint — Tools 4.1 screen intelligence and visual guidance
+
+Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Local HEAD:
+`ea110700e37173b2a88708bf617b2b17dbeed9bf`. The working tree contains the
+uncommitted implementation below; no commit or push was made. The current
+Windows desktop was exercised, but Pixel's foreground capture integration did
+not pass in this environment, so no real app/overlay acceptance is claimed.
+
+- Replaced Electron source-order guessing for active-window screenshots with
+  the native helper's exact observed window identity and a bounded in-memory
+  `PrintWindow` capture. Captures revalidate process/window identity and can
+  fail closed. Added explicit last-external and selected-window capture paths.
+- Display and region captures correlate only by Electron display ID. Regions
+  use global virtual-desktop DIP, support negative monitor positions and
+  clipping, reject cross-monitor/outside selections, and discard captures if
+  display geometry or scale changes while capture is in flight.
+- Successful captures include a fresh ID/time, target, bounds, display and
+  scale metadata, measured image dimensions and an explicit uncached status.
+  Empty vision output and capture failures are returned as failures; vision
+  text is labeled model-inferred rather than UI Automation verified.
+- Added a separate sandboxed transparent guidance window, kept mouse-click
+  through and focusless. It can show a short-lived rectangle, circle, arrow,
+  label or step number only around one exact UI Automation control. It
+  revalidates target identity, element bounds and foreground state while
+  visible; it expires, clears on stale targets, session lock and emergency
+  stop, and never clicks or types.
+- Added target enumeration/capture and narrowly scoped guidance IPC. React is
+  not given native handles, raw IPC, or window-creation capability. The
+  existing `analyze_screen`, UIA and permission paths are reused.
+- `npm run typecheck`: passed. Focused screen/agent/guidance suite:
+  **31/31 passed**. Full suite: **782 passed, 0 failed, 27 skipped (809 total;
+  48 files passed, 1 skipped)**. The skips are 17 browser cases (Chromium is
+  not installed in this host), 7 NSIS cases (`makensis` is unavailable), and
+  3 opt-in native foreground integration cases.
+- `npm run build`: passed (main TypeScript, bundled sandbox preload, renderer
+  and icon). `npm run build:native`: passed; the C# helper compiled and its
+  protocol smoke command succeeded. `git diff --check`: passed after the
+  documentation update.
+- `npm run test:native-foreground -- --reporter=dot`: **failed 3/3** both
+  before and after focusing a harmless blank Notepad fixture. Each failed
+  because the helper reported `The observed window or process is no longer
+  available.` No native screenshot bytes, Pixel GUI or annotation was
+  verified. Investigate on the target laptop with the exact commands in the
+  Windows acceptance procedure before treating the feature as release-ready.
+- Playwright Chromium and NSIS were not installed; browser and installer test
+  outcomes are therefore skipped, not passed. `npm run dev` is also not
+  accepted as a GUI pass: this host has a process already using Vite port
+  5199, and the Electron child previously exited `2147483651` (`0x80000003`)
+  before Pixel startup. Packaged GPU/renderer-child-process failures remain a
+  separate unresolved diagnosis.
+
+See [`docs/architecture/PIXEL_SCREEN_INTELLIGENCE.md`](docs/architecture/PIXEL_SCREEN_INTELLIGENCE.md)
+and [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+for implementation boundaries, exact commands and the target-laptop procedure.
 
 ## Current checkpoint — Monochrome design and cursor companion repair
 

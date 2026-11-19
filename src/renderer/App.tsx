@@ -30,6 +30,7 @@ import { RecentChatsPanel } from '@/components/RecentChatsPanel';
 import { ResponseBubble } from '@/components/ResponseBubble';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { TaskStrip } from '@/components/TaskStrip';
+import { VisualGuidanceOverlay } from '@/components/VisualGuidanceOverlay';
 import { BridgeContext } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useMotionPolicy } from '@/hooks/useMotion';
@@ -53,6 +54,10 @@ function isWorkspaceWindow(): boolean {
   return new URLSearchParams(window.location.search).get('window') === 'workspace';
 }
 
+function isGuidanceWindow(): boolean {
+  return new URLSearchParams(window.location.search).get('window') === 'guidance';
+}
+
 interface PushToTalkCaptureRecord {
   sessionId: number;
   capture: MicrophoneCapture;
@@ -64,7 +69,7 @@ export function App(): React.JSX.Element {
   const bridge = readBridge();
   return (
     <BridgeContext.Provider value={bridge}>
-      {isSettingsWindow() ? <SettingsWindow /> : isCursorWindow() ? <CursorCompanionWindow /> : isWorkspaceWindow() ? <Workspace /> : <Companion />}
+      {isGuidanceWindow() ? <VisualGuidanceOverlay /> : isSettingsWindow() ? <SettingsWindow /> : isCursorWindow() ? <CursorCompanionWindow /> : isWorkspaceWindow() ? <Workspace /> : <Companion />}
     </BridgeContext.Provider>
   );
 }
@@ -650,7 +655,7 @@ function Companion(): React.JSX.Element {
     }
     const api = bridge.bridge.screen;
     void api
-      .captureActiveWindow()
+      .captureLastExternalWindow()
       .then((result) => {
         if (!result.ok || !result.image) {
           showNotice(result.error?.message ?? 'Pixel could not capture the screen.');

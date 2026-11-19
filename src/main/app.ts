@@ -6,7 +6,7 @@
  * concerns (single instance, startup, clean quit) also live here.
  */
 
-import { app, BrowserWindow, Menu, powerMonitor, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, powerMonitor, screen, session, shell } from 'electron';
 import { existsSync } from 'node:fs';
 import { release as osRelease } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +26,7 @@ import { ScreenCapture } from './screen';
 import { SettingsStore } from './settings';
 import { ShortcutManager } from './shortcuts';
 import { PushToTalkReleaseWatcher } from './services/pushToTalkReleaseWatcher';
+import { NativeHelper } from './services/nativeHelper';
 import { TrayController } from './tray';
 import { WindowManager } from './window';
 
@@ -220,9 +221,43 @@ export async function start(): Promise<void> {
 
   // Capture is authorized per explicit UI action only.
   let captureAuthorized = false;
+  const nativeHelper = new NativeHelper({ executablePath: nativeHelperPath(), exists: existsSync });
+  try {
+    await nativeHelper.startForegroundTracking();
+  } catch (error) {
+    boot.warn(`Foreground-window tracking is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  windows.setGuidanceTargetValidator(async (target, selector, role) => {
+    const args = {
+      targetWindowId: target.windowId,
+      expectedWindowTitle: target.title,
+      expectedProcessId: target.pid,
+      expectedProcessName: target.processName,
+    };
+    const found = await nativeHelper.call('find_elements', {
+      text: selector,
+      ...(role ? { roles: [role] } : {}),
+      maxResults: 25,
+      ...args,
+    });
+    if (found.window.windowId !== target.windowId || found.window.pid !== target.pid ||
+      found.window.title !== target.title || found.window.processName.toLocaleLowerCase() !== target.processName.toLocaleLowerCase()) {
+      return { status: 'stale' as const };
+    }
+    const matches = found.elements.filter((element) =>
+      element.automationId === selector || element.name.localeCompare(selector, undefined, { sensitivity: 'accent' }) === 0);
+    if (matches.length !== 1 || matches[0].rect.width <= 0 || matches[0].rect.height <= 0) return { status: 'stale' as const };
+    const foreground = await nativeHelper.call('foreground_window', {});
+    const rect = screen.screenToDipRect(null, matches[0].rect);
+    return {
+      status: foreground?.windowId === target.windowId ? 'foreground' as const : 'background' as const,
+      bounds: rect,
+    };
+  });
   const captures = new ScreenCapture({
     isAuthorized: () => captureAuthorized,
-    ownSourceIds: () => BrowserWindow.getAllWindows().map((w) => w.getMediaSourceId()),
+    nativeHelper,
+    ownProcessIds: () => [process.pid],
   });
   void captureAuthorized;
 
@@ -232,13 +267,31 @@ export async function start(): Promise<void> {
     settings: store,
     windows,
     provider,
+    nativeHelper,
     captures: {
       isAuthorized: () => captureAuthorized,
       listDisplays: () => captures.listDisplays(),
+      listExternalWindows: () => captures.listExternalWindows(),
       captureActiveWindow: async () => {
         captureAuthorized = true;
         try {
           return await captures.captureActiveWindow();
+        } finally {
+          captureAuthorized = false;
+        }
+      },
+      captureLastExternalWindow: async () => {
+        captureAuthorized = true;
+        try {
+          return await captures.captureLastExternalWindow();
+        } finally {
+          captureAuthorized = false;
+        }
+      },
+      captureSelectedWindow: async (target) => {
+        captureAuthorized = true;
+        try {
+          return await captures.captureSelectedWindow(target);
         } finally {
           captureAuthorized = false;
         }

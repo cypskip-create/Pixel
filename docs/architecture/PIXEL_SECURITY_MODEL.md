@@ -11,6 +11,7 @@
 | Browser to network | Only HTTP(S), public DNS destinations and allowed connected addresses are surfaced. Requests are checked, including redirects and subresources. | A DNS rebind can connect before the post-connect check rejects the page; an egress proxy is needed to prevent that network connection entirely. |
 | Task state to disk | Zod validates snapshots; common credential patterns and sensitive argument fields are redacted; typed text and file-write bodies are not stored in task args. | SQLite task text is not application-layer encrypted, and redaction is pattern-based. Windows account/file permissions remain important. |
 | Provider key | Electron `safeStorage` encrypts the DeepSeek key (DPAPI on Windows); if encryption is unavailable, Pixel refuses to persist it. The renderer never receives the plaintext key. | This is a provider API-key store, not a general-purpose credential vault. |
+| Screen capture and guidance | Capture requires the existing explicit screen approval. Window IDs remain opaque in the renderer; native capture revalidates exact window/process identity. The visual overlay accepts a revalidated unique UIA control, remains passive/click-through, expires, and clears on stale target, lock or emergency stop. | Vision output is model interpretation. Native capture and the visible overlay have not passed target-laptop acceptance; current native integration fails before producing a screenshot in this host. |
 
 ## Approval behavior
 
@@ -20,6 +21,15 @@
 - **Stop:** emergency stop blocks future tool dispatch, revokes grants, rejects a pending prompt, cancels the current task and terminates controllable workers.
 
 Approval cards identify the proposed action, target, risk and whether a lasting scoped grant is available. Native UIA reads require approval; `invoke_ui_element` is a high-risk state change, shows the exact foreground title, selector and expected accessible UI state, and is single-use. Current tools do not include external messaging, purchase, payment, elevated-command or production-infrastructure actions.
+
+`analyze_screen`, `find_ui_elements` and `screen_highlight_control` use the
+existing high-risk, per-request approval behavior. A highlight is observation
+guidance only and cannot grant permission to invoke a control. The clear
+annotations command only removes Pixel's own temporary marks and does not
+require approval. Display and region capture requests are correlated to exact
+display IDs; ambiguous or stale identity fails closed. Captured images remain
+in memory in the screen service and are not persisted to chat/task history by
+default.
 
 ## Secret handling
 

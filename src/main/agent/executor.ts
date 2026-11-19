@@ -51,7 +51,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_read', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_read', 'documents_search', 'documents_list']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {
@@ -771,6 +771,10 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return 'Read system information';
     case 'analyze_screen':
       return 'Looked at the screen';
+    case 'screen_highlight_control':
+      return 'Highlight an exact accessible control';
+    case 'screen_clear_annotations':
+      return 'Clear visual guidance';
     case 'get_foreground_window':
       return 'Read the foreground window title and bounds';
     case 'get_last_external_foreground_window':

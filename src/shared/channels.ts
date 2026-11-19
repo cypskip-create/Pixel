@@ -51,9 +51,13 @@ export const CHANNELS = {
   historyActiveChanged: 'history:activeChanged',
 
   screenListDisplays: 'screen:listDisplays',
+  screenListExternalWindows: 'screen:listExternalWindows',
   screenCaptureActiveWindow: 'screen:captureActiveWindow',
+  screenCaptureLastExternalWindow: 'screen:captureLastExternalWindow',
+  screenCaptureSelectedWindow: 'screen:captureSelectedWindow',
   screenCaptureDisplay: 'screen:captureDisplay',
   screenCaptureRegion: 'screen:captureRegion',
+  screenGuidanceUpdate: 'screen:guidanceUpdate',
 
   systemDiagnostics: 'system:diagnostics',
   systemEmergencyStop: 'system:emergencyStop',

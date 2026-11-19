@@ -14,7 +14,7 @@
 
 import { app, ipcMain, screen, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AppSettings,
@@ -43,6 +43,7 @@ import type {
   PixelMemoryKind,
   SearchProvider,
   ToolCatalogEntry,
+  ScreenWindowTarget,
 } from '../shared/types';
 import { DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
@@ -60,7 +61,7 @@ import { DocumentIndex } from './documents/indexer';
 import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
 import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
 import { PythonWorker } from './services/python-worker';
-import { NativeHelper } from './services/nativeHelper';
+import type { NativeHelper } from './services/nativeHelper';
 import { VoiceService } from './voice/voice';
 import type { RecognitionResult } from './voice/voice';
 import { VISION_MODEL } from '../shared/types';
@@ -92,17 +93,16 @@ export interface IpcContext {
   settings: SettingsStore;
   windows: WindowManager;
   provider: ModelProvider;
+  nativeHelper: NativeHelper;
   captures: {
     isAuthorized: () => boolean;
     listDisplays: () => DiagnosticsSnapshot['displays'];
+    listExternalWindows: () => Promise<{ windows: ScreenWindowTarget[]; truncated: boolean }>;
     captureActiveWindow: () => Promise<CaptureResult>;
+    captureLastExternalWindow: () => Promise<CaptureResult>;
+    captureSelectedWindow: (target: ScreenWindowTarget) => Promise<CaptureResult>;
     captureDisplay: (displayId?: string) => Promise<CaptureResult>;
-    captureRegion: (region: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    }) => Promise<CaptureResult>;
+    captureRegion: (region: { x: number; y: number; width: number; height: number }) => Promise<CaptureResult>;
   };
   /** Request the UI's permission prompt surfaces. */
   sendToRenderer: (channel: string, payload: unknown) => void;
@@ -141,7 +141,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   cancelVoiceCapture: () => void;
   shutdown: () => void;
 }> {
-  const { settings, windows, provider, captures } = context;
+  const { settings, windows, provider, captures, nativeHelper } = context;
 
   const registerHandler = (
     channel: string,
@@ -303,16 +303,6 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
   const fileTools = new FileTools();
 
-  const nativeExecutable = app.isPackaged
-    ? join(process.resourcesPath, 'native', 'PixelNative.exe')
-    : join(app.getAppPath(), 'native', 'bin', 'PixelNative.exe');
-  const nativeHelper = new NativeHelper({ executablePath: nativeExecutable, exists: existsSync });
-  try {
-    await nativeHelper.startForegroundTracking();
-  } catch (error) {
-    boot.warn(`Foreground-window tracking is unavailable: ${error instanceof Error ? error.message : String(error)}`);
-  }
-
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
     ...MEMORY_TOOL_DEFINITIONS,
@@ -399,6 +389,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       conversation.abort();
       agent.cancel('stop');
       routineScheduler?.cancelAll();
+      windows.clearVisualGuidance();
       return wasRunning;
     },
     killChildren: () => {
@@ -442,7 +433,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       timeoutMs: 60_000,
       onEvent: () => undefined,
     });
-    return result.content || 'The screen was captured but nothing could be read from it.';
+    return result.content?.trim() ?? '';
   };
 
   // One browser session per app run, closed by the emergency stop.
@@ -463,14 +454,19 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     toDipRect: (rect) => screen.screenToDipRect(null, rect),
     requestHumanTakeover: (taskId, reason, signal) =>
       tasks.waitForHuman(taskId, reason, signal ?? new AbortController().signal),
-    captureDisplay: async (target) => {
-      const result =
-        target === 'active_window'
-          ? await captures.captureActiveWindow()
-          : await captures.captureDisplay();
-      return result.ok && result.image ? result.image : null;
+    captureScreen: async (target, selected, displayId) => {
+      if (target === 'active_window') return captures.captureActiveWindow();
+      if (target === 'last_external') return captures.captureLastExternalWindow();
+      if (target === 'selected_window') {
+        return selected
+          ? captures.captureSelectedWindow(selected)
+          : { ok: false, error: { code: 'BAD_REQUEST', message: 'Select one exact window before capture.', retryable: false } };
+      }
+      return captures.captureDisplay(displayId);
     },
     describeImage,
+    showVisualGuidance: (request) => windows.showVisualGuidance(request),
+    clearVisualGuidance: (selector) => windows.clearVisualGuidance(selector),
   });
 
   const agent = new AgentExecutor({
@@ -1030,7 +1026,19 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   /* ------------------------------ screen ----------------------------- */
 
   registerHandler(CHANNELS.screenListDisplays, () => captures.listDisplays());
+  registerHandler(CHANNELS.screenListExternalWindows, () => captures.listExternalWindows());
   registerHandler(CHANNELS.screenCaptureActiveWindow, () => captures.captureActiveWindow());
+  registerHandler(CHANNELS.screenCaptureLastExternalWindow, () => captures.captureLastExternalWindow());
+  registerHandler(CHANNELS.screenCaptureSelectedWindow, (_event, target: ScreenWindowTarget) => {
+    if (!target || typeof target.windowId !== 'string' || typeof target.title !== 'string' ||
+      typeof target.processName !== 'string' || !Number.isInteger(target.pid)) {
+      return {
+        ok: false,
+        error: { code: 'BAD_REQUEST', message: 'Select an exact current window target before capture.', retryable: false },
+      } satisfies CaptureResult;
+    }
+    return captures.captureSelectedWindow(target);
+  });
   registerHandler(CHANNELS.screenCaptureDisplay, (_event, displayId?: string) =>
     captures.captureDisplay(displayId),
   );
@@ -1245,6 +1253,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       voice.cancelAll();
       void pythonWorker.shutdown();
       executors.killAll();
+      nativeHelper.dispose();
     },
   };
 }
