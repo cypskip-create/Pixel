@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, X } from 'lucide-react';
-import type { AppSettings, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
+import type { AppSettings, AssistantState, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
@@ -8,6 +8,8 @@ import { AutomationPanel } from '@/components/AutomationPanel';
 import { MemoryPanel } from '@/components/MemoryPanel';
 import { PermissionsPanel } from '@/components/PermissionsPanel';
 import { PixelMark } from '@/components/PixelMark';
+import { PixMascot } from '@/components/PixMascot';
+import { CursorBuddy } from '@/components/CursorBuddy';
 import { MicrophoneCapture, type VoiceCaptureDiagnostics } from '@/lib/audioCapture';
 
 interface SettingsPanelProps {
@@ -55,6 +57,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
     workspaceLayout = false,
   } = props;
   const [advanced, setAdvanced] = useState(false);
+  const [cursorPreview, setCursorPreview] = useState(false);
+  const [pixPreviewState, setPixPreviewState] = useState<AssistantState>('idle');
   const [automationOpen, setAutomationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -432,19 +436,30 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 step={1}
                 value={settings.companion.topOffset}
                 onChange={(event) => onPatch({ companion: { topOffset: Number(event.target.value) } })}
-                className="no-drag w-24 accent-neutral-300"
+                className="no-drag w-24 settings-accent-control"
               />
               {settings.companion.topOffset}px
             </label>
           </Row>
           <Toggle
             label="Show cursor companion"
-            hint="A separate click-through orb follows the pointer. It pauses while the bar is open."
+            hint="A separate pointer-shaped, click-through companion follows your pointer over ordinary apps and the Workspace. It pauses while Settings is open or Windows is locked."
             checked={settings.companion.cursorCompanionEnabled}
-            onChange={(value) => onPatch({ companion: { cursorCompanionEnabled: value } })}
+            onChange={(value) => {
+              onPatch({ companion: { cursorCompanionEnabled: value } });
+              if (!value) setCursorPreview(false);
+            }}
           />
           {settings.companion.cursorCompanionEnabled ? (
             <>
+              <div className="flex min-h-9 items-center justify-between gap-3 px-1">
+                <div className="min-w-0 flex-1">
+                  <span className="block text-[11px] font-medium text-[var(--color-ink-soft)]">Cursor Buddy preview</span>
+                  <span className="block text-[10px] leading-snug text-[var(--color-ink-dim)]">Try the separate pointer companion here.</span>
+                </div>
+                <button type="button" aria-expanded={cursorPreview} onClick={() => setCursorPreview((value) => !value)} className="min-h-8 rounded-lg border border-[var(--color-border)] px-2.5 text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-[var(--color-hover)]">{cursorPreview ? 'Hide preview' : 'Preview companion'}</button>
+              </div>
+              {cursorPreview ? <div className="settings-cursor-preview" role="img" aria-label="Cursor Buddy preview; the desktop follower window is not active while Settings is open"><CursorBuddy reducedMotion={settings.companion.reducedMotion} /><span className="text-[10px] text-[var(--color-ink-dim)]">Settings preview only. The desktop window appears after Settings closes.</span></div> : null}
               <Row label="Follow speed">
                 <label className="flex items-center gap-2 text-[10px] text-[var(--color-ink-dim)]">
                   <input
@@ -455,7 +470,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     step={0.25}
                     value={settings.companion.followSpeed}
                     onChange={(event) => onPatch({ companion: { followSpeed: Number(event.target.value) } })}
-                    className="no-drag w-24 accent-neutral-300"
+                    className="no-drag w-24 settings-accent-control"
                   />
                   {settings.companion.followSpeed.toFixed(2)}×
                 </label>
@@ -490,6 +505,17 @@ export function SettingsPanel(props: SettingsPanelProps) {
               </Row>
             </>
           ) : null}
+
+          <div className="settings-pix-preview">
+            <PixMascot size={48} state={pixPreviewState} reducedMotion={settings.companion.reducedMotion} decorative />
+            <div className="min-w-0 flex-1">
+              <span className="block text-[11px] font-medium text-[var(--color-ink-soft)]">Pix expression preview</span>
+              <span className="block text-[10px] leading-snug text-[var(--color-ink-dim)]">Local preview only; real assistant state controls Pix elsewhere.</span>
+            </div>
+            <select aria-label="Preview Pix expression" value={pixPreviewState} onChange={(event) => setPixPreviewState(event.target.value as AssistantState)} className="no-drag max-w-[145px] rounded-lg border border-[var(--color-border)] bg-[var(--color-app-bg)] px-2 py-1.5 text-[10.5px] text-[var(--color-ink-soft)]">
+              <option value="idle">Idle</option><option value="listening">Listening</option><option value="thinking">Thinking</option><option value="executing">Working</option><option value="speaking">Speaking</option><option value="success">Success</option><option value="waiting_for_approval">Needs approval</option><option value="error">Error</option><option value="stopped">Stopped</option>
+            </select>
+          </div>
 
           <Toggle
             label="Collapse after answering"
@@ -633,7 +659,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </Row>}
           <Row label="Speech rate">
             <div className="flex items-center gap-2">
-              <input aria-label="Speech rate" type="range" min="0.7" max="1.3" step="0.1" value={settings.voice.ttsRate} onChange={(event) => onPatch({ voice: { ttsRate: Number(event.target.value) } })} className="no-drag w-24 accent-neutral-300" />
+              <input aria-label="Speech rate" type="range" min="0.7" max="1.3" step="0.1" value={settings.voice.ttsRate} onChange={(event) => onPatch({ voice: { ttsRate: Number(event.target.value) } })} className="no-drag w-24 settings-accent-control" />
               <span className="w-8 text-right text-[10px] text-[var(--color-ink-dim)]">{settings.voice.ttsRate.toFixed(1)}×</span>
             </div>
           </Row>
@@ -658,11 +684,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <span className="text-[10px] text-[var(--color-ink-dim)]">30-second limit · never sent to chat</span>
           </div>
           <label className="mx-1 flex items-center gap-2 pb-1 text-[10px] text-[var(--color-ink-dim)]">
-            <input type="checkbox" checked={showCaptureDiagnostics} onChange={(event) => setShowCaptureDiagnostics(event.target.checked)} className="no-drag accent-neutral-300" />
+            <input type="checkbox" checked={showCaptureDiagnostics} onChange={(event) => setShowCaptureDiagnostics(event.target.checked)} className="no-drag settings-accent-control" />
             Show capture diagnostics for the next voice test
           </label>
           <label className="mx-1 flex items-center gap-2 pb-1 text-[10px] text-[var(--color-ink-dim)]">
-            <input type="checkbox" checked={allowDiagnosticAudioSave} onChange={(event) => { setAllowDiagnosticAudioSave(event.target.checked); if (!event.target.checked) setDiagnosticAudio(null); }} className="no-drag accent-neutral-300" />
+            <input type="checkbox" checked={allowDiagnosticAudioSave} onChange={(event) => { setAllowDiagnosticAudioSave(event.target.checked); if (!event.target.checked) setDiagnosticAudio(null); }} className="no-drag settings-accent-control" />
             Keep the next 30-second test recording in memory so I can save it
           </label>
           {voiceTestResult ? <div className="mx-1 rounded-lg border border-white/10 bg-black/20 p-2 text-[10px]" aria-live="polite">
@@ -1116,19 +1142,18 @@ function Toggle({
     <label className="no-drag flex cursor-pointer items-start gap-2.5 rounded-xl px-1.5 py-1.5 hover:bg-white/6">
       <input
         type="checkbox"
+        role="switch"
+        aria-label={label}
+        aria-checked={checked}
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="sr-only"
+        className="settings-toggle-input sr-only"
       />
       <span
         aria-hidden="true"
-        className={`mt-0.5 flex h-4 w-7 shrink-0 items-center rounded-full border p-px transition-colors duration-[var(--cyps-duration-fast)] ${
-          checked
-            ? 'justify-end border-neutral-400/50 bg-neutral-500/40'
-            : 'justify-start border-[var(--color-border)] bg-white/8'
-        }`}
+        className={`settings-toggle-track mt-0.5 flex h-[18px] w-[34px] shrink-0 items-center rounded-full border p-[2px] transition-colors duration-[var(--cyps-duration-fast)] ${checked ? 'justify-end' : 'justify-start'}`}
       >
-        <span className="h-2.5 w-2.5 rounded-full bg-white shadow-sm" />
+        <span className="h-[11px] w-[11px] rounded-full shadow-sm transition-transform duration-[var(--cyps-duration-fast)]" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[11.5px] text-[var(--color-ink-soft)]">{label}</span>

@@ -13,6 +13,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
+  AssistantState,
   Mode,
   AuditEntry,
   CaptureResult,
@@ -113,6 +114,11 @@ const bridge: CypsBridge = {
       subscribe(CH.windowCursorMotion, handler),
     onCursorPlacement: (handler: (orientation: { flipX: boolean; flipY: boolean }) => void) =>
       subscribe(CH.windowCursorPlacement, handler),
+    setCursorAssistantState: (state: AssistantState) =>
+      ipcRenderer.invoke(CH.windowSetCursorState, state) as Promise<void>,
+    cursorRendererReady: () => ipcRenderer.invoke(CH.windowCursorRendererReady) as Promise<void>,
+    onCursorAssistantState: (handler: (state: AssistantState) => void) =>
+      subscribe(CH.windowCursorState, handler),
   },
 
   chat: {

@@ -17,6 +17,16 @@ are stored durably; work interrupted by restart is restored as paused and is
 never resumed automatically. State-changing actions that lack postcondition
 evidence finish as **Needs verification**.
 
+The current uncommitted Experience Polish 5.0 working tree adds the official
+Pix mascot (silver shell, dark face, folded mint corner) to Workspace and the
+expanded Island, with a separate pointer-shaped Cursor Buddy. It also adds a
+bounded, home-scoped file search/metadata/folder/copy/rename subset and changes
+Settings switches to accessible, clearly distinct sage-on and charcoal-off
+states. These changes are not yet backed by a new GitHub Actions run, packaged
+build or laptop screenshots. See the
+[`Experience Polish 5.0 readiness report`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
+for exact status and acceptance commands.
+
 Recent Chats restores conversations saved while `privacy.persistHistory` is
 enabled. Stored transcripts contain sanitized user-facing messages; disabling
 history keeps new conversation data in the current session only. Explicit web
@@ -33,8 +43,8 @@ for live settings and packaged-app checks.
 
 Use [`docs/research/PIXEL_CURRENT_STATE.md`](docs/research/PIXEL_CURRENT_STATE.md)
 for the source-backed feature inventory. The latest command results, exact test
-totals, release blockers and laptop-side commands are in
-[`docs/validation/PIXEL_RELEASE_READINESS.md`](docs/validation/PIXEL_RELEASE_READINESS.md).
+totals, release blockers and laptop-side commands for this working tree are in
+[`docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md).
 Type checking, unit tests and production builds do not prove the Windows window,
 tray, microphone, installer or multi-monitor behavior. Follow
 [`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
@@ -53,14 +63,16 @@ sidebar, secondary areas live under Library, and execution details appear only
 when requested. Approval cards remain visible with the conversation; the mode
 selector and message composer stay compact until needed.
 
-Pixel uses a shared black-and-charcoal monochrome design system across the
-Workspace and floating Island. Visible surfaces are opaque; Windows Acrylic,
-Mica and CSS backdrop blur are not used. The approved P geometry is rendered in
-grayscale within the app. `npm run dev:gpu` is available for separate GPU
+Pixel uses a shared black-and-charcoal surface system across the Workspace and
+floating Island, with a restrained sage interactive accent and silver/mint Pix
+artwork. Visible surfaces are opaque; Windows Acrylic, Mica and CSS backdrop
+blur are not used. The approved P geometry is rendered in grayscale within the
+app. `npm run dev:gpu` is available for separate GPU
 diagnostics; regular `npm run dev` continues to pass `--disable-gpu`. See the
 [design token reference](docs/architecture/PIXEL_DESIGN_TOKENS.md) and the
-[current validation report](docs/validation/INTERACTION_ENGINE_3_READINESS.md)
-for verified and unverified behavior.
+[current validation report](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
+for verified and unverified behavior. Pix's silver and mint are character-only
+artwork accents; the Workspace/Island surfaces remain charcoal.
 
 Type checks, automated tests and production builds do not prove the restored UI
 over real desktop content. The Windows visual comparison and packaged startup
@@ -82,7 +94,7 @@ and [`docs/architecture/PIXEL_SECURITY_MODEL.md`](docs/architecture/PIXEL_SECURI
 
 ### The three Windows distributions
 
-Every build produces three files in `release\`:
+`npm run dist` produces three files in `release\`:
 
 | File | Use it when |
 | --- | --- |

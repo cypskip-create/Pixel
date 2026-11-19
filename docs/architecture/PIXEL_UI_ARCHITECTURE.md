@@ -1,6 +1,6 @@
 # Pixel UI architecture
 
-Updated: 2026-11-18
+Updated: 2026-11-19
 
 ## Companion panel layout and Dynamic Island (Interaction Engine 3.0)
 
@@ -77,13 +77,17 @@ The critically damped follower runs at 30 Hz only while the companion is
 visible, bounds native-window lag to 12 DIP, and skips native position writes
 while stationary. Pointer jumps of 160 DIP or more, monitor changes and pauses
 of 500 ms or more snap it to the current pointer target. Reduced motion also
-uses direct placement. The companion is visible only while the main Island is
-compact and idle. It is hidden while a Pixel Settings/Workspace window is open,
-the Island is expanded or hidden, or the session is locked/suspended. Returning
-to compact mode, closing Pixel windows or resuming the session repositions it
-at the current pointer before showing it. Disabling the feature closes the
-window and stops its timer. It does not capture screenshots or take a
-desktop-input lease.
+uses direct placement. Current visibility follows the enabled preference,
+Settings/lock/suspend lifecycle and native renderer readiness; it is not tied
+to the Island being idle or Workspace being closed. The real desktop window is
+hidden while Settings is open so that its separate, labeled artwork preview
+does not imply that the native follower is active. Closing Settings repositions
+the companion at the current pointer before showing it. A typed ready
+acknowledgement, bounded readiness wait and load/crash diagnostics replace
+reliance on `ready-to-show` alone. Disabling the feature closes the window and
+stops its timer. It does not capture screenshots or take a desktop-input
+lease. Native visibility, focuslessness, click-through and multi-monitor
+behavior still require Windows GUI acceptance.
 
 Settings exposes the pinned top-bar status, explicit display selection, a
 10–14 px top offset and the independent cursor-companion toggle with speed,
@@ -198,7 +202,7 @@ formats. Failed/completed task cards dismiss after four seconds without deleting
 their persisted task evidence. The Settings window is sized around its compact,
 internally scrolling panel.
 
-## Supplied P mark and monochrome surfaces
+## Supplied P mark and dark surfaces
 
 The user supplied the visual reference used for the Pixel mark. Its geometry is
 hand-traced once in [`src/shared/pixelMark.json`](../../src/shared/pixelMark.json):
@@ -214,14 +218,41 @@ The floating companion keeps a transparent native window so its rounded shape
 works over the desktop; visible panels use opaque black/charcoal fills. The
 shared semantic palette is documented in
 [`PIXEL_DESIGN_TOKENS.md`](PIXEL_DESIGN_TOKENS.md). The Workspace and Island use
-the same grayscale tokens for surfaces, selected controls and state feedback.
+the same black/charcoal surface tokens, with restrained sage selected/live
+states and warm semantic warning/error colors.
 The companion and Workspace select the `none` system backdrop and do not apply
 CSS `backdrop-filter`, Mica or Acrylic. The lower companion toolbar remains an
 unboxed row; the approved P geometry and controls remain.
 
+## Official Pix mascot and Cursor Buddy separation
+
+`src/renderer/components/PixMascot.tsx` is the canonical application mascot.
+Its one SVG geometry renders the silver rounded-square shell, near-black face,
+folded mint upper-right corner, mint eyes, small arms and feet. `state` maps the
+existing `AssistantState` into idle, listening, thinking, working, speaking,
+success, concerned or stopped expressions. Workspace header/empty-chat/current
+response and expanded-Island placements reuse this component at different
+sizes; historical message avatars are static. The official P mark remains a
+separate brand asset. Settings provides a preview of Pix expressions.
+
+`src/renderer/hooks/useCompanionAnimation.ts` owns the bounded idle blink
+scheduler. It pauses while the document is hidden, observes both Pixel's
+reduced-motion setting and the operating-system preference, and clears timers
+on state change/unmount. State-specific body/expression motion is CSS based;
+no assistant events are synthesized. Screenshot and timing acceptance at 140,
+96, 64, 40, 32 and message-avatar sizes is still pending on Windows.
+
+See [`PIXEL_COMPANIONS.md`](PIXEL_COMPANIONS.md) for state mapping and separate
+Pix/Cursor Buddy acceptance criteria.
+
+Cursor Buddy remains separate pointer-shaped artwork in its own transparent,
+click-through, focusless native window. Pix never follows pointer coordinates.
+Settings can preview Cursor Buddy's appearance but labels this as preview-only
+while the desktop window is hidden.
+
 The last observed development launch in this environment stopped before
 creating a Pixel window: Electron exited with `2147483651` (`0x80000003`) after
-the native helper compiled. The monochrome surfaces, cursor placement and
+the native helper compiled. The charcoal surfaces, cursor placement and
 GPU-enabled launch have not been visually verified here. GPU acceleration is
 not disabled in production; `npm run dev:electron` retains `--disable-gpu` as a
 diagnostic launch, and `npm run dev:gpu` remains available for a separate

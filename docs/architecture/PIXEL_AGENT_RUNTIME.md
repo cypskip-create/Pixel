@@ -37,6 +37,19 @@ flowchart TD
 
 The plan is currently the sequence of model-proposed calls. There is no separate structured plan object or independent planner approval stage.
 
+## Experience Polish 5.0 file-operation subset
+
+`src/main/files/toolset.ts` retains the existing list/read/write tools and adds
+bounded `file_search`, `file_metadata`, one-level `directory_create`,
+`file_copy` and `file_rename`. Search is capped by depth and entry count,
+skips hidden/sensitive/symlink entries, and returns metadata rather than file
+contents. The new operations are constrained to the user's home scope, use
+the existing approval gateway, avoid overwrite, and verify destination
+metadata/content before reporting success. Rename copies exclusively and
+verifies the destination before source deletion; a failed copy verification
+leaves the source intact. Clipboard orchestration and additional unrestricted
+application-control interfaces were not added in this checkpoint.
+
 ## Durable state and restart behavior
 
 SQLite migration 6 includes task snapshots/events, project memories, versioned skills and durable routine occurrences. Each task snapshot is Zod-validated, written transactionally with a compact status/step event, and redacted before storage. A malformed task row is skipped rather than preventing other rows from loading.

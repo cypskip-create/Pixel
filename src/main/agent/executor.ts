@@ -51,7 +51,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_read', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_list', 'file_read', 'file_search', 'file_metadata', 'documents_search', 'documents_list']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {
@@ -834,6 +834,16 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return `Read file ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
     case 'file_write':
       return `${args.overwrite === true ? 'Replace' : 'Create'} file ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_search':
+      return `Search ${typeof args.directory === 'string' ? args.directory : 'a folder'} for files matching “${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : ''}”`;
+    case 'file_metadata':
+      return `Inspect metadata for ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'directory_create':
+      return `Create directory ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_copy':
+      return `Copy ${typeof args.source === 'string' ? args.source : '(unknown source)'} to ${typeof args.destination === 'string' ? args.destination : '(unknown destination)'}`;
+    case 'file_rename':
+      return `Rename ${typeof args.source === 'string' ? args.source : '(unknown source)'} to ${typeof args.destination === 'string' ? args.destination : '(unknown destination)'}`;
     default:
       return name;
   }
@@ -879,6 +889,9 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'find_ui_elements') return typeof args.targetWindowId === 'string' ? describeWindowTarget(args) : 'the foreground window';
   if (name === 'invoke_ui_element' || name === 'verify_ui_state') return describeWindowTarget(args);
   if (name === 'file_list' && typeof args.directory === 'string') return args.directory;
+  if (name === 'file_search' && typeof args.directory === 'string') return `${args.directory} (name: ${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : ''})`;
+  if ((name === 'file_metadata' || name === 'directory_create') && typeof args.path === 'string') return args.path;
+  if ((name === 'file_copy' || name === 'file_rename') && typeof args.source === 'string' && typeof args.destination === 'string') return `${args.source} → ${args.destination}`;
   if ((name === 'file_read' || name === 'file_write') && typeof args.path === 'string') return args.path;
   return 'this computer';
 }

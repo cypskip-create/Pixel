@@ -7,10 +7,10 @@
  * existing file unless `overwrite: true` is part of the approved call.
  */
 
-import { lstatSync, opendirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { constants as fsConstants, copyFileSync, lstatSync, mkdirSync, opendirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '../../shared/types';
 
 export const MAX_FILE_WRITE_CHARS = 64_000;
@@ -18,6 +18,9 @@ export const MAX_FILE_READ_CHARS = 12_000;
 export const MAX_FILE_SIZE_BYTES = 1_000_000;
 export const MAX_DIRECTORY_ENTRIES = 100;
 export const MAX_DIRECTORY_OFFSET = 10_000;
+export const MAX_SEARCH_DEPTH = 8;
+export const MAX_SEARCH_VISITS = 1_200;
+export const MAX_COPY_FILE_BYTES = 50_000_000;
 
 export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
@@ -55,6 +58,27 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'file_search',
+    description: 'Searches a bounded directory tree under the current user home folder by file name and optional extension. It skips hidden items, symlinks, and sensitive credential-like names. Requires approval for the exact search root and filters.',
+    category: 'code', risk: 'high', requiresApproval: true, changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        directory: { type: 'string', description: 'Absolute search root under the user home folder.' },
+        query: { type: 'string', minLength: 1, maxLength: 120, description: 'Case-insensitive filename substring.' },
+        extension: { type: 'string', maxLength: 12, description: 'Optional extension such as pdf, without a wildcard.' },
+        maxResults: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum matches to return; defaults to 25.' },
+      },
+      required: ['directory', 'query'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'file_metadata',
+    description: 'Reads size, type and last-modified time for one regular file under the current user home folder. Does not read its contents. Requires approval for this exact path.',
+    category: 'code', risk: 'high', requiresApproval: true, changesState: false,
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute file path under the user home folder.' } }, required: ['path'], additionalProperties: false },
+  },
+  {
     name: 'file_write',
     description: 'Writes UTF-8 text to one file in the current user home folder. Never creates directories. Existing files are refused unless overwrite is explicitly true. Requires approval for this exact write.',
     category: 'code',
@@ -70,6 +94,34 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
       },
       required: ['path', 'content'],
       additionalProperties: false,
+    },
+  },
+  {
+    name: 'directory_create',
+    description: 'Creates one new directory under the current user home folder. Its parent must already exist and the destination must not exist. Requires fresh approval and verifies the directory afterward.',
+    category: 'code', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute new directory path under the user home folder.' } }, required: ['path'], additionalProperties: false },
+  },
+  {
+    name: 'file_copy',
+    description: 'Copies one regular file under the current user home folder to a new destination. It never overwrites, follows symlinks, or copies credential-like files, and caps file size. Requires fresh approval and verifies SHA-256 after copying.',
+    category: 'code', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: {
+      type: 'object', properties: {
+        source: { type: 'string', description: 'Absolute source file path under the user home folder.' },
+        destination: { type: 'string', description: 'Absolute new file path under the user home folder.' },
+      }, required: ['source', 'destination'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'file_rename',
+    description: 'Moves or renames one regular file to a new path under the current user home folder. The destination must not exist. It will not delete data or overwrite files. Requires fresh approval and verifies the source is gone and destination content matches.',
+    category: 'code', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: {
+      type: 'object', properties: {
+        source: { type: 'string', description: 'Absolute source file path under the user home folder.' },
+        destination: { type: 'string', description: 'Absolute new file path under the user home folder.' },
+      }, required: ['source', 'destination'], additionalProperties: false,
     },
   },
 ] as const;
@@ -93,6 +145,11 @@ export class FileTools {
         case 'file_list': return this.list(args);
         case 'file_read': return this.read(args);
         case 'file_write': return this.write(args);
+        case 'file_search': return this.search(args);
+        case 'file_metadata': return this.metadata(args);
+        case 'directory_create': return this.createDirectory(args);
+        case 'file_copy': return this.copy(args);
+        case 'file_rename': return this.rename(args);
         default: return { ok: false, content: `Unknown file tool "${name}".`, errorCode: 'NOT_FOUND' };
       }
     } catch (error) {
@@ -176,6 +233,121 @@ export class FileTools {
     };
   }
 
+  private search(args: Record<string, unknown>): FileToolResult {
+    const raw = typeof args.directory === 'string' ? args.directory.trim() : '';
+    const query = typeof args.query === 'string' ? args.query.trim().toLocaleLowerCase() : '';
+    if (!raw || !isAbsolute(raw)) return invalidPath();
+    if (!query || query.length > 120) return { ok: false, content: 'query must contain 1 to 120 characters.', errorCode: 'FAILED' };
+    const extensionValue = typeof args.extension === 'string' ? args.extension.trim().replace(/^\./, '').toLocaleLowerCase() : '';
+    if (extensionValue && !/^[a-z0-9]{1,12}$/.test(extensionValue)) return { ok: false, content: 'extension must be a simple file extension without wildcards.', errorCode: 'FAILED' };
+    const maxResults = args.maxResults === undefined ? 25 : args.maxResults;
+    if (typeof maxResults !== 'number' || !Number.isSafeInteger(maxResults) || maxResults < 1 || maxResults > 50) {
+      return { ok: false, content: 'maxResults must be a whole number from 1 to 50.', errorCode: 'FAILED' };
+    }
+    const root = realpathSync(raw);
+    assertWithinHome(root);
+    if (!statSync(root).isDirectory()) return { ok: false, content: 'The requested search root is not a directory.', errorCode: 'FAILED' };
+
+    const pending: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
+    const matches: Array<{ path: string; sizeBytes: number; modifiedAt: string }> = [];
+    let visited = 0;
+    while (pending.length > 0 && visited < MAX_SEARCH_VISITS) {
+      const current = pending.pop();
+      if (!current) break;
+      let handle;
+      try { handle = opendirSync(current.path); }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'EACCES' || code === 'EPERM') continue;
+        throw error;
+      }
+      try {
+        while (visited < MAX_SEARCH_VISITS) {
+          const entry = handle.readSync();
+          if (!entry) break;
+          visited += 1;
+          if (entry.name.startsWith('.') || isSensitiveName(entry.name) || entry.isSymbolicLink()) continue;
+          const path = join(current.path, entry.name);
+          if (entry.isDirectory()) {
+            if (current.depth < MAX_SEARCH_DEPTH) pending.push({ path, depth: current.depth + 1 });
+            continue;
+          }
+          if (!entry.isFile() || !entry.name.toLocaleLowerCase().includes(query)) continue;
+          if (extensionValue && extname(entry.name).slice(1).toLocaleLowerCase() !== extensionValue) continue;
+          try {
+            const stats = statSync(path);
+            matches.push({ path, sizeBytes: stats.size, modifiedAt: stats.mtime.toISOString() });
+          } catch { /* the file may have disappeared during the bounded scan */ }
+        }
+      } finally { handle.closeSync(); }
+    }
+    matches.sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+    const truncated = visited >= MAX_SEARCH_VISITS || pending.length > 0 || matches.length > maxResults;
+    const returned = matches.slice(0, maxResults);
+    return {
+      ok: true,
+      content: `${matches.length} matching file${matches.length === 1 ? '' : 's'} found in the inspected portion of ${root}${truncated ? ` (bounded scan: ${visited} entries / ${MAX_SEARCH_DEPTH} levels; the complete tree may contain newer matches)` : ''}${returned.length ? `; newest ${returned.length}${matches.length > returned.length ? ` of ${matches.length}` : ''}:\n${returned.map((item) => `- ${item.path} (${item.sizeBytes} bytes; modified ${item.modifiedAt})`).join('\n')}` : '.'}`,
+      detail: { root, query, extension: extensionValue || null, visited, truncated, totalMatchesInScannedTree: matches.length, matches: returned },
+      verification: { summary: `Inspected ${visited} filesystem entries under the authorized search root and returned the newest ${returned.length} matching file metadata records${truncated ? ' from a bounded, incomplete scan' : ''}.`, source: 'bounded filesystem enumeration' },
+    };
+  }
+
+  private metadata(args: Record<string, unknown>): FileToolResult {
+    const source = resolveExistingFile(args.path);
+    if (isSensitiveName(basename(source))) return { ok: false, content: 'This file looks like a credential, secret, or private-key file and Pixel will not inspect it.', errorCode: 'DENIED' };
+    const stats = statSync(source);
+    if (!stats.isFile()) return { ok: false, content: 'The requested path is not a regular file.', errorCode: 'FAILED' };
+    const detail = { path: source, type: 'file', sizeBytes: stats.size, modifiedAt: stats.mtime.toISOString(), createdAt: stats.birthtime.toISOString() };
+    return { ok: true, content: `${source}: ${stats.size} bytes; modified ${detail.modifiedAt}.`, detail, verification: { summary: `Read file metadata from the exact path ${source}.`, source: 'filesystem stat' } };
+  }
+
+  private createDirectory(args: Record<string, unknown>): FileToolResult {
+    const target = resolveNewTarget(args.path);
+    if (isSensitiveName(basename(target.path))) return { ok: false, content: 'Pixel will not create a directory whose name resembles a credential or secret.', errorCode: 'DENIED' };
+    if (pathExists(target.path)) return { ok: false, content: 'The destination already exists; Pixel will not merge with or replace it.', errorCode: 'DENIED' };
+    mkdirSync(target.path, { recursive: false });
+    const actual = realpathSync(target.path);
+    assertWithinHome(actual);
+    if (!statSync(actual).isDirectory()) return { ok: false, content: 'The directory request returned but the destination is not a directory.', errorCode: 'FAILED' };
+    return { ok: true, content: `Created directory ${actual}.`, detail: { path: actual }, verification: { summary: `Confirmed the new directory exists at ${actual}.`, source: 'filesystem stat postcondition' } };
+  }
+
+  private copy(args: Record<string, unknown>): FileToolResult {
+    const source = resolveExistingFile(args.source);
+    const target = resolveNewTarget(args.destination);
+    if (isSensitiveName(basename(source)) || isSensitiveName(basename(target.path))) return { ok: false, content: 'Pixel will not copy credential-like files or create credential-like destination names.', errorCode: 'DENIED' };
+    const sourceStats = statSync(source);
+    if (!sourceStats.isFile()) return { ok: false, content: 'The source must be a regular file.', errorCode: 'FAILED' };
+    if (sourceStats.size > MAX_COPY_FILE_BYTES) return { ok: false, content: `The source exceeds the ${MAX_COPY_FILE_BYTES}-byte copy limit.`, errorCode: 'FAILED' };
+    if (pathExists(target.path)) return { ok: false, content: 'The destination already exists; Pixel will not overwrite it.', errorCode: 'DENIED' };
+    const sourceHash = sha256ForFile(source);
+    copyFileSync(source, target.path, fsConstants.COPYFILE_EXCL);
+    const destinationStats = statSync(target.path);
+    const destinationHash = sha256ForFile(target.path);
+    if (destinationStats.size !== sourceStats.size || destinationHash !== sourceHash) return { ok: false, content: 'The copy exists, but its size or SHA-256 does not match the source. Inspect both files before retrying.', errorCode: 'FAILED' };
+    return { ok: true, content: `Copied ${source} to ${target.path} and verified matching SHA-256 ${sourceHash}.`, detail: { source, path: target.path, sizeBytes: sourceStats.size, sha256: sourceHash }, verification: { summary: `Destination size and SHA-256 match the source file.`, source: 'filesystem read-back SHA-256' } };
+  }
+
+  private rename(args: Record<string, unknown>): FileToolResult {
+    const source = resolveExistingFile(args.source);
+    const target = resolveNewTarget(args.destination);
+    if (isSensitiveName(basename(source)) || isSensitiveName(basename(target.path))) return { ok: false, content: 'Pixel will not rename credential-like files or create credential-like destination names.', errorCode: 'DENIED' };
+    const sourceStats = statSync(source);
+    if (!sourceStats.isFile()) return { ok: false, content: 'The source must be a regular file.', errorCode: 'FAILED' };
+    if (sourceStats.size > MAX_COPY_FILE_BYTES) return { ok: false, content: `The source exceeds the ${MAX_COPY_FILE_BYTES}-byte rename verification limit.`, errorCode: 'FAILED' };
+    if (pathExists(target.path)) return { ok: false, content: 'The destination already exists; Pixel will not overwrite it.', errorCode: 'DENIED' };
+    const sourceHash = sha256ForFile(source);
+    // Copy with exclusive-create semantics so a race cannot replace an
+    // existing destination (POSIX rename would otherwise overwrite it).
+    copyFileSync(source, target.path, fsConstants.COPYFILE_EXCL);
+    if (statSync(target.path).size !== sourceStats.size || sha256ForFile(target.path) !== sourceHash) {
+      return { ok: false, content: 'A destination copy exists, but verification failed. The original was preserved; inspect both paths before retrying.', errorCode: 'FAILED' };
+    }
+    unlinkSync(source);
+    if (pathExists(source) || !pathExists(target.path) || sha256ForFile(target.path) !== sourceHash) return { ok: false, content: 'The move/rename operation did not meet its postcondition. Inspect the source and destination before retrying.', errorCode: 'FAILED' };
+    return { ok: true, content: `Renamed ${source} to ${target.path}; the destination content hash matches.`, detail: { source, path: target.path, sha256: sourceHash }, verification: { summary: 'Confirmed the original path is gone and the new path has matching SHA-256.', source: 'filesystem path and content postconditions' } };
+  }
+
   private write(args: Record<string, unknown>): FileToolResult {
     const raw = typeof args.path === 'string' ? args.path.trim() : '';
     const content = typeof args.content === 'string' ? args.content : null;
@@ -229,6 +401,42 @@ function assertWithinHome(path: string): void {
   if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
     throw new FileToolsError('File tools are limited to the current user home directory.', 'DENIED');
   }
+}
+
+function resolveExistingFile(value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || !isAbsolute(raw)) throw new FileToolsError('An absolute file path under the current user home directory is required.', 'FAILED');
+  const requested = resolve(raw);
+  if (lstatSync(requested).isSymbolicLink()) throw new FileToolsError('File operations will not follow a symlink.', 'DENIED');
+  const path = realpathSync(requested);
+  assertWithinHome(path);
+  return path;
+}
+
+function resolveNewTarget(value: unknown): { parent: string; path: string } {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || !isAbsolute(raw)) throw new FileToolsError('An absolute destination path under the current user home directory is required.', 'FAILED');
+  const requested = resolve(raw);
+  const name = basename(requested);
+  if (!name || name === '.' || name === '..') throw new FileToolsError('A regular destination name is required.', 'FAILED');
+  const parent = realpathSync(dirname(requested));
+  assertWithinHome(parent);
+  if (!statSync(parent).isDirectory()) throw new FileToolsError('The destination parent is not a directory.', 'FAILED');
+  const path = join(parent, name);
+  assertWithinHome(path);
+  return { parent, path };
+}
+
+function pathExists(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function sha256ForFile(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 class FileToolsError extends Error {

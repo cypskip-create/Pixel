@@ -1,6 +1,6 @@
 # Pixel security model
 
-Updated: 2026-11-19 — Tools 4.2.
+Updated: 2026-11-19 — Experience Polish 5.0 (adds bounded home-scoped file tools; retains Tools 4.2 controls).
 
 ## Trust boundaries
 
@@ -16,6 +16,7 @@ Updated: 2026-11-19 — Tools 4.2.
 | Task state to disk | Zod validates snapshots; common credential patterns and sensitive argument fields are redacted; typed text and file-write bodies are not stored in task args. | SQLite task text is not application-layer encrypted, and redaction is pattern-based. Windows account/file permissions remain important. |
 | Provider key | Electron `safeStorage` encrypts the DeepSeek key (DPAPI on Windows); if encryption is unavailable, Pixel refuses to persist it. The renderer never receives the plaintext key. | This is a provider API-key store, not a general-purpose credential vault. |
 | Screen capture and guidance | Capture requires the existing explicit screen approval. Window IDs remain opaque in the renderer; native capture revalidates exact window/process identity. The visual overlay accepts a revalidated unique UIA control, remains passive/click-through, expires, and clears on stale target, lock or emergency stop. | Vision output is model interpretation. Native capture and the visible overlay have not passed target-laptop acceptance; current native integration fails before producing a screenshot in this host. |
+| New everyday file operations | Experience Polish 5.0 search, metadata, directory creation, copy and rename are main-process tools in the existing registry. New paths are constrained to home scope; search is bounded and skips hidden, sensitive-name and symlink entries. Mutations avoid overwrite and verify destination postconditions. | No new clipboard read/write workflow was added. Real Pixel approval-card interaction and multi-step daily task UI remain unverified. |
 
 ## Approval behavior
 

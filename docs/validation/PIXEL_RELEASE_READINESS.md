@@ -1,5 +1,10 @@
 # Pixel release readiness
 
+> Historical report. Its dark-UI restoration evidence predates the latest
+> Experience Polish 5.0 working tree. For the current SHA, tests, CI status and
+> Windows acceptance commands, use
+> [`PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](PIXEL_EXPERIENCE_POLISH_5_READINESS.md).
+
 **Reviewed:** 2026-11-18 (original dark companion restoration)
 **Version:** 0.2.1
 **Branch:** `codex/ui-experience-2`

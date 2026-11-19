@@ -31,24 +31,30 @@ function expandHex(hex: string): string[] {
   return [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)];
 }
 
-describe('monochrome Pixel design', () => {
+describe('charcoal Pixel design system', () => {
   const files = sourceFiles(rendererRoot);
   const allRendererSource = files.map((file) => readFileSync(file, 'utf8')).join('\n');
   const css = readFileSync(join(rendererRoot, 'index.css'), 'utf8');
 
-  it('defines the agreed semantic dark palette and a grayscale light theme', () => {
+  it('defines the charcoal surfaces and the approved restrained sage, amber and red accents', () => {
     for (const [token, value] of [
-      ['--color-app-bg', '#0D0D0D'],
-      ['--color-sidebar', '#141414'],
-      ['--color-surface', '#1B1B1B'],
-      ['--color-surface-raised', '#222222'],
-      ['--color-hover', '#292929'],
-      ['--color-selected', '#303030'],
-      ['--color-border', '#333333'],
-      ['--color-ink', '#F4F4F4'],
-      ['--color-ink-soft', '#B8B8B8'],
-      ['--color-ink-dim', '#888888'],
-      ['--color-icon', '#D4D4D4'],
+      ['--color-app-bg', '#0E1013'],
+      ['--color-sidebar', '#1A1E23'],
+      ['--color-surface', '#20252A'],
+      ['--color-surface-raised', '#2A3138'],
+      ['--color-hover', '#333A40'],
+      ['--color-selected', '#394147'],
+      ['--color-border', '#3A4147'],
+      ['--color-ink', '#E6E9ED'],
+      ['--color-ink-soft', '#C6CACD'],
+      ['--color-ink-dim', '#9AA1A6'],
+      ['--color-accent', '#A7D7C2'],
+      ['--color-accent-hover', '#D6EDE3'],
+      ['--color-warning', '#D5AB72'],
+      ['--color-destructive', '#D88B83'],
+      ['--pix-face', '#0E1013'],
+      ['--pix-fold', '#A7D7C2'],
+      ['--pix-eye', '#9BE5C7'],
     ]) {
       expect(css).toContain(`${token}: ${value}`);
     }
@@ -56,10 +62,18 @@ describe('monochrome Pixel design', () => {
     expect(css).toContain('--color-brand-foreground: var(--color-icon)');
   });
 
-  it('contains no chromatic utility classes or literal color values in renderer code', () => {
-    expect(allRendererSource).not.toMatch(/(?:sky|blue|cyan|teal|emerald|green|amber|yellow|rose|red|orange|violet|purple|indigo)-\d{2,3}/i);
+  it('limits chromatic color values to the approved palette', () => {
+    expect(allRendererSource).not.toMatch(/(?:sky|blue|cyan|teal|emerald|green|yellow|rose|orange|violet|purple|indigo)-\d{2,3}/i);
+    const approvedTints = new Set([
+      '0e1013', '101113', '1a1e23', '20252a', '2a3138', '333a40', '394147', '3a4147', '515a61',
+      'e6e9ed', 'c6cacd', '9aa1a6', 'd2d7db', 'a7d7c2', 'd6ede3', 'd5ab72', 'd88b83',
+      '9be5c7', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',
+      'f1f3f3', 'e7eaea', 'f7f9f9', 'e3e7e7', 'd7dedd', 'c8d0ce', '9aa6a2', 'f5f7f6',
+      '161b1a', '414947', '68716e',
+    ]);
 
     for (const match of allRendererSource.matchAll(/#([\da-f]{3,8})\b/gi)) {
+      if (approvedTints.has((match[1] ?? '').toLowerCase())) continue;
       const channels = expandHex(match[1] ?? '');
       expect(channels[0]?.toLowerCase()).toBe(channels[1]?.toLowerCase());
       expect(channels[1]?.toLowerCase()).toBe(channels[2]?.toLowerCase());

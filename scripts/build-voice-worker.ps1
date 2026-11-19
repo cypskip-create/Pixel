@@ -89,41 +89,10 @@ if (-not (Test-Path $exe)) { throw "PyInstaller did not produce $exe" }
 & $pythonExe -m pip freeze --all | Set-Content -Encoding utf8 (Join-Path $target 'DEPENDENCY_VERSIONS.txt')
 Copy-Item -LiteralPath (Join-Path $root 'python\VOICE_RUNTIME_NOTICES.md') -Destination (Join-Path $target 'THIRD_PARTY_NOTICES.md') -Force
 
-# Import native runtime dependencies inside the frozen executable. This catches
-# missing CTranslate2/ONNX/eSpeak DLLs before electron-builder packages Pixel.
-$smoke = New-Object System.Diagnostics.ProcessStartInfo
-$smoke.FileName = $exe
-$smoke.UseShellExecute = $false
-$smoke.CreateNoWindow = $true
-$smoke.RedirectStandardInput = $true
-$smoke.RedirectStandardOutput = $true
-$smoke.RedirectStandardError = $true
-$smokeProcess = New-Object System.Diagnostics.Process
-$smokeProcess.StartInfo = $smoke
-if (-not $smokeProcess.Start()) { throw 'Could not start the packaged voice worker smoke test.' }
-$stdoutTask = $smokeProcess.StandardOutput.ReadToEndAsync()
-$stderrTask = $smokeProcess.StandardError.ReadToEndAsync()
-$request = @{ id = 'pixel-runtime-smoke'; op = 'runtime_smoke_test'; protocol = 1; params = @{} } | ConvertTo-Json -Compress
-# Write UTF-8 bytes without a BOM. StreamWriter's default input encoding differs
-# between Windows PowerShell and PowerShell Core; a frozen CPython stdin parser
-# must receive the same exact protocol bytes on both runtimes and GitHub runners.
-if ($request -notmatch '^\s*\{.*\}\s*$') { throw "The packaged worker smoke request was not serialized as a JSON object: $request" }
-$utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-$requestBytes = $utf8NoBom.GetBytes($request + "`n")
-$smokeProcess.StandardInput.BaseStream.Write($requestBytes, 0, $requestBytes.Length)
-$smokeProcess.StandardInput.BaseStream.Flush()
-$smokeProcess.StandardInput.Close()
-if (-not $smokeProcess.WaitForExit(30000)) {
-  $smokeProcess.Kill()
-  throw 'Packaged voice worker protocol/native dependency smoke test timed out.'
-}
-$smokeOutput = $stdoutTask.GetAwaiter().GetResult().Trim()
-$smokeError = $stderrTask.GetAwaiter().GetResult().Trim()
-if ($smokeProcess.ExitCode -ne 0) { throw "Packaged voice worker exited with $($smokeProcess.ExitCode): $smokeError" }
-try { $smokeResult = $smokeOutput | ConvertFrom-Json }
-catch { throw "Packaged voice worker returned invalid protocol JSON: $smokeOutput`n$smokeError" }
-if ($smokeResult.id -ne 'pixel-runtime-smoke' -or -not $smokeResult.ok -or -not $smokeResult.result.onnxCpuProvider -or -not $smokeResult.result.espeakReady) {
-  throw "Packaged voice worker runtime smoke test failed: $smokeOutput`n$smokeError"
-}
-Write-Host 'Packaged worker protocol, CTranslate2, ONNX Runtime CPU and eSpeak imports passed.' -ForegroundColor Green
+# Exercise the frozen worker with a deterministic Node-owned JSONL pipe. Avoid
+# Windows PowerShell's native stdin pipeline/encoding conversions at this
+# protocol boundary, and verify both runtime and capability response shapes.
+$smokeHarness = Join-Path $root 'scripts\smoke-frozen-voice-worker.mjs'
+& node $smokeHarness $exe
+if ($LASTEXITCODE -ne 0) { throw "Packaged voice worker protocol/native dependency smoke test failed with exit code $LASTEXITCODE." }
 Write-Host "Built bundled voice worker: $exe" -ForegroundColor Green

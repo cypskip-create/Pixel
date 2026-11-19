@@ -2,7 +2,66 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
-## Current checkpoint — Tools 4.2 memory, persistent permissions and UI Automation
+## Current uncommitted checkpoint — Experience Polish 5.0 and official Pix
+
+Reviewed base: `6ac637e2149872e112b78177b3dcda41c2c8c764` on
+`codex/interaction-engine-3`. Working changes are uncommitted; the user will
+commit and push. No release was published.
+
+- Fixed the frozen voice-worker smoke boundary by replacing PowerShell string
+  piping with a Node JSONL harness that writes explicit UTF-8 bytes without a
+  BOM, captures stdout and stderr separately, validates response IDs/version
+  and capability shape, and enforces a bounded timeout. The prior Actions run
+  `44522917967` failed only at packaging when the frozen worker returned
+  `BAD_JSON` before receiving a valid request. The new frozen-worker harness
+  could not be exercised locally because Python 3.12 x64 and NSIS are absent;
+  there is no Actions run for these unpushed changes, so CI is **not verified
+  green**.
+- Added canonical `PixMascot` SVG artwork based on the approved reference:
+  silver rounded shell, dark display, folded mint corner, mint expressions,
+  arms and feet. It is used in the Workspace header, empty conversation,
+  active assistant and compact expanded-Island response. Historic messages
+  use static avatars. Settings provides an expression preview. Pix remains
+  separate from the pointer-shaped Cursor Buddy.
+- Added a bounded, visibility-aware idle blink scheduler and state expressions
+  driven by the existing assistant states. Reduced motion and document
+  visibility pause animation. Success/failure status follows task evidence;
+  results with unresolved verification are shown as needing attention.
+- Cursor Buddy now has a dedicated preview and is no longer hidden merely
+  because Workspace is open or the Island is expanded. A renderer-ready
+  acknowledgement and bounded readiness diagnostics replace the unreliable
+  assumption that `ready-to-show` always fires. The native companion remains
+  independent from Pix. Actual Electron visibility/click-through/focus
+  behavior still needs laptop validation.
+- Settings switches use accessible `role="switch"`, checked semantics,
+  keyboard support, visible focus, and distinct sage-enabled/charcoal-disabled
+  states. The interface retains its charcoal foundation; mint is also used
+  within Pix as specified by its character artwork.
+- Added a bounded home-scoped file search, metadata, one-level directory
+  creation, verified copy and verified rename to the existing permissioned
+  filesystem toolset. These operations stay under the user's home directory,
+  do not overwrite, skip hidden/sensitive/symlink entries and require scoped
+  approval. Clipboard workflows and broader new application orchestration
+  were not added; existing app, browser and document tools are unchanged.
+- Validation on 2026-11-19: `npm run typecheck` passed; production
+  `npm run build` passed; final full Vitest **834 passed, 27 skipped, 0 failed
+  (861 total; 54 passed files, 1 skipped)**; Python worker tests **11/11**;
+  native helper build/protocol ping passed; harmless WinForms UIA fixture
+  passed and wrote
+  `artifacts/windows-acceptance/pixel-native-uia-e2e-2026-11-19T13-45-14-496Z.json`.
+  The native UIA harness is not evidence of the Pixel approval-card UI.
+- `npm run test:preload-sandbox` exited `2147483651` without smoke output.
+  Electron dev GUI, real Pix/cursor screenshots, the 1366×768 / 1920×1080 and
+  100% / 125% visual matrix, GPU behavior and unpacked/portable/NSIS packages
+  are unverified. Port 5199 was already occupied by another checkout; that
+  launch attempt was not treated as an application failure. Chromium install
+  was blocked by DNS (`ENOTFOUND cdn.playwright.dev`); Python 3.12 x64 and
+  `makensis` are unavailable here.
+
+See [`docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
+for exact evidence, remaining defects and laptop-side validation commands.
+
+## Previous checkpoint — Tools 4.2 memory, persistent permissions and UI Automation
 
 Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Local HEAD before
 this uncommitted checkpoint: `cbac143ec28b0b19669aa58a911b5f53af0f5b5e`.

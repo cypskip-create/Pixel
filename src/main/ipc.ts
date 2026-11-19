@@ -18,6 +18,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AppSettings,
+  AssistantState,
   AuditEntry,
   CaptureResult,
   ChatMessage,
@@ -45,7 +46,7 @@ import type {
   ToolCatalogEntry,
   ScreenWindowTarget,
 } from '../shared/types';
-import { DEFAULT_THINKING } from '../shared/types';
+import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
@@ -820,6 +821,17 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.windowSetExpanded, (_event, expanded: boolean): void => {
     if (!_event || !windows.isMainSender(_event.sender)) return;
     windows.setSurface(expanded ? 'active' : 'idle');
+  });
+
+  registerHandler(CHANNELS.windowSetCursorState, (event, state: AssistantState): void => {
+    if (!windows.isMainSender(event.sender)) return;
+    if (typeof state === 'string' && ASSISTANT_STATES.includes(state as AssistantState)) {
+      windows.setCursorAssistantState(state);
+    }
+  });
+
+  registerHandler(CHANNELS.windowCursorRendererReady, (event): void => {
+    if (windows.isCursorSender(event.sender)) windows.markCursorRendererReady(event.sender);
   });
 
   registerHandler(CHANNELS.windowHide, (event): void => { if (windows.isMainSender(event.sender)) windows.hide(); });
