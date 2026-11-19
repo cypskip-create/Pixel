@@ -5,10 +5,13 @@ import {
   SPEAK_SCRIPT,
   PLAY_WAV_SCRIPT,
   VoiceService,
+  MAX_VOICE_WAV_BYTES,
   buildRecognitionScript,
   buildWaveRecognitionScript,
   parseCapability,
   parseRecognition,
+  splitSpeechText,
+  validateDiagnosticVoiceWav,
   validateVoiceWav,
 } from '../src/main/voice/voice';
 import { encodePcm16Wav } from '../src/renderer/lib/audioCapture';
@@ -117,7 +120,35 @@ describe('transient voice audio', () => {
     const stereo = encodePcm16Wav(new Float32Array(4000), 16_000);
     new DataView(stereo.buffer).setUint16(22, 2, true);
     expect(validateVoiceWav(stereo)).toMatch(/unsupported/i);
-    expect(validateVoiceWav(new Uint8Array(44 + 16_000 * 2 * 22))).toMatch(/20-second/i);
+    expect(validateVoiceWav(new Uint8Array(44 + 16_000 * 2 * 121))).toMatch(/120-second/i);
+    const maxRecording = new Uint8Array(MAX_VOICE_WAV_BYTES);
+    maxRecording.set(encodePcm16Wav(new Float32Array(16), 16_000).subarray(0, 44));
+    const view = new DataView(maxRecording.buffer);
+    view.setUint32(4, maxRecording.byteLength - 8, true);
+    view.setUint32(40, maxRecording.byteLength - 44, true);
+    expect(validateVoiceWav(maxRecording)).toBeNull();
+  });
+
+  it('allows only valid short diagnostic audio for explicit export', () => {
+    expect(validateDiagnosticVoiceWav(encodePcm16Wav(new Float32Array(3_200), 16_000))).toBeNull();
+    expect(validateDiagnosticVoiceWav(new Uint8Array(44 + 16_000 * 2 * 31))).toMatch(/30 seconds/i);
+  });
+});
+
+describe('Kokoro speech segmentation', () => {
+  it('keeps sentences ordered and omits fenced code and URLs', () => {
+    const chunks = splitSpeechText('First sentence. Second sentence! ```ts\nsecret code\n``` See https://example.test/page.');
+    expect(chunks.join(' ')).toContain('First sentence. Second sentence!');
+    expect(chunks.join(' ')).not.toContain('secret code');
+    expect(chunks.join(' ')).not.toContain('https://');
+  });
+
+  it('bounds long chunks and preserves all plain text', () => {
+    const input = `${'First phrase. '.repeat(80)}Last word.`;
+    const chunks = splitSpeechText(input, 120);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 120)).toBe(true);
+    expect(chunks.join(' ')).toContain('Last word.');
   });
 });
 
@@ -148,8 +179,8 @@ describe('VoiceService', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('refuses unreasonably long speech', async () => {
-    const result = await service.speak('x'.repeat(3000));
+  it('refuses speech beyond the safety limit', async () => {
+    const result = await service.speak('x'.repeat(20_001));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/too long/i);
   });

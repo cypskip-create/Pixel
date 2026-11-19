@@ -21,9 +21,12 @@ import type { PythonWorker } from '../services/python-worker';
 import type { VoiceSettings } from '../../shared/types';
 import type { VoiceModelManager } from './models';
 
-/** Longest single dictation window. */
+/** Longest live push-to-talk window. Renderer dictation uses a WAV stream. */
 export const MAX_LISTEN_MS = 20_000;
-export const MAX_VOICE_WAV_BYTES = 44 + 16_000 * 2 * 21;
+/** At most 120 seconds of mono 16 kHz PCM plus its WAV header. */
+export const MAX_VOICE_AUDIO_MS = 120_000;
+export const MAX_VOICE_WAV_BYTES = 44 + 16_000 * 2 * 120;
+export const MAX_VOICE_DIAGNOSTIC_WAV_BYTES = 44 + 16_000 * 2 * 30;
 
 export interface VoiceCapability {
   speechToText: boolean;
@@ -44,6 +47,15 @@ export interface RecognitionResult {
   error?: string;
   /** True when the recognizer heard nothing rather than failing. */
   noSpeech?: boolean;
+}
+
+export interface SpeechResult {
+  ok: boolean;
+  error?: string;
+  backend?: string;
+  generationMs?: number;
+  playbackMs?: number;
+  elapsedMs?: number;
 }
 
 export class VoiceService {
@@ -185,7 +197,7 @@ export class VoiceService {
     }
   }
 
-  /** Transcribe a short, in-memory mono 16 kHz PCM WAV captured by the renderer. */
+  /** Transcribe an in-memory mono 16 kHz PCM WAV captured by the renderer. */
   async transcribeWav(input: Uint8Array, signal?: AbortSignal, model = 'base.en'): Promise<RecognitionResult> {
     if (process.platform !== 'win32') {
       return { ok: false, text: '', error: 'Voice input is only supported on Windows.' };
@@ -194,6 +206,7 @@ export class VoiceService {
     if (validation) return { ok: false, text: '', error: validation };
     if (signal?.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
 
+    const startedAt = performance.now();
     const file = join(tmpdir(), `pixel-voice-${process.pid}-${randomUUID()}.wav`);
     const controller = new AbortController();
     const onParentAbort = (): void => controller.abort();
@@ -235,13 +248,15 @@ export class VoiceService {
       }
       if (controller.signal.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
       const output = await runPowerShell(
-        buildWaveRecognitionScript(MAX_LISTEN_MS),
-        MAX_LISTEN_MS + 10_000,
+        buildWaveRecognitionScript(MAX_VOICE_AUDIO_MS + 5_000),
+        MAX_VOICE_AUDIO_MS + 15_000,
         controller.signal,
         { CYPS_AUDIO_FILE: file },
       );
       const parsed = parseRecognition(output);
-      return parsed ? { ...parsed, backend: 'Windows System.Speech' } : { ok: false, text: '', error: 'The speech recognizer returned nothing usable.' };
+      return parsed
+        ? { ...parsed, backend: 'Windows System.Speech', processingMs: Math.round(performance.now() - startedAt) }
+        : { ok: false, text: '', error: 'The speech recognizer returned nothing usable.' };
     } catch (error) {
       return { ok: false, text: '', error: message(error) };
     } finally {
@@ -252,18 +267,17 @@ export class VoiceService {
   }
 
   /** Speak through the explicitly selected local engine; never silently switch engines. */
-  async speak(text: string, settings?: VoiceSettings): Promise<{ ok: boolean; error?: string }> {
+  async speak(text: string, settings?: VoiceSettings): Promise<SpeechResult> {
     if (process.platform !== 'win32') {
       return { ok: false, error: 'Speech is only supported on Windows.' };
     }
     const clean = text.trim();
     if (clean.length === 0) return { ok: false, error: 'There is nothing to say.' };
-    if (clean.length > 2_000) {
-      return { ok: false, error: 'That text is too long to speak in one go.' };
-    }
+    if (clean.length > 20_000) return { ok: false, error: 'That response is too long to speak safely.' };
     if (this.speaking) return { ok: false, error: 'Pixel is already speaking. Stop the current reply before starting another.' };
 
     this.speaking = true;
+    const speakStartedAt = performance.now();
     const controller = new AbortController();
     this.activeControllers.add(controller);
     try {
@@ -271,31 +285,42 @@ export class VoiceService {
         if (!this.pythonWorker || !this.voiceModels) return { ok: false, error: 'Pixel’s neural speech runtime is unavailable.' };
         const assets = await this.voiceModels.getTtsAssets();
         if (!assets) return { ok: false, error: 'Download the Kokoro voice model in Settings before selecting it.' };
-        const outputPath = join(tmpdir(), `pixel-voice-tts-${process.pid}-${randomUUID()}.wav`);
-        try {
-          const generated = await this.pythonWorker.synthesizeKokoro(
-            clean,
-            settings.ttsVoice ?? 'af_heart',
-            settings.ttsRate,
-            assets.modelPath,
-            assets.voicesPath,
-            outputPath,
-            controller.signal,
-          );
-          if (!generated.ok) return { ok: false, error: generated.error.message };
-          await runPowerShell(PLAY_WAV_SCRIPT, 120_000, controller.signal, { CYPS_AUDIO_FILE: outputPath });
-          return { ok: true };
-        } finally {
-          try { unlinkSync(outputPath); } catch { /* temporary speech is always best-effort cleaned */ }
+        // Kokoro's current API produces a WAV before playback. Split at safe
+        // sentence/phrase boundaries to stay within its per-call cap. Playback
+        // is deliberately serial (with possible small gaps) and cancellable.
+        let generationMs = 0;
+        let playbackMs = 0;
+        for (const chunk of splitSpeechText(clean)) {
+          if (controller.signal.aborted) return { ok: false, error: 'Speech was cancelled.' };
+          const outputPath = join(tmpdir(), `pixel-voice-tts-${process.pid}-${randomUUID()}.wav`);
+          try {
+            const generated = await this.pythonWorker.synthesizeKokoro(
+              chunk,
+              settings.ttsVoice ?? 'af_heart',
+              settings.ttsRate,
+              assets.modelPath,
+              assets.voicesPath,
+              outputPath,
+              controller.signal,
+            );
+            if (!generated.ok) return { ok: false, error: generated.error.message };
+            generationMs += generated.result.processingMs ?? 0;
+            const playbackStarted = performance.now();
+            await runPowerShell(PLAY_WAV_SCRIPT, 120_000, controller.signal, { CYPS_AUDIO_FILE: outputPath });
+            playbackMs += performance.now() - playbackStarted;
+          } finally {
+            try { unlinkSync(outputPath); } catch { /* temporary speech is always best-effort cleaned */ }
+          }
         }
+        return { ok: true, backend: 'Kokoro ONNX', generationMs, playbackMs: Math.round(playbackMs), elapsedMs: Math.round(performance.now() - speakStartedAt) };
       }
       const rate = Math.max(-10, Math.min(10, Math.round(((settings?.ttsRate ?? 1) - 1) * 25)));
-      await runPowerShell(SPEAK_SCRIPT, 60_000, controller.signal, {
+      await runPowerShell(SPEAK_SCRIPT, 300_000, controller.signal, {
         CYPS_SPEAK_TEXT: clean,
         CYPS_SPEAK_VOICE: settings?.ttsVoice ?? '',
         CYPS_SPEAK_RATE: String(rate),
       });
-      return { ok: true };
+      return { ok: true, backend: 'Windows System.Speech', elapsedMs: Math.round(performance.now() - speakStartedAt) };
     } catch (error) {
       return { ok: false, error: message(error) };
     } finally {
@@ -372,11 +397,12 @@ export function validateVoiceWav(input: Uint8Array): string | null {
   if (!(input instanceof Uint8Array) || input.byteLength < 44 + 6_400) {
     return 'The recording was too short or malformed to transcribe.';
   }
-  if (input.byteLength > MAX_VOICE_WAV_BYTES) return 'The recording exceeded Pixel’s 20-second voice limit.';
+  if (input.byteLength > MAX_VOICE_WAV_BYTES) return 'The recording exceeded Pixel’s 120-second voice limit.';
   const header = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
   if (header.toString('ascii', 0, 4) !== 'RIFF' || header.toString('ascii', 8, 12) !== 'WAVE' ||
       header.readUInt16LE(20) !== 1 || header.readUInt16LE(22) !== 1 ||
-      header.readUInt32LE(24) !== 16_000 || header.readUInt16LE(34) !== 16 ||
+      header.readUInt32LE(24) !== 16_000 || header.readUInt32LE(28) !== 32_000 ||
+      header.readUInt16LE(32) !== 2 || header.readUInt16LE(34) !== 16 ||
       header.toString('ascii', 36, 40) !== 'data') {
     return 'Pixel received an unsupported audio format. Try recording again.';
   }
@@ -385,6 +411,50 @@ export function validateVoiceWav(input: Uint8Array): string | null {
     return 'Pixel received an incomplete audio recording. Try again.';
   }
   return null;
+}
+
+/** Diagnostic export is intentionally capped at 30 seconds. */
+export function validateDiagnosticVoiceWav(input: Uint8Array): string | null {
+  if (!(input instanceof Uint8Array) || input.byteLength > MAX_VOICE_DIAGNOSTIC_WAV_BYTES) {
+    return 'Only a valid diagnostic recording up to 30 seconds can be saved.';
+  }
+  return validateVoiceWav(input);
+}
+
+/** Split speech at punctuation, keeping each Kokoro request below 1,800 chars. */
+export function splitSpeechText(text: string, maxLength = 1_800): string[] {
+  const normalized = text.replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!?\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/(\*\*|__|~~)(.*?)\1/g, '$2')
+    .replace(/([*_])([^*_]+)\1/g, '$2')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return [];
+  const chunks: string[] = [];
+  let pending = '';
+  for (const sentence of normalized.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) ?? [normalized]) {
+    const part = sentence.trim();
+    if (!part) continue;
+    if (part.length > maxLength) {
+      if (pending) { chunks.push(pending); pending = ''; }
+      let remaining = part;
+      while (remaining.length > maxLength) {
+        let boundary = remaining.lastIndexOf(' ', maxLength);
+        if (boundary < Math.floor(maxLength / 2)) boundary = maxLength;
+        chunks.push(remaining.slice(0, boundary).trim());
+        remaining = remaining.slice(boundary).trimStart();
+      }
+      if (remaining) chunks.push(remaining);
+    } else if (!pending) pending = part;
+    else if (pending.length + part.length + 1 <= maxLength) pending += ` ${part}`;
+    else { chunks.push(pending); pending = part; }
+  }
+  if (pending) chunks.push(pending);
+  return chunks;
 }
 
 export const SPEAK_SCRIPT = [

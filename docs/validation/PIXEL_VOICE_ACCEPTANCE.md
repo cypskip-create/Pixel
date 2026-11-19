@@ -1,8 +1,7 @@
 # Pixel voice acceptance
 
-This procedure checks the integrated local STT/TTS implementation on a supported
-Windows x64 laptop. Automated unit tests do not replace microphone, speaker or
-installer testing.
+This procedure checks Pixel Voice Engine 4.1 on a supported Windows x64 laptop.
+Automated unit tests do not replace microphone, speaker or installer testing.
 
 ## Build and automated checks
 
@@ -33,37 +32,59 @@ for `PixelVoiceWorker.exe`, its dependent files, `THIRD_PARTY_NOTICES.md` and
 
 1. Start Pixel with `npm run dev`. Open Settings → Voice. Select the microphone,
    run Test microphone and confirm its level meter changes only while testing.
-2. Select `base.en` and choose Download model. Wait until the status says ready.
+   Then select **Test recognition**, speak a known sentence and select **Stop &
+   transcribe test**. Compare the displayed result with what you said. Confirm
+   the reported backend/model and timing, and confirm the test text was not
+   submitted to chat.
+2. To inspect audio metadata, enable **Show capture diagnostics for the next
+   voice test** and repeat with a short sentence. Review the actual device,
+   input/stream/output sample rates, timestamps, duration, RMS/peak, clipping
+   and quiet-sample percentage. The metrics are not logged.
+3. To keep a diagnostic clip, separately enable **Keep the next 30-second test
+   recording in memory so I can save it**. Use **Save diagnostic WAV…**, choose
+   a local path, listen to it locally and delete it when finished. Otherwise
+   leave the checkbox off or use **Discard recording**; no raw audio is saved
+   by default.
+4. Select Balanced (`base.en`) and choose Download model. Wait for download
+   completion, then run Voice Test to verify the model actually loads and
+   transcribes. Download Fast (`tiny.en`) or High accuracy (`small.en`) only
+   when desired; those labels identify model sizes, not measured accuracy.
    Cancel one download and confirm the next download resumes; test with the
    larger `small.en` only if there is adequate disk space. Remove a downloaded
    model and confirm the selected preference remains but the readiness status
    changes to not downloaded.
-3. Hold `Ctrl+Shift+Space` over Notepad, speak “Pixel, tell me the current
+5. Hold `Ctrl+Shift+Space` over Notepad, speak “Pixel, tell me the current
    time,” and release. Confirm the Notepad window remains focused, the orb
    waveform is live only during capture, the transcript is submitted once, and
    Pixel responds. Confirm no screenshot or transcript text appears in logs.
-4. Use Workspace's manual microphone control. Confirm a transcript appears in
-   the draft, can be edited, and is not sent until the Send button is pressed.
-5. With the Windows system voice selected, choose an installed voice, adjust the
+6. Use Workspace's manual microphone control for longer than 20 seconds but
+   less than two minutes. Confirm a transcript appears in the draft, can be
+   edited, and is not sent until the Send button is pressed. Stop and restart
+   capture; confirm no earlier samples are appended.
+7. With the Windows system voice selected, choose an installed voice, adjust the
    rate, press Test voice, then Stop voice. Repeat with rapid Test voice clicks;
    a second reply must be rejected while playback is active.
-6. Download Kokoro and its voice pack, choose Kokoro, select each voice and
+8. Download Kokoro and its voice pack, choose Kokoro, select each voice and
    rate, and test a harmless sentence. Confirm sound comes from the Windows
    default output device. Confirm cancellation and emergency stop end synthesis
    or playback and remove the temporary WAV. A selected Kokoro engine with
    missing assets must show an error, never a false success or silent fallback.
-7. Disconnect the network after models are installed. Retest dictation and
+9. Disconnect the network after models are installed. Retest dictation and
    Kokoro playback. This checks speech only; Pixel's DeepSeek conversations
    still require network access.
-8. Restart Pixel. Confirm model readiness and settings persist, model weights
+10. Restart Pixel. Confirm model downloads and settings persist, model weights
    are reused without re-download, and the worker does not launch until voice
    work/settings probing requires it. Confirm PTT, manual capture, stop,
    emergency stop and app shutdown all cancel correctly.
 
-Record machine CPU/RAM, Windows version, microphone/speaker, model revision,
-model-load time, warm processing time, audio duration, real-time factor, peak
-and idle memory, and manually checked transcript/reference text. Do not report
-accuracy or latency as passed without these measurements.
+For a local STT comparison, prepare a private manifest of manually verified
+mono PCM16 16 kHz recordings, then run the aggregate-only harness described in
+[`PIXEL_VOICE_READINESS.md`](PIXEL_VOICE_READINESS.md). It compares installed
+models at beam sizes 1/3/5 and reports WER/CER, omission/repetition/silence
+metrics, load/warm latency, RTF, CPU and working set. Keep the manifest, audio
+and manually reviewed transcripts private. Record machine CPU/RAM, Windows
+version and microphone/speaker alongside results. Do not report accuracy or
+latency as passed without these measurements and a listening review.
 
 ## Packaged acceptance
 
@@ -83,7 +104,7 @@ accuracy or latency as passed without these measurements.
    model assets are absent, existing appId/GUID are unchanged, and no release
    was automatically published.
 
-## Status for this working-tree checkpoint
+## Status for the Voice 4.1 working-tree checkpoint
 
 - Automated model-manager, voice-boundary, settings and worker-safety tests are
   documented in the Voice Engine section of `docs/validation/PIXEL_VOICE_READINESS.md`.

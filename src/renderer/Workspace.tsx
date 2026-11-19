@@ -252,7 +252,7 @@ export function Workspace(): React.JSX.Element {
       const result = await shell.voiceTranscribeWav(wav);
       if (result.ok && result.text.trim()) {
         setDraft((current) => current ? `${current} ${result.text.trim()}` : result.text.trim());
-        if (reachedLimit) setNotice('The 20-second limit was reached. The transcription was added to the composer.');
+        if (reachedLimit) setNotice('The 120-second dictation limit was reached. The transcription was added to the composer.');
       } else {
         setNotice(result.error ?? 'Pixel did not hear anything.');
       }

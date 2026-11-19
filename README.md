@@ -220,16 +220,15 @@ completed actions explicitly so nothing implies a rollback that did not happen.
 - No screen capture without an explicit user action. There is no timer and no
   background capture path.
 - Voice input retains the configured global push-to-talk chord (default
-  `Ctrl+Shift+Space`) and explicit manual dictation. Push-to-talk submits one
-  valid transcript; manual dictation leaves it in the draft. Optional English
-  faster-whisper models can be downloaded and verified in Settings; Windows
-  System.Speech remains the documented fallback when no local model is ready.
-  Optional Kokoro ONNX speech output and selectable Windows voices use a
-  supervised local worker. Speech data is not sent to a provider. Windows
-  packaging is configured to bundle the worker, while models remain optional
-  user-data downloads; the worker bundle and packaged runtime have not yet been
-  built or verified in this checkpoint. Real microphone, model inference and
-  speaker acceptance are also unverified. See
+  `Ctrl+Shift+Space`) and explicit manual dictation. PTT remains capped at 20
+  seconds; manual dictation is capped at 120 seconds and leaves its transcript
+  in the draft. Settings includes a voice test that reports its actual
+  transcription backend/model without submitting the result, opt-in capture
+  diagnostics, and an optional short WAV export. Audio remains local.
+  Optional faster-whisper models and Kokoro use the supervised worker; Windows
+  System.Speech is an explicit fallback/engine. The current-tree worker bundle,
+  actual microphone and speaker quality, and Windows distribution remain
+  unverified. See
   [`docs/architecture/PIXEL_VOICE_ENGINE.md`](docs/architecture/PIXEL_VOICE_ENGINE.md)
   and [`docs/validation/PIXEL_VOICE_ACCEPTANCE.md`](docs/validation/PIXEL_VOICE_ACCEPTANCE.md).
 - Model output cannot grant permission. Tool authority is a local policy table.

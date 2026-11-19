@@ -280,7 +280,16 @@ const shell = {
       confidence?: number;
       error?: string;
       noSpeech?: boolean;
+      backend?: string;
+      model?: string;
+      processingMs?: number;
+      audioSeconds?: number;
     }>,
+
+  /** Save only a short, user-approved diagnostic WAV through the native dialog. */
+  voiceSaveDiagnosticWav: (audio: Uint8Array) => ipcRenderer.invoke(CH.voiceSaveDiagnosticWav, audio) as Promise<{
+    ok: boolean; cancelled?: boolean; error?: string;
+  }>,
 
   voiceModelsList: () => ipcRenderer.invoke(CH.voiceModelsList) as Promise<VoiceModelInfo[]>,
   voiceVoicesList: () => ipcRenderer.invoke(CH.voiceVoicesList) as Promise<string[]>,
@@ -321,7 +330,7 @@ const shell = {
 
   /** Speak text aloud with the installed Windows voice. */
   voiceSpeak: (text: string) =>
-    ipcRenderer.invoke(CH.voiceSpeak, text) as Promise<{ ok: boolean; error?: string }>,
+    ipcRenderer.invoke(CH.voiceSpeak, text) as Promise<{ ok: boolean; error?: string; backend?: string; generationMs?: number; playbackMs?: number; elapsedMs?: number }>,
 };
 
 contextBridge.exposeInMainWorld('cypsShell', shell);

@@ -2,44 +2,35 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
-## Current checkpoint — Voice Engine 4.0 local implementation
+## Current checkpoint — Voice Engine 4.1 reliability and diagnostics
 
-Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Source HEAD before
-these working-tree edits: `1e822c92222a8ca13cc94546eff7d7da5a8f7b60`. Changes
-are uncommitted; no checkpoint commit, push or release was made.
+Updated: 2026-11-19. Branch: `codex/interaction-engine-3`. Base commit:
+`d6031d9c0909413622b082fe9b8035a2acac01ba`. Changes are uncommitted for the
+user to review and commit; no checkpoint commit, push or release was made.
 
-- Added a supervised local voice worker path, allowlisted integrity-checked
-  optional faster-whisper and Kokoro model downloads, model status/removal and
-  progress UI, Windows/system and Kokoro speech selection, cancellation, and a
-  typed `window.cypsShell` boundary. Existing Pixel recording/PTT, manual
-  dictation, monochrome UI, permissions, emergency stop and provider flow are
-  retained.
-- The selected STT implementation is the existing Python worker extended with
-  faster-whisper, rather than Handy's Rust/transcribe.cpp runtime. The worker
-  is intended to be bundled as an on-demand PyInstaller onedir executable;
-  models remain optional downloads in Electron user data. Kokoro ONNX is the
-  optional neural TTS implementation; Windows System.Speech remains an
-  explicit system engine. No speech API is used, and synthesis errors do not
-  silently switch engines.
-- `npm run typecheck`: passed. `npm run build`: passed (main, sandbox preload,
-  renderer and icon). Full Vitest: **793 passed, 0 failed, 27 skipped (820
-  total; 49 files passed, 1 skipped)**. Skips: 17 Chromium-dependent browser
-  cases (Playwright Chromium absent), 7 NSIS cases (`makensis` absent), and 3
-  opt-in native foreground desktop tests. `npm run build:native` passed. Python
-  worker boundary suite: **4 passed, 0 failed**; `python -m compileall -q
-  python/pixel_worker python/tests` passed.
-- The packaged voice worker was **not built**. `npm run build:voice-worker`
-  stopped before creating its environment because the host has Python 3.15.2
-  only; the script and pinned runtime require Python 3.12 x64. Consequently no
-  current-tree unpacked app, portable executable or installer was built, and
-  the packaged worker's DLL discovery and app launch are unverified.
-- No Handy or candidate-engine benchmark, model inference, real microphone or
-  speaker test, offline run, or actual Windows GUI acceptance was performed
-  for this tree. There is no CI run for the uncommitted edits. Do not treat
-  capability probes or unit tests as real-device speech evidence. See
-  [`docs/validation/PIXEL_VOICE_READINESS.md`](docs/validation/PIXEL_VOICE_READINESS.md)
+- Fixed the PowerShell 5.1 Python-version probe, added an explicit CI Python
+  interpreter and a post-freeze worker protocol/native-import smoke test.
+- Replaced MediaRecorder/Opus decode capture with AudioWorklet direct PCM,
+  bounded manual dictation at 120 seconds (PTT remains at 20 seconds), and
+  added opt-in signal diagnostics plus a no-submit voice test and optional
+  30-second WAV export through the native save dialog.
+- Added Fast/Balanced/High accuracy model-size labels, real backend/model/time
+  reporting after inference, long Kokoro text segmentation, test-voice timing,
+  and an aggregate-only local accuracy benchmark harness. Recognition decoding
+  defaults remain unchanged pending real corpus results.
+- Validation: typecheck passed; full Vitest **801 passed, 0 failed, 27 skipped
+  (828 total; 50 files passed, 1 skipped)**; Python tests **11 passed**;
+  Python compileall and `npm run build` passed. Playwright browser download
+  failed because DNS for `cdn.playwright.dev` is blocked. Electron's sandbox
+  smoke exited `2147483651` before app/preload output. Python 3.15 rejection
+  check passed before creating a build venv.
+- The Python 3.12 x64 voice worker and unpacked/portable/NSIS packages were not
+  built. The prior GitHub run `44485597153` failed on the PowerShell quoting
+  defect repaired here; no new Actions run exists until these local edits are
+  pushed. No real microphone, Whisper/Kokoro model, TTS playback/quality or
+  accuracy benchmark was run. See [`docs/validation/PIXEL_VOICE_READINESS.md`](docs/validation/PIXEL_VOICE_READINESS.md)
   and [`docs/validation/PIXEL_VOICE_ACCEPTANCE.md`](docs/validation/PIXEL_VOICE_ACCEPTANCE.md)
-  for evidence, limitations and exact laptop steps.
+  for evidence, limits and exact laptop steps.
 
 Sections below describe earlier checkpoints; their HEADs and test totals are
 historical and do not describe this current working tree.

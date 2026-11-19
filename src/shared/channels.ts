@@ -120,6 +120,7 @@ export const CHANNELS = {
   voicePttCaptureReady: 'voice:pttCaptureReady',
   voicePttTranscribe: 'voice:pttTranscribe',
   voiceTranscribeWav: 'voice:transcribeWav',
+  voiceSaveDiagnosticWav: 'voice:saveDiagnosticWav',
   voiceModelsList: 'voice:modelsList',
   voiceVoicesList: 'voice:voicesList',
   voiceModelDownload: 'voice:modelDownload',

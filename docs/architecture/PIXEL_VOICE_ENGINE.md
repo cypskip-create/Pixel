@@ -1,17 +1,27 @@
 # Pixel local voice engine
 
-Updated 2026-11-19. This describes the current Voice Engine 4.0 implementation;
-it separates code paths that exist from inference and device checks that still
-need a real Windows run.
+Updated 2026-11-19. This describes the Voice Engine 4.1 working tree. It
+separates implemented code from model, audio-device and packaging checks that
+still require a real Windows run.
 
 ## Architecture
 
-Pixel keeps ownership of microphone permission, the 20-second recording
-session, selected input device, waveform, manual-dictation draft, PTT release,
-submission and emergency stop. Captured audio remains a transient mono 16 kHz
-PCM WAV. The main process validates its RIFF fields and size, writes it to a
-short-lived Pixel-named temp file, submits it to the supervised Python worker,
-and deletes it in `finally`.
+Pixel keeps ownership of microphone permission, selected input device,
+waveform, manual-dictation draft, PTT release, submission and emergency stop.
+PTT retains its 20-second bound. Manual dictation is bounded to 120 seconds.
+After an explicit user action, Chromium AudioWorklet captures Float32 PCM,
+downmixes to mono, resamples with WebAudio to 16 kHz and produces a transient
+PCM16 WAV. This removes the previous MediaRecorder/Opus encode/decode stage.
+The main process validates the WAV, writes it to a short-lived Pixel-named
+temp file for transcription and deletes it in `finally`.
+
+Settings has a separate 30-second Voice Test. Its transcript is shown for
+review and is not submitted to chat. Signal metadata (sample rates, duration,
+RMS, peak, clipping, low-energy share and timestamps) is computed in memory
+and shown only when the user opts in. Saving a test recording requires a
+separate opt-in, keeps the WAV in renderer memory until saved or discarded,
+and uses the native save dialog. No audio or transcript is logged by this
+diagnostic path.
 
 The worker is the existing newline-JSON process supervised by
 `PythonWorker`. It starts on demand, keeps at most one Whisper model and one
@@ -43,6 +53,15 @@ user-installed Python or a Python launcher.
 - The result boundary can include transcript, language, model, backend, audio
   duration, processing time, no-speech and cancellation/error information.
   Audio is not sent to DeepSeek or another provider by the speech worker.
+- Settings labels the available model choices Fast (`tiny.en`), Balanced
+  (`base.en`) and High accuracy (`small.en`). These labels describe the
+  existing model-size choices; they are not a measured quality ranking. The
+  decoder remains at beam size 1 and retains its prior VAD/conditioning values
+  until a manually verified corpus provides evidence for changing them.
+- A capability probe detects the runtime/module/files but does not prove
+  successful model inference. The Settings Voice Test is the point where the
+  actual backend, model and processing duration are reported. Windows Speech
+  fallback results are explicitly tagged and timed.
 
 ### Speech synthesis
 
@@ -56,8 +75,13 @@ user-installed Python or a Python launcher.
   worker. `System.Media.SoundPlayer` performs local playback; cancellation kills
   the synthesis worker or playback process and the generated file is removed.
   Pixel rejects overlapping speech. Playback uses Windows' default output
-  device. Sentence streaming, a selectable output device and a real-device
-  Kokoro quality/latency result are not implemented or verified.
+  device. Long replies (up to 20,000 characters) are stripped of fenced code,
+  URLs and basic Markdown, then split at sentence boundaries into bounded
+  Kokoro requests. Synthesis and playback are serial; each segment is generated
+  before it plays, so this is not streaming and may have audible gaps. The
+  selected engine/backend and timing are surfaced by Test voice. A selectable
+  output device and real-device quality/latency result are not implemented or
+  verified.
 - Selecting Kokoro without its model, or with a missing runtime, returns a
   specific failure. It does not silently switch to Windows Speech. The system
   engine remains an explicit fallback choice.
@@ -144,8 +168,15 @@ are `python/VOICE_RUNTIME_NOTICES.md` and
 
 - English-only faster-whisper models are offered; no Parakeet, multilingual
   model, custom vocabulary or exact-string correction path has been integrated.
-- Pixel's existing recorder has a hard 20-second limit. Long dictation,
-  punctuation accuracy and recognition quality have not been benchmarked.
+- Manual capture supports up to 120 seconds, but it is one continuous segment;
+  VAD-based segmentation at pauses is not implemented. PTT remains limited to
+  20 seconds. Speech quality and dictation accuracy have not been benchmarked.
+- `python/tools/benchmark_voice.py` accepts manually verified mono PCM16 16 kHz
+  WAVs and evaluates installed model paths with beam sizes 1, 3 and 5. It emits
+  aggregate WER/CER, omission/repetition/silence metrics, cold model-load,
+  warm inference, real-time factor, CPU time and working-set measurements. It
+  never writes references, hypotheses or paths to its report. No real corpus
+  or local model was supplied/run, so there are no comparative results yet.
 - No real microphone, speaker, offline-network, Windows install/upgrade or
   on-device latency/memory measurement was possible for this implementation
   turn. The host has Python 3.15.2 only; Kokoro ONNX 0.6.1 requires Python

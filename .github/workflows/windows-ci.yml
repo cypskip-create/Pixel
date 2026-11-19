@@ -103,6 +103,8 @@ jobs:
       - name: Build unpacked app, portable executable and NSIS installer
         shell: pwsh
         run: |
+          $env:PIXEL_VOICE_BUILD_PYTHON = Join-Path $env:pythonLocation 'python.exe'
+          Write-Host "Voice worker build interpreter: $env:PIXEL_VOICE_BUILD_PYTHON"
           npm run dist 2>&1 | Tee-Object artifacts/logs/package.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

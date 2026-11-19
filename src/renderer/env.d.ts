@@ -30,7 +30,9 @@ declare global {
       voicePttTranscribe(sessionId: number, audio: Uint8Array): Promise<{ ok: boolean; error?: string }>;
       voiceTranscribeWav(audio: Uint8Array): Promise<{
         ok: boolean; text: string; confidence?: number; error?: string; noSpeech?: boolean;
+        backend?: string; model?: string; processingMs?: number; audioSeconds?: number;
       }>;
+      voiceSaveDiagnosticWav(audio: Uint8Array): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
       voiceModelsList(): Promise<VoiceModelInfo[]>;
       voiceVoicesList(): Promise<string[]>;
       voiceModelDownload(id: VoiceModelInfo['id']): Promise<{ ok: boolean; error?: string }>;
@@ -54,7 +56,7 @@ declare global {
         noSpeech?: boolean;
       }>;
       voiceCancel(): Promise<number>;
-      voiceSpeak(text: string): Promise<{ ok: boolean; error?: string }>;
+      voiceSpeak(text: string): Promise<{ ok: boolean; error?: string; backend?: string; generationMs?: number; playbackMs?: number; elapsedMs?: number }>;
     };
   }
 }
