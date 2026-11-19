@@ -2,6 +2,32 @@
 
 Updated: 2026-11-19
 
+## Tools 4.2 interaction status
+
+The agent can read UI Automation elements in a selected external window and
+can request state-changing operations using exact selectors. Text entry uses
+`ValuePattern` with in-helper read-back; semantic controls use SelectionItem,
+Toggle, Scroll, and ExpandCollapse patterns with a state read-back. `InvokePattern`
+still uses an explicit expected postcondition, which is checked separately.
+The main process revalidates the opaque window reference, title and process
+identity around state changes; it never activates a background target. All
+state-changing UIA operations remain high-risk and require fresh approval.
+Desktop input stays leased until native-helper process termination is
+confirmed after timeout or cancellation.
+
+Current verification: `npm run build:native` and native protocol ping passed.
+The latest disposable fixture run enumerated the fixture and verified
+ValuePattern entry/read-back, InvokePattern, a separate postcondition query,
+and TogglePattern state read-back. It restored a completed task from SQLite
+with verification evidence. Earlier runs failed at the provider boundary. A
+direct rerun exited zero after cleanup confirmed helper/fixture termination;
+the npm build-and-test wrapper needs its final rerun. See the tracked result at
+[`PIXEL_TOOLS_4_2_UIA_FIXTURE_RESULT.md`](../validation/PIXEL_TOOLS_4_2_UIA_FIXTURE_RESULT.md).
+The fixture pass is single-run evidence; repeatability and the Pixel desktop
+approval-card flow are still unverified. See
+[`PIXEL_SECURITY_MODEL.md`](PIXEL_SECURITY_MODEL.md) and the current Tools 4.2
+section of the Windows acceptance procedure.
+
 ## Current state
 
 Pixel now uses the existing Windows foreground observer and UI Automation helper as the identity authority for application windows. Window captures no longer choose the first named \`desktopCapturer\` result. The helper captures only the exact opaque window reference, process ID/name and title supplied by the caller, and rechecks that identity and bounds before returning an in-memory PNG.

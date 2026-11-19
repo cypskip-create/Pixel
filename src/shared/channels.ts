@@ -67,6 +67,8 @@ export const CHANNELS = {
 
   permissionsRespond: 'permissions:respond',
   permissionsListActiveGrants: 'permissions:listActiveGrants',
+  permissionsRevokeGrant: 'permissions:revokeGrant',
+  permissionsClearExpired: 'permissions:clearExpired',
   permissionsRevokeAll: 'permissions:revokeAll',
   permissionsRequest: 'permissions:request',
   permissionsListPending: 'permissions:listPending',
@@ -95,6 +97,7 @@ export const CHANNELS = {
   memoryList: 'memory:list',
   memoryUpdate: 'memory:update',
   memoryDelete: 'memory:delete',
+  memoryHistory: 'memory:history',
   memoryExport: 'memory:export',
   memoryProjectsList: 'memory:projectsList',
   memorySetActiveProject: 'memory:setActiveProject',

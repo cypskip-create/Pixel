@@ -6,6 +6,7 @@ import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { AutomationPanel } from '@/components/AutomationPanel';
 import { MemoryPanel } from '@/components/MemoryPanel';
+import { PermissionsPanel } from '@/components/PermissionsPanel';
 import { PixelMark } from '@/components/PixelMark';
 import { MicrophoneCapture, type VoiceCaptureDiagnostics } from '@/lib/audioCapture';
 
@@ -56,6 +57,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [advanced, setAdvanced] = useState(false);
   const [automationOpen, setAutomationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [keyEditorReset, setKeyEditorReset] = useState(0);
   const [pushToTalkStatus, setPushToTalkStatus] = useState<{ accelerator: string; ok: boolean; reason?: string } | null>(null);
   const [speechCapability, setSpeechCapability] = useState<{ speechToText: boolean; reason?: string } | null>(null);
@@ -382,6 +384,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
         {automationOpen ? (
           <AutomationPanel onBack={() => setAutomationOpen(false)} />
+        ) : permissionsOpen ? (
+          <PermissionsPanel onBack={() => setPermissionsOpen(false)} />
         ) : memoryOpen ? (
           <MemoryPanel onBack={() => setMemoryOpen(false)} />
         ) : <>
@@ -709,6 +713,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
             checked={settings.privacy.persistHistory}
             onChange={(value) => onPatch({ privacy: { persistHistory: value } })}
           />
+          <Toggle
+            label="Automatic Memory"
+            hint="Save concise preferences and verified task outcomes to this project. Passwords, credentials and copied webpage instructions are excluded."
+            checked={settings.privacy.automaticMemory}
+            onChange={(value) => onPatch({ privacy: { automaticMemory: value } })}
+          />
           <ApiKeyManager
             hasApiKey={hasApiKey}
             onSave={onSaveApiKey}
@@ -723,6 +733,14 @@ export function SettingsPanel(props: SettingsPanelProps) {
           >
             <Brain size={12} aria-hidden="true" />
             Manage project memory
+          </button>
+          <button
+            type="button"
+            onClick={() => setPermissionsOpen(true)}
+            className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
+          >
+            <ShieldCheck size={12} aria-hidden="true" />
+            Manage Always Allow permissions
           </button>
         </Group>
 

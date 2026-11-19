@@ -41,7 +41,7 @@ import type { RunTurnOptions } from './conversation';
 import type { ToolResult } from './executors';
 import type { AuditLog, PermissionBroker, TaskManager } from './runtime';
 import { ToolRegistry } from './tools';
-import { deriveGrantScope, describeScope } from './scope';
+import { describeScope, standingGrantEligibility } from './scope';
 
 /** Hard ceiling on model turns per request. */
 export const MAX_STEPS = 8;
@@ -271,14 +271,21 @@ export class AgentExecutor {
         // No tool calls: the model answered. Done.
         if (outcome.toolCalls.length === 0) {
           if (tasks.get(task.id)?.reobserveRequired) {
-            const warning = 'Pixel is waiting for a fresh observation after your handoff. The environment was not rechecked, so this task is blocked.';
+            const failedMutation = (task.pendingVerifications ?? []).some((item) =>
+              item.toolName !== undefined && task.steps.find((step) => step.id === item.stepId)?.status === 'failed');
+            const warning = failedMutation
+              ? 'A state-changing step failed and may have partly completed. Pixel cannot mark this task complete. Re-observe and verify the target before retrying.'
+              : 'Pixel is waiting for a fresh observation after your handoff. The environment was not rechecked, so this task is blocked.';
             return this.finish(requestId, task, executed, [finalContent, warning].filter(Boolean).join('\n\n'), 'blocked', false);
           }
           const pending = task.pendingVerifications ?? [];
           if (pending.length > 0) {
             const latest = pending[pending.length - 1];
             const unverifiedTitle = task.steps.find((item) => item.id === latest?.stepId)?.title ?? latest?.toolName ?? 'unknown action';
-            const warning = `Pixel performed the requested action, but could not verify the result. Please check it before treating this task as complete. Unverified step: ${unverifiedTitle}.`;
+            const failedStep = task.steps.find((item) => item.id === latest?.stepId)?.status === 'failed';
+            const warning = failedStep
+              ? `A state-changing step failed and may have partly completed. Pixel cannot mark this task complete. Re-observe and verify the target before retrying. Step: ${unverifiedTitle}.`
+              : `Pixel performed the requested action, but could not verify the result. Please check it before treating this task as complete. Unverified step: ${unverifiedTitle}.`;
             return this.finish(requestId, task, executed, [finalContent, warning].filter(Boolean).join('\n\n'), 'blocked', false);
           }
           return this.finish(requestId, task, executed, finalContent, 'completed', false);
@@ -647,7 +654,23 @@ export class AgentExecutor {
       task.recoveryNote = 'The operation was interrupted and may have partly completed. Re-observe its target before retrying.';
     }
 
-    tasks.update(task.id, { steps: [...task.steps] });
+    const uncertainMutationFailure = !succeeded && tool.changesState &&
+      ['FAILED', 'TIMEOUT', 'CANCELLED', 'CRASHED', 'UNKNOWN'].includes(result.errorCode ?? '');
+    if (uncertainMutationFailure) {
+      task.reobserveRequired = true;
+      task.pendingVerifications = [
+        ...(task.pendingVerifications ?? []),
+        { stepId: step.id, toolName: call.name },
+      ];
+    }
+
+    tasks.update(task.id, {
+      steps: [...task.steps],
+      ...(uncertainMutationFailure ? {
+        reobserveRequired: true,
+        pendingVerifications: task.pendingVerifications,
+      } : {}),
+    });
 
     audit.record(
       'tool',
@@ -791,6 +814,13 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
         const expectedRole = typeof expected.role === 'string' ? ` (${expected.role})` : '';
         return `Invoke ${typeof args.selector === 'string' ? args.selector : 'the selected control'}; then verify ${String(expected.selector ?? 'the specified UI state')}${expectedRole} is ${expected.state === 'absent' ? 'absent' : 'present'}`;
       }
+    case 'control_ui_element': {
+      const action = typeof args.action === 'string' ? args.action : 'control';
+      const selector = typeof args.selector === 'string' ? args.selector : 'the selected control';
+      const state = args.action === 'toggle' ? ` ${String(args.desiredToggleState ?? '')}`
+        : args.action === 'scroll' ? ` ${String(args.scrollDirection ?? '')} ${String(args.scrollAxis ?? '')}` : '';
+      return `${action}${state} ${selector}`;
+    }
     case 'open_application':
       return `Open ${typeof args.name === 'string' ? args.name : 'an application'}`;
     case 'browser_open_search':
@@ -814,8 +844,9 @@ export function buildPermissionRequest(
   tool: ToolDefinition,
   args: Record<string, unknown>,
 ): PermissionRequest {
-  const scope = deriveGrantScope(tool.name, args);
-  const allowPersistent = tool.risk !== 'high' && Object.keys(scope).length > 0;
+  const eligibility = standingGrantEligibility(tool.name, args);
+  const scope = eligibility.target;
+  const allowPersistent = tool.risk !== 'high' && eligibility.allowed;
   return {
     id: `perm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     toolName: tool.name,
@@ -824,9 +855,13 @@ export function buildPermissionRequest(
     changesData: tool.changesState,
     risk: tool.risk,
     duration: 'once',
-    args,
+    args: permissionArgsForDisplay(tool.name, args),
     createdAt: Date.now(),
     allowPersistent,
+    alwaysAllowed: allowPersistent,
+    alwaysDisabledReason: allowPersistent ? undefined : tool.risk === 'high'
+      ? 'Sensitive actions always require fresh approval.'
+      : eligibility.reason,
     scopeLabel: allowPersistent ? describeScope(scope) : 'this exact action, one time',
   };
 }
@@ -839,7 +874,7 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
   if (name === 'get_last_external_foreground_window') return 'the last observed non-Pixel foreground window';
   if (name === 'list_external_windows') return 'visible non-Pixel windows on this desktop';
-  if (name === 'type_text') return describeWindowTarget(args);
+  if (name === 'type_text' || name === 'control_ui_element') return describeWindowTarget(args);
   if (name === 'get_foreground_window') return 'the foreground window';
   if (name === 'find_ui_elements') return typeof args.targetWindowId === 'string' ? describeWindowTarget(args) : 'the foreground window';
   if (name === 'invoke_ui_element' || name === 'verify_ui_state') return describeWindowTarget(args);
@@ -856,10 +891,24 @@ function describeWindowTarget(args: Record<string, unknown>): string {
   return `${processName}${pid}, window titled "${title}"${windowId}`;
 }
 
+function permissionArgsForDisplay(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const displayed = { ...args };
+  if (toolName === 'type_text' && typeof displayed.text === 'string') {
+    displayed.text = `[hidden for privacy; ${displayed.text.length} characters]`;
+  }
+  for (const key of Object.keys(displayed)) {
+    if (/(password|passwd|passphrase|secret|token|api[_-]?key|authorization|cookie|credential|cvv|otp)/i.test(key)) {
+      displayed[key] = '[redacted]';
+    }
+  }
+  return displayed;
+}
+
 function summariseResult(result: ToolResult): string {
   if (result.ok && result.verification) return `Verified: ${redactTaskText(result.verification.summary).slice(0, 160)}`;
   if (result.ok) return 'Action completed; postcondition verification is still pending.';
-  return `Operation failed (${result.errorCode ?? 'FAILED'}).`;
+  const safeReason = redactTaskText(result.content).replace(/\s+/g, ' ').trim().slice(0, 160);
+  return `Operation failed (${result.errorCode ?? 'FAILED'}).${safeReason ? ` ${safeReason}` : ''}`;
 }
 
 function estimateTextTokens(text: string): number {

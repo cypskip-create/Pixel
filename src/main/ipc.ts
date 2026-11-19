@@ -50,13 +50,15 @@ import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
 import { ToolExecutors } from './agent/executors';
+import { PermissionGrantStore } from './agent/permissionStore';
 import { BrowserSession } from './agent/browser';
 import { JsonlAuditSink } from './agent/auditStore';
 import { openDatabase } from './data/database';
 import { boot } from './startup/boot';
 import { selectMemoryContext } from './memory/context';
-import { MemoryStore } from './memory/store';
+import { looksLikeCredential, MemoryStore } from './memory/store';
 import { MemoryTools, MEMORY_TOOL_DEFINITIONS } from './memory/toolset';
+import { extractAutomaticMemoryCandidates, extractAutomaticMemoryForgetSlot, hasVerifiedTaskOutcome } from './memory/autoExtract';
 import { DocumentIndex } from './documents/indexer';
 import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
 import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
@@ -313,12 +315,15 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
   const fileTools = new FileTools();
 
+  const permissionGrantStore = new PermissionGrantStore(database);
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
-    ...MEMORY_TOOL_DEFINITIONS,
+    ...MEMORY_TOOL_DEFINITIONS.filter((definition) => definition.name !== 'memory_save'),
     ...DOCUMENT_TOOL_DEFINITIONS,
     ...FILE_TOOL_DEFINITIONS,
-  ]);
+  ], (grant) => {
+    try { permissionGrantStore.markUsed(grant); } catch { /* persistence failure must not change the authorization decision */ }
+  });
   const taskStore = new TaskStore(database);
   const skillStore = new SkillStore(database);
   const routineStore = new RoutineStore(database, skillStore);
@@ -336,6 +341,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     audit,
     (request) => context.sendToRenderer(CHANNELS.permissionsRequest, request),
     (requestId) => context.sendToRenderer(CHANNELS.permissionsResolved, requestId),
+    permissionGrantStore,
   );
   const voice = new VoiceService(pythonWorker, voiceModelManager);
   let activePtt: {
@@ -704,6 +710,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (!existing || existing.projectId !== projectId()) return false;
     return memoryStore.delete(id) && memoryStore.get(id) === null;
   });
+  registerHandler(CHANNELS.memoryHistory, (_event, id: string) => {
+    const existing = memoryStore.get(id);
+    if (!existing || existing.projectId !== projectId()) throw new Error('That memory is not in the active project.');
+    return memoryStore.history(id);
+  });
   registerHandler(CHANNELS.memoryExport, (): MemoryExportView =>
     memoryStore.exportProject(projectId()) as MemoryExportView,
   );
@@ -874,6 +885,33 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       content: userContent,
       createdAt: Date.now(),
     });
+    const forgetSlot = request.text.trim() ? extractAutomaticMemoryForgetSlot(request.text) : null;
+    if (forgetSlot) {
+      const removed = memoryStore.deleteAutomaticSlot(projectId(), forgetSlot);
+      audit.record('system', removed ? 'Automatic preference forgotten' : 'No matching automatic preference to forget', 'ok', `${forgetSlot} · ${removed} record(s)`);
+    }
+    if (request.text.trim()) {
+      const candidates = extractAutomaticMemoryCandidates(request.text);
+      for (const candidate of candidates) {
+        const explicitUserMemoryAction = candidate.tags.includes('user-requested') || candidate.tags.includes('auto-correction');
+        if (!current.privacy.automaticMemory && !explicitUserMemoryAction) continue;
+        try {
+          const saved = memoryStore.saveAutomatic({
+            projectId: projectId(),
+            kind: candidate.kind,
+            content: candidate.content,
+            source: 'auto:conversation',
+            confidence: 'user_approved',
+            tags: candidate.tags,
+            ...(candidate.slot ? { slot: candidate.slot } : {}),
+            ...(candidate.replaceSlot ? { replaceSlot: true } : {}),
+          });
+          audit.record('system', saved.duplicate ? 'Automatic memory already existed' : 'Automatic memory saved', 'ok', `${saved.memory.id} · ${candidate.kind}`);
+        } catch {
+          audit.record('system', 'Automatic memory was not saved', 'error', 'The candidate failed local validation or persistence.');
+        }
+      }
+    }
     streamConversations.set(requestId, { conversationId: record.id, content: '' });
     broadcastActiveConversation();
 
@@ -901,7 +939,28 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       thinking: current.provider.thinking ?? DEFAULT_THINKING,
       temperature: current.provider.temperature,
       maxTokens: current.provider.maxTokens,
-    });
+    }).then((result) => {
+      if (!current.privacy.automaticMemory || !hasVerifiedTaskOutcome(result.task)) return;
+      const verified = result.task.steps.filter((step) => step.status === 'verified').slice(0, 2);
+      if (verified.length === 0) return;
+      const title = redactTaskText(result.task.title).replace(/\s+/g, ' ').trim().slice(0, 220);
+      const evidence = verified.map((step) => redactTaskText(step.detail ?? step.title).replace(/\s+/g, ' ').trim().slice(0, 100)).filter(Boolean);
+      const content = `Completed task: ${title}. Verified: ${evidence.join('; ')}.`.slice(0, 500);
+      if (!title || looksLikeCredential(content)) return;
+      try {
+        const saved = memoryStore.saveAutomatic({
+          projectId: record.projectId ?? projectId(),
+          kind: 'outcome',
+          content,
+          source: `auto:verified-task:${result.task.id}`,
+          confidence: 'source_backed',
+          tags: ['automatic', 'verified-task'],
+        });
+        audit.record('system', saved.duplicate ? 'Verified task outcome already existed' : 'Verified task outcome saved', 'ok', `${saved.memory.id} · ${result.task.id}`);
+      } catch {
+        audit.record('system', 'Verified task outcome was not saved', 'error', result.task.id);
+      }
+    }).catch(() => undefined);
 
     return { requestId, persistence: record.persistence ?? 'persistent' };
   });
@@ -1093,8 +1152,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.permissionsListPending, (): PermissionRequest[] => permissions.pendingRequests());
 
   registerHandler(CHANNELS.permissionsListActiveGrants, (): PermissionGrant[] =>
-    permissions.activeGrants(),
+    permissions.activeGrants().filter((grant) => grant.scope === 'always'),
   );
+
+  registerHandler(CHANNELS.permissionsRevokeGrant, (_event, grantId: string): boolean =>
+    typeof grantId === 'string' && grantId.length <= 160 && permissions.revokeGrant(grantId),
+  );
+
+  registerHandler(CHANNELS.permissionsClearExpired, (): number => permissions.clearExpiredGrants());
 
   registerHandler(CHANNELS.permissionsRevokeAll, (): number => {
     const count = permissions.revokeAll();

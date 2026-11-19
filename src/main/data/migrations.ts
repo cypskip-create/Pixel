@@ -323,6 +323,39 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_routine_runs_routine ON routine_runs(routine_id, started_at DESC);
     `,
   },
+  {
+    version: 7,
+    name: 'permission-grants-and-memory-revisions',
+    sql: `
+      CREATE TABLE permission_grants (
+        id             TEXT PRIMARY KEY,
+        tool_name      TEXT NOT NULL,
+        target_json    TEXT NOT NULL,
+        risk           TEXT NOT NULL,
+        created_at     INTEGER NOT NULL,
+        last_used_at   INTEGER,
+        expires_at     INTEGER,
+        revoked_at     INTEGER,
+        policy_version INTEGER NOT NULL
+      );
+
+      CREATE INDEX idx_permission_grants_active
+        ON permission_grants(revoked_at, tool_name, created_at DESC);
+
+      CREATE TABLE memory_revisions (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id       TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        content         TEXT NOT NULL,
+        source          TEXT NOT NULL,
+        confidence      TEXT NOT NULL,
+        updated_at      INTEGER NOT NULL,
+        reason          TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_memory_revisions_memory ON memory_revisions(memory_id, updated_at DESC);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

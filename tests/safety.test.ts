@@ -137,12 +137,12 @@ describe('approval response correlation', () => {
     expect(broker.isPending()).toBe(true);
     expect(registry.activeGrants()).toHaveLength(0);
 
-    broker.respond({ requestId: requestedId, approved: true, duration: 'session' });
-    await expect(pending).resolves.toMatchObject({ approved: true });
-    expect(registry.activeGrants()[0]).toMatchObject({ target: { app: 'notepad' } });
+    broker.respond({ requestId: requestedId, approved: true, duration: 'once' });
+    await expect(pending).resolves.toMatchObject({ approved: true, duration: 'once' });
+    expect(registry.activeGrants()[0]).toMatchObject({ target: { app: 'notepad' }, scope: 'once' });
   });
 
-  it('downgrades a standing grant the request did not allow', async () => {
+  it('rejects an ineligible standing grant instead of silently downgrading it', async () => {
     const registry = new ToolRegistry();
     const broker = new PermissionBroker(registry, new AuditLog(), () => undefined);
     const pending = broker.ask({
@@ -160,8 +160,8 @@ describe('approval response correlation', () => {
 
     broker.respond({ requestId: 'one-shot-only', approved: true, duration: 'always' });
 
-    await expect(pending).resolves.toMatchObject({ approved: true, duration: 'once' });
-    expect(registry.activeGrants()[0]?.scope).toBe('once');
+    await expect(pending).resolves.toMatchObject({ approved: false, duration: 'once' });
+    expect(registry.activeGrants()).toEqual([]);
   });
 
   it('clears an approval prompt when its task signal is cancelled', async () => {

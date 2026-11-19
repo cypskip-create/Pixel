@@ -82,6 +82,15 @@ export interface VerifyElementStateQuery {
   role?: string;
 }
 
+export interface NativeElementTarget {
+  selector: string;
+  targetWindowId: string;
+  expectedWindowTitle: string;
+  expectedProcessId: number;
+  expectedProcessName: string;
+  role?: string;
+}
+
 export interface NativeCommands {
   ping: { args: Record<string, never>; result: { version: string; trackingMode?: string } };
   foreground_window: { args: Record<string, never>; result: WindowInfo | null };
@@ -102,6 +111,20 @@ export interface NativeCommands {
   invoke_element: {
     args: { selector: string; targetWindowId: string; expectedWindowTitle: string; expectedProcessId: number; expectedProcessName: string; role?: string; expectedResult: { selector: string; state: 'present' | 'absent'; role?: string } };
     result: { window: WindowInfo; element: UiElement; invoked: true };
+  };
+  set_element_value: {
+    args: NativeElementTarget & { value: string };
+    /** Value is verified inside the helper but never returned or logged. */
+    result: { window: WindowInfo; element: UiElement; valueLength: number; verified: true };
+  };
+  control_element: {
+    args: NativeElementTarget & {
+      action: 'select' | 'toggle' | 'scroll' | 'expand' | 'collapse';
+      desiredToggleState?: 'on' | 'off';
+      scrollAxis?: 'vertical' | 'horizontal';
+      scrollDirection?: 'increment' | 'decrement';
+    };
+    result: { window: WindowInfo; element: UiElement; action: string; observedState: string; verified: true };
   };
 }
 

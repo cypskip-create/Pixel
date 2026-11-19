@@ -1,5 +1,109 @@
 # Pixel Windows acceptance procedure
 
+## Tools 4.2 acceptance status — 2026-11-19
+
+This section supersedes earlier generic UIA-control acceptance text below for
+the current uncommitted Tools 4.2 implementation. Initial real desktop fixture
+runs found the target and verified ValuePattern read-back but failed in
+InvokePattern/TogglePattern. Repeated later runs passed the scripted
+InvokePattern, separate completion-label verification, TogglePattern
+state read-back, and durable completed-task reload. The latest report is
+`artifacts/windows-acceptance/pixel-native-uia-e2e-2026-11-19T12-11-25-948Z.json`;
+both direct and documented npm fixture commands exited zero after bounded
+cleanup confirmed helper and fixture termination. Pixel's actual Electron
+approval-card interaction was not tested. See
+the tracked result at
+[`PIXEL_TOOLS_4_2_UIA_FIXTURE_RESULT.md`](PIXEL_TOOLS_4_2_UIA_FIXTURE_RESULT.md).
+
+The latest GitHub Windows Actions run reviewed for the Tools 4.2 brief is
+[`44498305105`](https://github.com/cypskip-create/Pixel/actions/runs/44498305105).
+Typecheck, voice-worker unit tests, sandboxed preload smoke, full tests and
+native-helper compilation passed. Packaging failed in the pre-existing Voice
+4.1 packaged-worker smoke: the frozen worker returned `BAD_JSON` with “Expecting
+value: line 1 column 1” and then reported stdin closed. This is separate from
+Tools 4.2. The PowerShell worker build script now writes the smoke request as
+explicit UTF-8 bytes, but rebuilding the packaged Python 3.12 worker and rerun
+of the workflow are still required to verify the repair. No workflow run exists
+for these unpushed local changes.
+
+### Required final automated checks
+
+From a fresh PowerShell session at the repository root, run:
+
+```powershell
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run build:native
+npm run test:voice-worker
+```
+
+Keep each command's complete output. Chromium-dependent tests need Playwright
+Chromium installed; NSIS integration requires `makensis`. Any test reported as
+skipped remains unverified. The native UIA harness passed both directly and
+through the npm build-and-test wrapper, which exited zero after bounded cleanup.
+
+### Memory
+
+1. Open Settings → Privacy and confirm **Automatic Memory** is enabled. Turn it
+   off, send “I prefer the black-and-charcoal interface,” and verify no automatic
+   memory appears. Turn it back on and send the preference again.
+2. Open project Memory and confirm one concise preference exists with
+   automatically saved provenance. Open a new chat in the same project and ask
+   “What theme do I prefer?” Confirm the answer comes from this project only.
+3. Repeat the preference in different wording; verify no duplicate appears.
+   Correct it directly, open History, and verify the previous value remains in
+   revision history. Use the supported forget command and confirm only the
+   active project's matching preference is removed.
+4. Verify project switching does not retrieve this preference in another
+   project. Export the active project, inspect the JSON, and delete the test
+   memory from Pixel.
+
+### Persistent permissions
+
+1. Ask Pixel to open Notepad and select **Always Allow**. Confirm the app opens
+   and Settings → Permissions lists the exact Notepad grant and target.
+2. Ask again and verify the same scoped launch does not prompt. Restart Pixel,
+   repeat, then revoke that grant and confirm approval is requested again.
+3. Select **Allow Once** for a bounded action and repeat it; a new approval must
+   appear. Select **Deny** and confirm that action does not execute.
+4. Try an unsupported/high-risk action. **Always Allow** must remain disabled
+   with a reason; no permanent grant should appear. Use Emergency Stop and
+   confirm saved grants are revoked and pending approval is cancelled.
+
+### UI Automation and task recovery
+
+Build and run the current harmless fixture harness:
+
+```powershell
+npm run test:native-uia-fixture
+```
+
+Earlier runs failed at TogglePattern and InvokePattern. The latest npm report
+shows both actions and the postcondition verified and the command exited zero.
+Continue requiring generated JSON showing `valuePatternVerified`,
+`togglePatternVerified`, `postconditionVerified`, a completed durable task and
+verification evidence.
+
+Then use the actual Pixel UI with the disposable fixture. Verify exact-window
+selection, unique control discovery, the three approval decisions, denial and
+cancellation. Confirm the expected UIA state before Pixel reports success.
+Change the target window between observation and approval and verify Pixel
+refuses the stale target without activating another app. Close Pixel while an
+approval is pending, restart it, and verify recovery requires re-observation.
+Trigger Emergency Stop during a multi-step fixture task and confirm no later
+step executes. Keep screenshots unused for these metadata/UIA checks.
+
+No test screenshots for the new permission cards are available because the
+Electron GUI acceptance could not be completed in this environment. The
+separate native UIA fixture has passed; do not claim that automatic memory,
+Always Allow restart persistence, visible approval flows or emergency-stop
+recovery passed until they are observed through the Pixel UI on the target
+laptop.
+
+---
+
 This is the manual gate for behavior that type checks and automated tests cannot prove. The user reports that Pixel now starts on the target Windows laptop and its sandbox preload smoke test passes. This procedure includes the focused foreground-context integration. Record only behavior observed directly on the tested machine; see [PIXEL_RELEASE_READINESS.md](PIXEL_RELEASE_READINESS.md) for local build and test evidence.
 
 ## Tools 4.1 — exact capture and visual guidance (2026-11-19)

@@ -2,6 +2,58 @@
 
 Updated: 2026-11-19
 
+## Current handoff — Tools 4.2
+
+Branch: `codex/interaction-engine-3`. Local HEAD before these uncommitted
+changes: `cbac143ec28b0b19669aa58a911b5f53af0f5b5e`. No commit, push or release
+was made; the user will commit and push.
+
+- Automatic memory uses deterministic, bounded main-process extraction for
+  direct user preferences, selected Pixel project assertions, explicit memory
+  requests/corrections and completed tasks with verified steps. Secrets,
+  prompt-injection phrasing and copied external instructions are filtered.
+  Records are isolated to the active project, semantically deduplicated by
+  preference slot, revisioned on correction, searchable, editable, exportable,
+  and deletable. Automatic Memory defaults on and remains user-disableable.
+- Always Allow / Allow Once / Deny is wired through the main-process broker.
+  SQLite stores revocable Always grants with exact application/origin scope and
+  policy version. Persistent approval is restricted to Notepad/Calculator/Paint
+  launches and HTTPS origins. High-risk or unsupported operations cannot get a
+  standing grant. Emergency Stop revokes active grants, cancels operations and
+  pending approvals.
+- UIA uses ValuePattern for exact selected controls, verifies value read-back
+  without returning/logging the value, and supports semantic select/toggle/
+  scroll/expand/collapse operations with post-action read-back. The latest real
+  fixture report passed ValuePattern entry, InvokePattern, separate
+  postcondition verification, TogglePattern state and durable task reload
+  (3 verification records, 61 events). Earlier attempts failed at provider
+  operations. Direct and documented `npm run test:native-uia-fixture` runs
+  exited zero after a test-only cleanup fix confirmed helper and fixture
+  terminal status. Pixel's visible approval UI remains open. See the tracked result at
+  `docs/validation/PIXEL_TOOLS_4_2_UIA_FIXTURE_RESULT.md` and the raw report in
+  the local `artifacts/windows-acceptance/` folder.
+  Automatic task-outcome capture now refuses any completed task record
+  containing a failed step, pending verification, or no verified step. The
+  actual Pixel approval UI, emergency-stop workflow and laptop multi-step
+  acceptance are still pending.
+- Focused tests: **172/172 passed**. Final full Vitest: **815 passed, 27
+  skipped, 0 failed (842 total; 52 passed files, 1 skipped)**. The 27 skips are
+  missing Playwright Chromium (17), missing NSIS `makensis` (7), and opt-in
+  native desktop integration (3). Typecheck, production build, native helper
+  compilation and protocol ping passed. Python worker tests: **11/11**.
+- Current local HEAD is `cbac143ec28b0b19669aa58a911b5f53af0f5b5e`; the brief's
+  latest reviewed main SHA is `f607621bdc2fe9503df722f410423f630c700db2`.
+  GitHub Actions run `44498305105` failed only at the packaged Voice 4.1 worker
+  protocol smoke after earlier CI steps passed. The worker returned `BAD_JSON`
+  because it received no JSON request. This checkpoint updates its PowerShell
+  stdin encoding but does not yet verify a rebuilt packaged Python 3.12 worker;
+  there is no CI run for current unpushed changes.
+
+See [`docs/architecture/PIXEL_MEMORY.md`](docs/architecture/PIXEL_MEMORY.md)
+for memory policy and
+[`docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+for exact rebuild and Windows acceptance instructions.
+
 ## Current handoff — Voice Engine 4.1
 
 Branch: `codex/interaction-engine-3`. Base commit before these uncommitted

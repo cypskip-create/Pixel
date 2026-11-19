@@ -64,26 +64,6 @@ export const APPLICATION_ALLOWLIST: Record<string, string> = {
   'visual studio code': 'code.cmd',
 };
 
-/**
- * Escape text for WScript.Shell.SendKeys.
- *
- * SendKeys is a mini-language, not a text API: + ^ % ~ ( ) { } [ ] are control
- * characters. Typing "50% off (today)" unescaped sends Alt+<keys>, and a
- * model-supplied "%{F4}" would close the focused window. Every metacharacter is
- * wrapped in braces so it is typed literally, and line breaks become Enter.
- */
-export function escapeSendKeys(text: string): string {
-  let out = '';
-  for (const ch of text) {
-    if ('+^%~(){}[]'.includes(ch)) out += `{${ch}}`;
-    else if (ch === '\r') continue;
-    else if (ch === '\n') out += '{ENTER}';
-    else if (ch === '\t') out += '{TAB}';
-    else out += ch;
-  }
-  return out;
-}
-
 /** Per-tool wall clock limit. */
 export const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 
@@ -161,7 +141,7 @@ export class ToolExecutors {
     if (signal?.aborted) return cancelledResult(name);
 
     let releaseInput: (() => void) | null = null;
-    if (name === 'type_text' || name === 'invoke_ui_element') {
+    if (name === 'type_text' || name === 'invoke_ui_element' || name === 'control_ui_element') {
       releaseInput = await this.inputLease.acquire(signal);
       if (!releaseInput || signal?.aborted) {
         releaseInput?.();
@@ -189,7 +169,7 @@ export class ToolExecutors {
       return signal?.aborted && name !== 'browser_open_search' ? cancelledResult(name) : result;
     } finally {
       signal?.removeEventListener('abort', onAbort);
-      if (releaseInput && name === 'invoke_ui_element' && this.deps.nativeHelper?.terminating) {
+      if (releaseInput && this.deps.nativeHelper?.terminating) {
         await this.deps.nativeHelper.whenStopped();
       }
       releaseInput?.();
@@ -265,6 +245,8 @@ export class ToolExecutors {
           return await this.verifyUiState(args, signal);
         case 'invoke_ui_element':
           return await this.invokeUiElement(args, signal);
+        case 'control_ui_element':
+          return await this.controlUiElement(args, signal);
         case 'open_application':
           return await this.openApplication(args, signal);
         case 'type_text':
@@ -700,6 +682,60 @@ export class ToolExecutors {
     };
   }
 
+  private async controlUiElement(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.nativeHelper) {
+      return { ok: false, content: 'Windows UI Automation is not available in this build.', errorCode: 'UNAVAILABLE' };
+    }
+    const target = selectedWindowTarget(args);
+    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+    const action = args.action;
+    if (!target || !selector || !['select', 'toggle', 'scroll', 'expand', 'collapse'].includes(String(action))) {
+      return { ok: false, content: 'Provide an exact control selector, selected window identity, and supported semantic action.', errorCode: 'FAILED' };
+    }
+    if (action === 'toggle' && args.desiredToggleState !== 'on' && args.desiredToggleState !== 'off') {
+      return { ok: false, content: 'A toggle action must specify the desired state as on or off.', errorCode: 'FAILED' };
+    }
+    if (action === 'scroll' && !['vertical', 'horizontal'].includes(String(args.scrollAxis))) {
+      return { ok: false, content: 'A scroll action must specify a vertical or horizontal axis.', errorCode: 'FAILED' };
+    }
+    if (action === 'scroll' && !['increment', 'decrement'].includes(String(args.scrollDirection))) {
+      return { ok: false, content: 'A scroll action must specify increment or decrement.', errorCode: 'FAILED' };
+    }
+
+    const result = await this.deps.nativeHelper.call('control_element', {
+      targetWindowId: target.windowId,
+      expectedWindowTitle: target.title,
+      expectedProcessId: target.pid,
+      expectedProcessName: target.processName,
+      selector,
+      action: action as 'select' | 'toggle' | 'scroll' | 'expand' | 'collapse',
+      ...(typeof args.role === 'string' ? { role: args.role } : {}),
+      ...(args.desiredToggleState === 'on' || args.desiredToggleState === 'off'
+        ? { desiredToggleState: args.desiredToggleState } : {}),
+      ...(args.scrollAxis === 'vertical' || args.scrollAxis === 'horizontal'
+        ? { scrollAxis: args.scrollAxis } : {}),
+      ...(args.scrollDirection === 'increment' || args.scrollDirection === 'decrement'
+        ? { scrollDirection: args.scrollDirection } : {}),
+    }, signal);
+    const elementRect = this.deps.toDipRect?.(result.element.rect) ?? result.element.rect;
+    return {
+      ok: true,
+      content: `Pixel ${action === 'scroll' ? 'scrolled' : action === 'select' ? 'selected' : action === 'toggle' ? 'set the toggle' : action === 'expand' ? 'expanded' : 'collapsed'} the exact ${result.element.role} control "${result.element.name || result.element.automationId}" in "${result.window.title}" and verified its UI Automation state (${result.observedState}).`,
+      detail: {
+        window: result.window,
+        element: { ...result.element, physicalRect: result.element.rect, rect: elementRect },
+        action: result.action,
+        observedState: result.observedState,
+        verified: true,
+        coordinateSpace: 'electron_dip',
+      },
+      verification: {
+        summary: `${action} on ${result.element.role} "${result.element.name || result.element.automationId}" was confirmed by UI Automation (${result.observedState}).`,
+        source: 'UI Automation pattern read-back',
+      },
+    };
+  }
+
   /* --------------------------- state changing -------------------------- */
 
   private async openApplication(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
@@ -748,6 +784,7 @@ export class ToolExecutors {
 
   private async typeText(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const text = typeof args.text === 'string' ? args.text : '';
+    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
     const expectedWindowTitle = typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : '';
     const targetWindowId = typeof args.targetWindowId === 'string' ? args.targetWindowId : '';
     const expectedProcessId = typeof args.expectedProcessId === 'number' ? args.expectedProcessId : 0;
@@ -755,8 +792,8 @@ export class ToolExecutors {
     if (text.length === 0) {
       return { ok: false, content: 'No text was provided to type.', errorCode: 'FAILED' };
     }
-    if (expectedWindowTitle.length === 0 || expectedWindowTitle.length > 500 || !targetWindowId || expectedProcessId <= 0 || !expectedProcessName) {
-      return { ok: false, content: 'Select a recently observed window and include its exact title and process identity before requesting text input.', errorCode: 'FAILED' };
+    if (expectedWindowTitle.length === 0 || expectedWindowTitle.length > 500 || !targetWindowId || expectedProcessId <= 0 || !expectedProcessName || !selector || selector.length > 300) {
+      return { ok: false, content: 'Select a recently observed window and an exact editable control, including its title and process identity, before requesting text input.', errorCode: 'FAILED' };
     }
     if (text.length > 2_000) {
       return {
@@ -765,87 +802,33 @@ export class ToolExecutors {
         errorCode: 'FAILED',
       };
     }
-    if (process.platform !== 'win32') {
-      return {
-        ok: false,
-        content: 'Typing into other applications is only supported on Windows.',
-        errorCode: 'UNAVAILABLE',
-      };
-    }
-
     if (!this.deps.nativeHelper) {
       return { ok: false, content: 'Window identity validation is unavailable; no text was sent.', errorCode: 'UNAVAILABLE' };
     }
-    const target = await this.deps.nativeHelper.resolveWindowTarget({
+    const result = await this.deps.nativeHelper.call('set_element_value', {
+      selector,
+      value: text,
       targetWindowId,
       expectedWindowTitle,
       expectedProcessId,
       expectedProcessName,
+      ...(typeof args.role === 'string' ? { role: args.role } : {}),
     }, signal);
-
-    // Both the requested title and text travel through the environment, never
-    // inside the PowerShell script. A Win32 recheck immediately before SendKeys
-    // narrows the focus-change race between the approval card and input.
-    const nativeCode = [
-      'using System;',
-      'using System.Runtime.InteropServices;',
-      'using System.Text;',
-      'public static class PixelForegroundWindowCheck {',
-      '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
-      '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);',
-      '  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);',
-      '}',
-    ].join('\n');
-    const script = [
-      '$ErrorActionPreference = "Stop";',
-      "$native = @'",
-      nativeCode,
-      "'@",
-      'Add-Type -TypeDefinition $native;',
-      '$handle = [PixelForegroundWindowCheck]::GetForegroundWindow();',
-      '$expectedHandle = [IntPtr]([Convert]::ToInt64($env:CYPS_EXPECTED_WINDOW_HANDLE, 16));',
-      'if ($handle -ne $expectedHandle) { Write-Error "Foreground window changed; no text was sent"; exit 3 }',
-      '$foregroundPid = [uint32]0; [void][PixelForegroundWindowCheck]::GetWindowThreadProcessId($handle, [ref]$foregroundPid);',
-      'if ($foregroundPid -ne [uint32]$env:CYPS_EXPECTED_PROCESS_ID) { Write-Error "Foreground process changed; no text was sent"; exit 3 }',
-      '$title = New-Object System.Text.StringBuilder 1024;',
-      '[void][PixelForegroundWindowCheck]::GetWindowText($handle, $title, $title.Capacity);',
-      'if ($title.ToString() -cne $env:CYPS_EXPECTED_WINDOW_TITLE) { Write-Error "Foreground window changed; no text was sent"; exit 3 }',
-      '$process = Get-Process -Id $foregroundPid -ErrorAction Stop;',
-      'if ($process.ProcessName -ine $env:CYPS_EXPECTED_PROCESS_NAME -or $process.StartTime.ToUniversalTime().Ticks -ne [long]$env:CYPS_EXPECTED_START_TICKS) { Write-Error "Foreground process identity changed; no text was sent"; exit 3 }',
-      '$value = $env:CYPS_TYPE_TEXT;',
-      'if ([string]::IsNullOrEmpty($value)) { Write-Error "empty"; exit 2 }',
-      '$shell = New-Object -ComObject WScript.Shell;',
-      '$shell.SendKeys($value);',
-      'Write-Output "typed"',
-    ].join('\n');
-
-    const result = await this.runChild(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      {
-        ...process.env,
-        CYPS_TYPE_TEXT: escapeSendKeys(text),
-        CYPS_EXPECTED_WINDOW_TITLE: expectedWindowTitle,
-        CYPS_EXPECTED_WINDOW_HANDLE: target.handle,
-        CYPS_EXPECTED_PROCESS_ID: String(expectedProcessId),
-        CYPS_EXPECTED_PROCESS_NAME: expectedProcessName,
-        CYPS_EXPECTED_START_TICKS: target.processStartTicks,
-      },
-      signal,
-    );
-
-    if (!result.ok) {
-      return {
-        ok: false,
-        content: `Windows refused the keystrokes: ${result.error}. The target window may not accept input, or the session may be locked.`,
-        errorCode: result.timedOut ? 'TIMEOUT' : /foreground window changed/i.test(result.error ?? '') ? 'DENIED' : 'FAILED',
-      };
-    }
-
+    const rect = this.deps.toDipRect?.(result.element.rect) ?? result.element.rect;
     return {
       ok: true,
-      content: `Typed ${text.length} character${text.length === 1 ? '' : 's'} into the selected foreground window titled "${expectedWindowTitle}" (${expectedProcessName}, PID ${expectedProcessId}) after rechecking its window and process identity.`,
-      detail: { characters: text.length, expectedWindowTitle, expectedProcessName, expectedProcessId, targetWindowId },
+      content: `Set and verified ${result.valueLength} character${result.valueLength === 1 ? '' : 's'} in the exact ${result.element.role} control "${result.element.name || result.element.automationId}" in "${result.window.title}" using UI Automation. The value itself was not returned or logged.`,
+      detail: {
+        window: result.window,
+        element: { ...result.element, physicalRect: result.element.rect, rect },
+        characters: result.valueLength,
+        targetWindowId,
+        verified: true,
+      },
+      verification: {
+        summary: `UI Automation read the value back from ${result.element.role} "${result.element.name || result.element.automationId}" and confirmed it matched the approved input.`,
+        source: 'UI Automation ValuePattern read-back',
+      },
     };
   }
 
@@ -1099,37 +1082,6 @@ export class ToolExecutors {
     return child;
   }
 
-  /** Run a child process to completion with a timeout, never throwing. */
-  private runChild(
-    file: string,
-    args: string[],
-    env: NodeJS.ProcessEnv,
-    signal?: AbortSignal,
-  ): Promise<{ ok: boolean; error: string; timedOut: boolean }> {
-    return new Promise((resolve) => {
-      let settled = false;
-      const child = execFile(
-        file,
-        args,
-        // Node kills the child when the signal aborts.
-        { env, windowsHide: true, timeout: DEFAULT_TOOL_TIMEOUT_MS, signal },
-        (error) => {
-          if (settled) return;
-          settled = true;
-          if (!error) {
-            resolve({ ok: true, error: '', timedOut: false });
-            return;
-          }
-          const timedOut = (error as { killed?: boolean }).killed === true;
-          resolve({ ok: false, error: message(error), timedOut });
-        },
-      );
-      this.track(child);
-      const onAbort = (): void => terminateProcessTree(child);
-      signal?.addEventListener('abort', onAbort, { once: true });
-      child.once('close', () => signal?.removeEventListener('abort', onAbort));
-    });
-  }
 }
 
 function cancelledResult(name: string): ToolResult {

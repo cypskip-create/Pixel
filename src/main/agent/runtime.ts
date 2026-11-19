@@ -18,6 +18,8 @@ import type {
 import type { AuditSink } from './auditStore';
 import { describeScope } from './scope';
 import { ToolRegistry, applyDecision } from './tools';
+import { PERMISSION_POLICY_VERSION } from './scope';
+import type { PermissionGrantStore } from './permissionStore';
 import type { TaskPersistence } from '../tasks/store';
 import { redactTaskText } from '../tasks/schema';
 
@@ -70,17 +72,21 @@ export class AuditLog {
  */
 export class PermissionBroker {
   private pending: { request: PermissionRequest; resolve: (d: PermissionDecision) => void; cleanup: () => void } | null = null;
-  private readonly grants = new Map<string, PermissionGrant>();
   private readonly registry: ToolRegistry;
+  private readonly grantStore?: PermissionGrantStore;
   private readonly audit: AuditLog;
   private readonly emitRequest: (request: PermissionRequest) => void;
   private readonly emitResolved: (requestId: string) => void;
 
-  constructor(registry: ToolRegistry, audit: AuditLog, emitRequest: (r: PermissionRequest) => void, emitResolved: (id: string) => void = () => undefined) {
+  constructor(registry: ToolRegistry, audit: AuditLog, emitRequest: (r: PermissionRequest) => void, emitResolved: (id: string) => void = () => undefined, grantStore?: PermissionGrantStore) {
     this.registry = registry;
     this.audit = audit;
     this.emitRequest = emitRequest;
     this.emitResolved = emitResolved;
+    this.grantStore = grantStore;
+    for (const grant of grantStore?.listActive() ?? []) {
+      if (!registry.grant(grant)) grantStore?.revoke(grant.id);
+    }
   }
 
   /** Ask the user. Resolves with their decision; never resolves to approved by default. */
@@ -134,40 +140,54 @@ export class PermissionBroker {
       this.audit.record('permission', 'Ignored a stale approval response', 'denied');
       return;
     }
-    if (
-      typeof decision.approved !== 'boolean' ||
-      !['once', 'session', 'always'].includes(decision.duration)
-    ) {
+    if (typeof decision.approved !== 'boolean' || !['once', 'always'].includes(decision.duration)) {
       this.audit.record('permission', 'Ignored an invalid approval response', 'denied');
+      this.pending = null;
+      pending.cleanup();
+      this.notifyResolved(pending.request.id);
+      pending.resolve({ requestId: pending.request.id, approved: false, duration: 'once' });
       return;
     }
     this.pending = null;
     pending.cleanup();
     this.notifyResolved(decision.requestId);
 
-    // The renderer is not an authority boundary. Even if a modified or stale
-    // UI asks for a standing grant, only the exact scoped action represented by
-    // this request may retain one; high-risk and unscoped requests are one-shot.
-    const effectiveDecision: PermissionDecision = {
-      ...decision,
-      duration:
-        decision.approved && decision.duration !== 'once' &&
-        (pending.request.allowPersistent !== true || pending.request.risk === 'high')
-          ? 'once'
-          : decision.duration,
-    };
-    if (decision.approved && effectiveDecision.duration !== decision.duration) {
-      this.audit.record('permission', 'Reduced an unsupported standing approval to one use', 'ok');
+    // The renderer is not an authority boundary. Always Allow is checked again
+    // against a main-process capability allow-list and the exact current scope.
+    let effectiveDecision: PermissionDecision = { ...decision };
+    if (decision.approved && decision.duration === 'always') {
+      const eligibility = this.registry.canGrantAlways(pending.request.toolName, pending.request.args);
+      if (!eligibility.allowed || pending.request.risk === 'high') {
+        effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
+        this.audit.record('permission', 'Rejected an ineligible Always Allow decision', 'denied', eligibility.reason);
+      }
     }
 
     if (effectiveDecision.approved) {
       const grant = applyDecision(effectiveDecision, {
         toolName: pending.request.toolName,
         args: pending.request.args,
+        risk: pending.request.risk,
       });
       if (grant) {
-        this.grants.set(grant.toolName, grant);
-        this.registry.grant(grant);
+        if (!this.registry.grant(grant)) {
+          effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
+          this.audit.record('permission', 'Rejected a permission that failed current policy validation', 'denied');
+          pending.resolve(effectiveDecision);
+          return;
+        }
+        if (grant.scope === 'always') {
+          try {
+            if (!this.grantStore || grant.policyVersion !== PERMISSION_POLICY_VERSION) throw new Error('persistent permission store unavailable');
+            this.grantStore.save(grant);
+          } catch {
+            this.registry.revoke(grant.id);
+            effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
+            this.audit.record('permission', 'Could not persist Always Allow; action was not approved', 'error');
+            pending.resolve(effectiveDecision);
+            return;
+          }
+        }
         this.audit.record(
           'permission',
           `Approved "${pending.request.toolName}" (${grant.scope})`,
@@ -199,19 +219,31 @@ export class PermissionBroker {
 
   /** Revoke one tool's grant. Used to consume single-use approvals. */
   revoke(toolName: string): boolean {
-    const existed = this.grants.delete(toolName);
+    const grant = this.activeGrants().find((candidate) => candidate.toolName === toolName && candidate.scope === 'once');
+    const existed = grant ? this.registry.revoke(grant.id) : false;
     if (existed) {
-      this.registry.revoke(toolName);
       this.audit.record('permission', `Consumed approval for "${toolName}"`, 'ok');
     }
     return existed;
   }
 
+  revokeGrant(grantId: string): boolean {
+    const grant = this.activeGrants().find((candidate) => candidate.id === grantId);
+    if (!grant || !this.registry.revoke(grantId)) return false;
+    if (grant.scope === 'always') this.grantStore?.revoke(grantId);
+    this.audit.record('permission', `Revoked "${grant.toolName}" permission`, 'ok', `limited to ${describeScope(grant.target ?? {})}`);
+    return true;
+  }
+
   revokeAll(): number {
     this.rejectPending();
     const count = this.registry.revokeAll();
-    this.grants.clear();
+    this.grantStore?.revokeAll();
     return count;
+  }
+
+  clearExpiredGrants(): number {
+    return this.grantStore?.clearExpired() ?? 0;
   }
 
   isPending(): boolean {
