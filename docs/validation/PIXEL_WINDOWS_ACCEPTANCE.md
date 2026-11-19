@@ -1,16 +1,33 @@
 # Pixel Windows acceptance procedure
 
-## Experience 5.1 & Tools 5.2 — current uncommitted changes (2026-11-19)
+## Experience 5.1 base and Cursor Buddy trust follow-up (2026-11-19)
 
 Current automated evidence and blockers are in
 [`PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](PIXEL_EXPERIENCE_POLISH_5_READINESS.md).
-This worktree passed typechecking, production build, native-helper build and
-the full Vitest suite (**839 passed, 27 skipped, 0 failed; 866 total; 57 files
-passed, 1 skipped**). The
-Python worker tests passed **12/12**. The sandboxed Electron smoke failed with
+The merged Experience 5.1 base passed typechecking, production build,
+native-helper build and Vitest (**839 passed, 27 skipped; 866 total**). Python
+worker tests passed **12/12**. The sandboxed Electron smoke failed with
 `0x80000003` before a report; the Python 3.12 frozen worker could not be built
 because no suitable interpreter is installed. Settings/Workspace screenshots,
 the packaged application, installer and new Actions run remain unverified.
+
+The current local Cursor Buddy fix adds a narrow IPC path for renderer-ready
+and a reduced-motion-only preference. Focused policy tests pass **6/6** and the
+updated full suite passes **842, skips 27, fails 0 (869 total)**. Its production
+build and TypeScript checks pass. The sandbox preload smoke rebuilt the bridge
+but Electron exited `0x80000003` before renderer startup. The actual cursor
+window has not been tested after this fix.
+
+### Cursor Buddy laptop acceptance
+
+On the same checkout that contains the fix, run `npm run build`, then enable
+Cursor Companion in Settings. Confirm the terminal reports `renderer-ready`
+followed by `visible` within eight seconds, with no untrusted-renderer errors.
+Toggle Reduce Motion and confirm it updates the companion. Verify Cursor Buddy
+stays adjacent to the pointer, remains click-through, does not take focus, and
+stays visible across Island, Workspace and Settings transitions. Its only
+permitted IPC calls are the readiness acknowledgement and reduced-motion read;
+all other calls from the cursor window must remain rejected.
 
 Only one Codex Settings reference screenshot and the approved Pix concept were
 available in the current attachment set. Compare Settings to the supplied

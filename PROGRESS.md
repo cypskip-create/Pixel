@@ -2,11 +2,35 @@
 
 Updated: 2026-11-19. Version: 0.2.1.
 
-## Current uncommitted checkpoint — Experience 5.1 & Tools 5.2
+## Current fix — Cursor Buddy stays hidden after being enabled
+
+Reviewed latest GitHub `main`: `0a8f39f68bf54bc10ac3274521ef348b8289080a`.
+The fix below is local and uncommitted; no push or workflow was triggered.
+
+- Root cause from the laptop log: the shared IPC guard trusted Island, Settings
+  and Workspace renderers but excluded the cursor window. As a result,
+  `window:cursorRendererReady` was rejected and the 8-second readiness timer
+  left the buddy hidden. The cursor renderer also called the broad
+  `settings:get` endpoint, which was rejected for the same reason.
+- The cursor now has a two-channel IPC allowlist: renderer-ready and a new
+  reduced-motion-only preference read. Sender checks require the current
+  cursor BrowserWindow, its main frame and Pixel's trusted renderer URL. All
+  other IPC remains denied for the cursor window. Popup and cross-document
+  navigation are blocked there as well.
+- Validation on this host: typecheck and production build passed; focused
+  cursor IPC policy tests **6/6 passed**; full Vitest **842 passed, 27 skipped,
+  0 failed (869 total; 57 files passed, 1 skipped)**. The current GitHub commit
+  has no reported status checks; no CI run was started for this local change.
+  The sandbox preload smoke rebuilt the new API but Electron exited
+  `2147483651` (`0x80000003`) before producing a renderer report.
+  The user's photo is pre-fix runtime evidence; post-fix real-laptop visibility
+  is not yet confirmed.
+
+## Latest merged checkpoint — Experience 5.1 & Tools 5.2
 
 Reviewed source base: `47d1db1284c7860ec52ddf1f6dd50bf532a2f8b4` on `main`.
-Changes remain uncommitted for the user to commit and push; no release was
-published.
+This checkpoint is on latest `main` as `0a8f39f68bf54bc10ac3274521ef348b8289080a`;
+no release was published.
 
 - The failed Windows CI run `44542308139` passed JSONL framing and failed in
   frozen voice runtime initialization. Source inspection found phonemizer was

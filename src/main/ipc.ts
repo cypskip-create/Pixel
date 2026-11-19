@@ -93,6 +93,7 @@ import { redactTaskText } from './tasks/schema';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../shared/browserSearch';
 import { safeExternalHttpUrl } from '../shared/externalUrl';
 import { claimPushToTalkEnd } from '../shared/companion/pushToTalkSession';
+import { isCursorIpcChannelAllowed } from './windowPolicy';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -153,7 +154,10 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown,
   ): void => {
     ipcMain.handle(channel, (event, ...args) => {
-      if (!windows.isTrustedApplicationSender(event.sender, event.senderFrame)) {
+      const trustedApplication = windows.isTrustedApplicationSender(event.sender, event.senderFrame);
+      const trustedCursorRequest = isCursorIpcChannelAllowed(channel) &&
+        windows.isTrustedCursorApplicationSender(event.sender, event.senderFrame);
+      if (!trustedApplication && !trustedCursorRequest) {
         throw new Error('This Pixel IPC request came from an untrusted renderer.');
       }
       return listener(event, ...args);
@@ -832,6 +836,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.windowCursorRendererReady, (event): void => {
     if (windows.isCursorSender(event.sender)) windows.markCursorRendererReady(event.sender);
+  });
+
+  registerHandler(CHANNELS.windowCursorSettingsGet, (event): { reducedMotion: boolean } => {
+    if (!windows.isCursorSender(event.sender)) throw new Error('Only the cursor companion may read its appearance preference.');
+    return { reducedMotion: settings.get().companion.reducedMotion };
   });
 
   registerHandler(CHANNELS.windowHide, (event): void => { if (windows.isMainSender(event.sender)) windows.hide(); });

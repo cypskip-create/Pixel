@@ -1,5 +1,27 @@
 # Experience 5.1 & Tools 5.2 readiness report
 
+## Cursor Buddy IPC regression follow-up (2026-11-19)
+
+Latest GitHub main is [`0a8f39f`](https://github.com/cypskip-create/Pixel/commit/0a8f39f68bf54bc10ac3274521ef348b8289080a). GitHub currently reports no check statuses for that commit. The cursor fix is local and uncommitted; it has not run in Actions or on the user's laptop.
+
+The supplied log shows the cursor renderer calling `settings:get` and
+`window:cursorRendererReady`, both rejected as untrusted. The common IPC guard
+accepted only Island, Settings and Workspace, so the cursor's ready event never
+reached `WindowManager`; after eight seconds the window stayed hidden. The
+repair adds a two-channel cursor allow-list, validates the sender window/main
+frame/trusted renderer URL, and replaces the full settings read with a
+`reducedMotion`-only response. Other IPC remains blocked for Cursor Buddy.
+Popup and non-Pixel navigation are blocked on that window.
+
+Current local evidence: TypeScript and production build pass; cursor policy
+tests pass **6/6**; full Vitest passes **842**, skips **27**, fails **0** (869
+total; 57 test files passed, 1 skipped). The rebuilt sandbox preload smoke
+could not reach renderer startup: Electron exited `0x80000003`. The Electron
+GUI did not run in this host, so the real companion appearing beside the pointer
+still needs laptop acceptance. The laptop test should show `renderer-ready` promptly followed by
+`visible`, with no untrusted-renderer errors. The existing Windows acceptance
+procedure has the exact steps.
+
 Date: 2026-11-19
 Reviewed base SHA: `47d1db1284c7860ec52ddf1f6dd50bf532a2f8b4` (`main`)
 Current HEAD: same base SHA; changes are uncommitted.

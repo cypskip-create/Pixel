@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { safeExternalHttpUrl } from '../src/shared/externalUrl';
 import { mergeSettings } from '../src/shared/types';
-import { isTrustedRendererUrl } from '../src/main/windowPolicy';
+import { isCursorIpcChannelAllowed, isTrustedRendererUrl } from '../src/main/windowPolicy';
+import { CHANNELS } from '../src/shared/channels';
 
 describe('Workspace window policy', () => {
   it('bounds restored Workspace dimensions and accepts the configured shortcut', () => {
@@ -21,6 +24,36 @@ describe('Workspace window policy', () => {
 });
 
 describe('renderer and external-link boundaries', () => {
+  it('limits the cursor companion to readiness and its reduced-motion preference', () => {
+    expect(isCursorIpcChannelAllowed(CHANNELS.windowCursorRendererReady)).toBe(true);
+    expect(isCursorIpcChannelAllowed(CHANNELS.windowCursorSettingsGet)).toBe(true);
+    expect(isCursorIpcChannelAllowed(CHANNELS.settingsGet)).toBe(false);
+    expect(isCursorIpcChannelAllowed(CHANNELS.settingsSet)).toBe(false);
+    expect(isCursorIpcChannelAllowed(CHANNELS.screenCaptureDisplay)).toBe(false);
+    expect(isCursorIpcChannelAllowed(CHANNELS.systemEmergencyStop)).toBe(false);
+  });
+
+  it('keeps the renderer identity and per-channel cursor gate connected', () => {
+    const ipc = readFileSync(join(process.cwd(), 'src', 'main', 'ipc.ts'), 'utf8');
+    const windows = readFileSync(join(process.cwd(), 'src', 'main', 'window.ts'), 'utf8');
+    expect(ipc).toContain('isCursorIpcChannelAllowed(channel) &&');
+    expect(ipc).toContain('windows.isTrustedCursorApplicationSender(event.sender, event.senderFrame)');
+    expect(windows).toContain('frame !== sender.mainFrame');
+    expect(windows).toContain('isTrustedRendererUrl(frame.url, this.deps.rendererIndexPath, this.deps.devServerUrl)');
+  });
+
+  it('gives Cursor Buddy only the reduced-motion preference instead of all settings', () => {
+    const ipc = readFileSync(join(process.cwd(), 'src', 'main', 'ipc.ts'), 'utf8');
+    const app = readFileSync(join(process.cwd(), 'src', 'renderer', 'App.tsx'), 'utf8');
+    const start = app.indexOf('function CursorCompanionWindow()');
+    const end = app.indexOf('/* ------------------------------------------------------------------ *', start);
+    const cursorWindow = app.slice(start, end);
+    expect(ipc).toContain('return { reducedMotion: settings.get().companion.reducedMotion };');
+    expect(ipc).toContain('if (!windows.isCursorSender(event.sender))');
+    expect(cursorWindow).toContain('window.getCursorSettings()');
+    expect(cursorWindow).not.toContain('settings.get()');
+  });
+
   it('accepts only the configured development renderer origin and page', () => {
     expect(isTrustedRendererUrl('http://localhost:5199/?window=workspace', 'unused', 'http://localhost:5199')).toBe(true);
     expect(isTrustedRendererUrl('http://localhost:5199/index.html?window=settings', 'unused', 'http://localhost:5199')).toBe(true);

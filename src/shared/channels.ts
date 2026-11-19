@@ -24,6 +24,7 @@ export const CHANNELS = {
   windowCursorPlacement: 'window:cursorPlacement',
   windowCursorState: 'window:cursorState',
   windowCursorRendererReady: 'window:cursorRendererReady',
+  windowCursorSettingsGet: 'window:cursorSettingsGet',
   windowSetCursorState: 'window:setCursorState',
   windowSetExpanded: 'window:setExpanded',
   windowHide: 'window:hide',

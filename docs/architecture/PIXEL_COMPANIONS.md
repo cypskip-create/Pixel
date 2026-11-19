@@ -60,6 +60,16 @@ than an indefinite hidden loading window. Its visible behavior, focus, click
 through, monitor edges and lock/resume lifecycle still require the target
 Windows acceptance procedure.
 
+The cursor renderer has a separate IPC trust path. It must be the current
+cursor BrowserWindow's main frame on the trusted Pixel renderer URL, and it may
+invoke only `window:cursorRendererReady` and `window:cursorSettingsGet` (which
+returns only `reducedMotion`). The generic app IPC guard must not be widened to
+the cursor window: its full typed preload exists, but main-process handlers
+deny every other channel. The 2026-11-19 laptop log showed this readiness call
+being rejected by the generic guard; the focused fix adds the narrow exception
+and blocks popup/cross-document navigation. Real post-fix visibility still
+needs laptop verification.
+
 ## Acceptance separation
 
 Verify both systems independently. Pix should react to real Pixel states in

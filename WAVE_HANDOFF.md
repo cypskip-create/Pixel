@@ -1,9 +1,33 @@
 # Pixel implementation handoff
 
-## Current uncommitted checkpoint — Experience 5.1 & Tools 5.2
+## Current local fix — Cursor Companion IPC trust
+
+Latest GitHub `main` reviewed: `0a8f39f68bf54bc10ac3274521ef348b8289080a`.
+The focused fix is local and uncommitted; no commit, push or workflow run was
+created.
+
+- The laptop log showed the cursor renderer's `settings:get` and
+  `window:cursorRendererReady` calls rejected by the generic application IPC
+  guard. That guard intentionally trusted only Island, Settings and Workspace,
+  so the ready acknowledgement never reached `WindowManager` and the 8-second
+  timeout kept Cursor Buddy hidden.
+- Cursor IPC now allows only a trusted main-frame readiness acknowledgement
+  and a reduced-motion-only preference read. The window identity and trusted
+  renderer URL are checked; other application capabilities remain unavailable
+  to Cursor Buddy. The cursor renderer also denies popup and external
+  navigation.
+- Validation: focused policy tests **6/6**, typecheck, full Vitest **842
+  passed, 27 skipped, 0 failed (869 total)** and production build passed. The
+  sandbox preload smoke rebuilt the bridge but Electron exited `0x80000003`
+  before renderer startup. The cursor still needs a post-fix visible test on
+  the laptop. GitHub reports no checks for latest main; this local fix has no
+  Actions run.
+
+## Latest merged checkpoint — Experience 5.1 & Tools 5.2
 
 Reviewed base: `47d1db1284c7860ec52ddf1f6dd50bf532a2f8b4` (`main`). The user
-will commit and push; no commit, push, workflow trigger or release was created.
+checkpoint is now merged on `main` at `0a8f39f68bf54bc10ac3274521ef348b8289080a`.
+The Cursor Buddy follow-up above remains uncommitted.
 
 - Windows Actions run `44542308139` (run 29 on this base SHA) passed through
   typecheck, worker safety, sandbox preload, full suite and native-helper

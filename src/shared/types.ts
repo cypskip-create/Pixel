@@ -925,6 +925,8 @@ export interface CypsBridge {
     setCursorAssistantState(state: AssistantState): Promise<void>;
     /** Cursor window acknowledges its first completed renderer paint. */
     cursorRendererReady(): Promise<void>;
+    /** Read the one appearance preference needed by the passive cursor window. */
+    getCursorSettings(): Promise<{ reducedMotion: boolean }>;
     onCursorAssistantState(handler: (state: AssistantState) => void): () => void;
   };
   chat: {

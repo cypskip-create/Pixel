@@ -117,6 +117,7 @@ const bridge: CypsBridge = {
     setCursorAssistantState: (state: AssistantState) =>
       ipcRenderer.invoke(CH.windowSetCursorState, state) as Promise<void>,
     cursorRendererReady: () => ipcRenderer.invoke(CH.windowCursorRendererReady) as Promise<void>,
+    getCursorSettings: () => ipcRenderer.invoke(CH.windowCursorSettingsGet) as Promise<{ reducedMotion: boolean }>,
     onCursorAssistantState: (handler: (state: AssistantState) => void) =>
       subscribe(CH.windowCursorState, handler),
   },

@@ -1,12 +1,13 @@
 # Pixel security model
 
-Updated: 2026-11-19 — Experience 5.1 (blue Settings states, compact Island Pix, local Pixel Board, and frozen-worker diagnostics; existing permission boundaries retained).
+Updated: 2026-11-19 — Cursor Buddy IPC trust fix on `0a8f39f` (latest main); Experience 5.1 functionality and permission boundaries retained.
 
 ## Trust boundaries
 
 | Boundary | Rule in current code | Remaining limit |
 | --- | --- | --- |
 | Renderer to OS | Renderer calls an explicit preload API; the main process owns tools, settings, credentials and DB access. | Live Electron window behavior is not part of the automated test result. |
+| Cursor Buddy IPC | Only the current cursor window's trusted main frame can call renderer-ready and `cursorSettingsGet`; the latter returns only `reducedMotion`. The per-channel allow-list is checked before the common IPC listener, and the cursor window denies popups and external navigation. | The renderer still has the shared typed preload object, so handler-side deny-by-default must remain enforced. Post-fix visibility needs a real desktop test. |
 | Model to tool | Model output is a proposal. Zod validates the registered argument contract; main-process mode, stop and approval policy decides whether it can run. | Model reasoning itself is not trusted as policy. Some schema formats outside Pixel's supported subset fail closed. |
 | Retrieved content to instruction | System prompt and document/file tool results label website/document/screenshot content as untrusted. | Prompt instructions alone cannot eliminate model influence; every consequential action still needs local policy and approval. |
 | Approval response to request | Approval ids must match the pending request. Main-process policy independently validates Always Allow against an explicit tool/scope allow-list. High-risk and unsupported standing grants are rejected. | Real Electron approval-card interaction is not verified in this host. |

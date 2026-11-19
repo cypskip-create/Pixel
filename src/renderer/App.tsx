@@ -143,8 +143,8 @@ function CursorCompanionWindow(): React.JSX.Element {
     const unsubscribePlacement = safeSubscribe<{ flipX: boolean; flipY: boolean }>(bridge.bridge.window.onCursorPlacement, setOrientation);
     const unsubscribeState = safeSubscribe<AssistantState>(bridge.bridge.window.onCursorAssistantState, setAssistantState);
     void bridge.bridge.window.cursorRendererReady().catch(() => undefined);
-    void bridge.bridge.settings.get().then((settings) => {
-      if (mounted) setReducedMotion(settings.companion.reducedMotion);
+    void bridge.bridge.window.getCursorSettings().then((settings) => {
+      if (mounted) setReducedMotion(settings.reducedMotion);
     }).catch(() => undefined);
     return () => {
       mounted = false;

@@ -628,6 +628,11 @@ export class WindowManager {
     return Boolean(this.cursorWindow && !this.cursorWindow.isDestroyed() && this.cursorWindow.webContents === sender);
   }
 
+  isTrustedCursorApplicationSender(sender: WebContents, frame: WebFrameMain | null): boolean {
+    if (!this.isCursorSender(sender) || !frame || frame !== sender.mainFrame) return false;
+    return isTrustedRendererUrl(frame.url, this.deps.rendererIndexPath, this.deps.devServerUrl);
+  }
+
   markCursorRendererReady(sender: WebContents): void {
     if (!this.isCursorSender(sender) || this.cursorWindowReady) return;
     this.cursorWindowReady = true;
@@ -942,6 +947,10 @@ export class WindowManager {
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
     win.setIgnoreMouseEvents(true, { forward: true });
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', (event, url) => {
+      if (!isTrustedRendererUrl(url, this.deps.rendererIndexPath, this.deps.devServerUrl)) event.preventDefault();
+    });
     win.webContents.on('did-finish-load', () => {
       if (this.cursorWindow !== win) return;
       this.reportCursorStatus('renderer-loaded; awaiting-ready-ack');

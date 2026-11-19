@@ -1,5 +1,16 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CHANNELS } from '../shared/channels';
+
+const CURSOR_IPC_ALLOWLIST = new Set<string>([
+  CHANNELS.windowCursorRendererReady,
+  CHANNELS.windowCursorSettingsGet,
+]);
+
+/** The passive cursor surface gets only its paint acknowledgement and one preference. */
+export function isCursorIpcChannelAllowed(channel: string): boolean {
+  return CURSOR_IPC_ALLOWLIST.has(channel);
+}
 
 /** Accept only the configured renderer document in its top-level frame. */
 export function isTrustedRendererUrl(urlValue: string, rendererIndexPath: string, devServerUrl: string | null): boolean {
