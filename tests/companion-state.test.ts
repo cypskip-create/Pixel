@@ -39,6 +39,13 @@ describe('companion state', () => {
     expect(deriveAssistantState({ ...base, error: true, streaming: true })).toBe('error');
   });
 
+  it('shows only verified task outcomes as success while preserving stop and approval priority', () => {
+    expect(deriveAssistantState({ ...base, taskOutcome: 'success' })).toBe('success');
+    expect(deriveAssistantState({ ...base, taskOutcome: 'error' })).toBe('error');
+    expect(deriveAssistantState({ ...base, taskOutcome: 'success', permission: true })).toBe('waiting_for_approval');
+    expect(deriveAssistantState({ ...base, taskOutcome: 'success', stopped: true })).toBe('stopped');
+  });
+
   it('returns to idle when no active signal remains', () => {
     expect(deriveAssistantState(base)).toBe('idle');
   });

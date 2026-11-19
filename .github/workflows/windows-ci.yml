@@ -12,7 +12,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       PLAYWRIGHT_BROWSERS_PATH: '0'
     steps:
@@ -25,6 +25,11 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Set up Python for document worker tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Create artifact folders
         shell: pwsh
         run: |
@@ -34,6 +39,12 @@ jobs:
         shell: pwsh
         run: |
           npm ci 2>&1 | Tee-Object artifacts/logs/npm-ci.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install and verify the locked Electron runtime
+        shell: pwsh
+        run: |
+          npm run ensure:electron-runtime 2>&1 | Tee-Object artifacts/logs/electron-runtime.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install Playwright Chromium
@@ -63,6 +74,12 @@ jobs:
           npm run typecheck 2>&1 | Tee-Object artifacts/logs/typecheck.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test local voice worker safety and recovery
+        shell: pwsh
+        run: |
+          python -m unittest discover -s python/tests -v 2>&1 | Tee-Object artifacts/logs/voice-worker-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Exercise the sandboxed preload bridge
         shell: pwsh
         run: |
@@ -72,6 +89,8 @@ jobs:
       - name: Run full automated test suite
         shell: pwsh
         run: |
+          $env:PIXEL_PYTHON = (Get-Command python).Source
+          Write-Host "Document tests use Python at $env:PIXEL_PYTHON"
           npm test -- --reporter=default --reporter=junit --outputFile.junit=artifacts/test-results/vitest-junit.xml 2>&1 | Tee-Object artifacts/logs/tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -84,6 +103,8 @@ jobs:
       - name: Build unpacked app, portable executable and NSIS installer
         shell: pwsh
         run: |
+          $env:PIXEL_VOICE_BUILD_PYTHON = Join-Path $env:pythonLocation 'python.exe'
+          Write-Host "Voice worker build interpreter: $env:PIXEL_VOICE_BUILD_PYTHON"
           npm run dist 2>&1 | Tee-Object artifacts/logs/package.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -100,5 +121,6 @@ jobs:
             artifacts/test-results/*.xml
             artifacts/windows-acceptance/*.json
             artifacts/windows-acceptance/*.log
+            dist/main/preload/index.js
             release/**
             native/bin/PixelNative.exe

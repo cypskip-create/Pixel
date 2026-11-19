@@ -39,6 +39,7 @@ function Harness() {
   const state = useSettings();
   return createElement(SettingsPanel, {
     settings: state.settings,
+    displays: [],
     onPatch: state.patch,
     onRequestMode: state.setMode,
     onClose: () => undefined,
@@ -320,6 +321,7 @@ describe('DeepSeek API key settings', () => {
       const state = useSettings();
       return createElement(SettingsPanel, {
         settings: state.settings,
+        displays: [],
         onPatch: state.patch,
         onRequestMode: state.setMode,
         onClose,

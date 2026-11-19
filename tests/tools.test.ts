@@ -179,8 +179,8 @@ describe('ToolRegistry', () => {
 
   it('revokeAll clears every grant and reports the count', () => {
     const registry = new ToolRegistry();
-    registry.grant({ id: 'a', toolName: 'type_text', scope: 'always', grantedAt: Date.now() });
-    registry.grant({ id: 'b', toolName: 'open_application', scope: 'session', grantedAt: Date.now() });
+    registry.grant({ id: 'a', toolName: 'open_application', scope: 'always', target: { app: 'notepad' }, risk: 'medium', policyVersion: 1, grantedAt: Date.now() });
+    registry.grant({ id: 'b', toolName: 'type_text', scope: 'once', risk: 'high', grantedAt: Date.now() });
     expect(registry.activeGrants()).toHaveLength(2);
     expect(registry.revokeAll()).toBe(2);
     expect(registry.activeGrants()).toHaveLength(0);

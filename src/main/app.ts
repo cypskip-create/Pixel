@@ -6,9 +6,12 @@
  * concerns (single instance, startup, clean quit) also live here.
  */
 
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, Menu, powerMonitor, screen, session, shell } from 'electron';
+import { existsSync } from 'node:fs';
+import { release as osRelease } from 'node:os';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/channels';
+import { safeExternalHttpUrl } from '../shared/externalUrl';
 import { boot, describeError } from './startup/boot';
 import {
   APP_NAME,
@@ -22,6 +25,8 @@ import { RuntimeProvider } from './providers/runtime';
 import { ScreenCapture } from './screen';
 import { SettingsStore } from './settings';
 import { ShortcutManager } from './shortcuts';
+import { PushToTalkReleaseWatcher } from './services/pushToTalkReleaseWatcher';
+import { NativeHelper } from './services/nativeHelper';
 import { TrayController } from './tray';
 import { WindowManager } from './window';
 
@@ -78,15 +83,21 @@ function preloadPath(): string {
   return join(mainDir(), '..', 'preload', 'index.js');
 }
 
+function nativeHelperPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'native', 'PixelNative.exe')
+    : join(app.getAppPath(), 'native', 'bin', 'PixelNative.exe');
+}
+
 function createWindowManager(store: SettingsStore): WindowManager {
-  const manager = new WindowManager(store.get().companion.position, {
+  const manager = new WindowManager(store.get().companion, {
     preloadPath: preloadPath(),
     devServerUrl: DEV_SERVER_URL,
     rendererIndexPath: join(rendererDir(), 'index.html'),
-    onPositionChange: (position) => {
-      // Persist quietly; a failure here must not interrupt dragging.
+    onAnchorChange: (anchor) => {
+      // Persist only the selected display and clear the retired free-form point.
       try {
-        store.set({ companion: { position } });
+        store.set({ companion: anchor });
       } catch {
         // ignore
       }
@@ -94,6 +105,14 @@ function createWindowManager(store: SettingsStore): WindowManager {
     onVisibilityChange: (visible) => {
       tray?.rebuild();
       void visible;
+    },
+    onCursorDiagnostic: (message, error = false) => {
+      if (error) boot.error(`Cursor companion: ${message}`);
+      else boot.info(`Cursor companion: ${message}`);
+    },
+    workspaceWindow: store.get().workspaceWindow,
+    onWorkspaceBoundsChange: (state) => {
+      try { store.set({ workspaceWindow: state }); } catch { /* window state is best-effort */ }
     },
   });
   return manager;
@@ -121,11 +140,8 @@ export async function start(): Promise<void> {
 
   resolveUserDataDir();
 
-  // Some user machines run Electron without a usable GPU (VMs, headless RDP,
-  // cloud desktops, or broken drivers). A GPU launch failure kills the renderer
-  // before the window can paint, so prefer software rendering over a silent
-  // crash. Transparent, always-on-top windows still work without the GPU path.
-  app.commandLine.appendSwitch('disable-gpu');
+  // Keep production on Electron's normal GPU path. Development can opt in to
+  // --disable-gpu for diagnosis; packaged GPU failures are logged independently.
   app.commandLine.appendSwitch('enable-transparent-visuals');
   if (process.platform === 'win32') {
     app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
@@ -134,6 +150,7 @@ export async function start(): Promise<void> {
   boot.stage('waiting for electron ready');
   await app.whenReady();
   boot.stage('electron ready');
+  boot.info(`Renderer startup: platform=${process.platform} os=${osRelease()} disableGpu=${app.commandLine.hasSwitch('disable-gpu')}`);
 
   // No application menu: Pixel is not a document application and a menu bar in a
   // floating window would be visual noise.
@@ -197,18 +214,54 @@ export async function start(): Promise<void> {
   const store = settings;
 
   windows = createWindowManager(store);
-  windows.setVisualMode(
-    store.get().companion.visualMode,
-    store.get().companion.followSpeed,
-    store.get().companion.cursorOffset,
-    store.get().companion.reducedMotion,
-  );
+  windows.setPresentationSettings(store.get().companion);
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const mediaTypes = (details as { mediaTypes?: Array<'audio' | 'video'> }).mediaTypes;
+    const audioOnly = permission === 'media' &&
+      Array.isArray(mediaTypes) && mediaTypes.length === 1 &&
+      mediaTypes[0] === 'audio';
+    callback(audioOnly && windows?.isTrustedApplicationSender(contents, contents.mainFrame) === true);
+  });
 
   // Capture is authorized per explicit UI action only.
   let captureAuthorized = false;
+  const nativeHelper = new NativeHelper({ executablePath: nativeHelperPath(), exists: existsSync });
+  try {
+    await nativeHelper.startForegroundTracking();
+  } catch (error) {
+    boot.warn(`Foreground-window tracking is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  windows.setGuidanceTargetValidator(async (target, selector, role) => {
+    const args = {
+      targetWindowId: target.windowId,
+      expectedWindowTitle: target.title,
+      expectedProcessId: target.pid,
+      expectedProcessName: target.processName,
+    };
+    const found = await nativeHelper.call('find_elements', {
+      text: selector,
+      ...(role ? { roles: [role] } : {}),
+      maxResults: 25,
+      ...args,
+    });
+    if (found.window.windowId !== target.windowId || found.window.pid !== target.pid ||
+      found.window.title !== target.title || found.window.processName.toLocaleLowerCase() !== target.processName.toLocaleLowerCase()) {
+      return { status: 'stale' as const };
+    }
+    const matches = found.elements.filter((element) =>
+      element.automationId === selector || element.name.localeCompare(selector, undefined, { sensitivity: 'accent' }) === 0);
+    if (matches.length !== 1 || matches[0].rect.width <= 0 || matches[0].rect.height <= 0) return { status: 'stale' as const };
+    const foreground = await nativeHelper.call('foreground_window', {});
+    const rect = screen.screenToDipRect(null, matches[0].rect);
+    return {
+      status: foreground?.windowId === target.windowId ? 'foreground' as const : 'background' as const,
+      bounds: rect,
+    };
+  });
   const captures = new ScreenCapture({
     isAuthorized: () => captureAuthorized,
-    ownSourceIds: () => BrowserWindow.getAllWindows().map((w) => w.getMediaSourceId()),
+    nativeHelper,
+    ownProcessIds: () => [process.pid],
   });
   void captureAuthorized;
 
@@ -218,13 +271,31 @@ export async function start(): Promise<void> {
     settings: store,
     windows,
     provider,
+    nativeHelper,
     captures: {
       isAuthorized: () => captureAuthorized,
       listDisplays: () => captures.listDisplays(),
+      listExternalWindows: () => captures.listExternalWindows(),
       captureActiveWindow: async () => {
         captureAuthorized = true;
         try {
           return await captures.captureActiveWindow();
+        } finally {
+          captureAuthorized = false;
+        }
+      },
+      captureLastExternalWindow: async () => {
+        captureAuthorized = true;
+        try {
+          return await captures.captureLastExternalWindow();
+        } finally {
+          captureAuthorized = false;
+        }
+      },
+      captureSelectedWindow: async (target) => {
+        captureAuthorized = true;
+        try {
+          return await captures.captureSelectedWindow(target);
         } finally {
           captureAuthorized = false;
         }
@@ -247,11 +318,27 @@ export async function start(): Promise<void> {
       },
     },
     sendToRenderer: (channel, payload) => {
-      const win = windows?.getMainWindow();
-      if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-      const settingsWin = windows?.getSettingsWindow();
-      if (settingsWin && !settingsWin.isDestroyed()) {
-        settingsWin.webContents.send(channel, payload);
+      const recipients = [windows?.getMainWindow(), windows?.getSettingsWindow(), windows?.getWorkspaceWindow()];
+      for (const win of recipients) {
+        if (!win || win.isDestroyed() || win.webContents.isDestroyed()) continue;
+        try { win.webContents.send(channel, payload); } catch { /* a closing window may reject delivery */ }
+      }
+    },
+    sendToMainRenderer: (channel, payload) => {
+      const main = windows?.getMainWindow();
+      if (main && !main.isDestroyed() && !main.webContents.isDestroyed()) {
+        try { main.webContents.send(channel, payload); } catch { /* a closing renderer may reject delivery */ }
+      }
+    },
+    getShortcutStatus: () => shortcuts?.getStatus().pushToTalk ?? null,
+    onSettingsChange: (next) => {
+      shortcuts?.apply(next);
+      tray?.rebuild();
+      const recipients = [windows?.getMainWindow(), windows?.getSettingsWindow(), windows?.getWorkspaceWindow()];
+      for (const win of recipients) {
+        if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+          try { win.webContents.send(CHANNELS.settingsChanged, next); } catch { /* closing renderer */ }
+        }
       }
     },
     onQuit: () => {
@@ -270,12 +357,18 @@ export async function start(): Promise<void> {
       void next;
       tray?.rebuild();
       const win = windows?.getMainWindow();
-      if (win && !win.isDestroyed()) {
-        win.webContents.send(CHANNELS.modeChanged, mode);
+      const recipients = [win, windows?.getSettingsWindow(), windows?.getWorkspaceWindow()];
+      for (const recipient of recipients) {
+        if (recipient && !recipient.isDestroyed() && !recipient.webContents.isDestroyed()) {
+          try { recipient.webContents.send(CHANNELS.modeChanged, mode); } catch { /* closing renderer */ }
+          try { recipient.webContents.send(CHANNELS.settingsChanged, next); } catch { /* closing renderer */ }
+        }
       }
     },
     onOpenSettings: () => windows?.createSettingsWindow(),
+    onOpenWorkspace: () => windows?.openWorkspace(),
     onEmergencyStop: () => {
+      shortcuts?.cancelPushToTalk();
       controller.emergency.trigger();
     },
     onQuit: () => {
@@ -289,11 +382,33 @@ export async function start(): Promise<void> {
 
   shortcuts = new ShortcutManager({
     onToggle: () => windows?.toggle(),
+    onOpenWorkspace: () => windows?.openWorkspace(),
     onEmergencyStop: () => {
+      shortcuts?.cancelPushToTalk();
       controller.emergency.trigger();
     },
-  });
+    onPushToTalkStart: () => controller.startPushToTalk(),
+    onPushToTalkEnd: (reason) => controller.endPushToTalk(reason),
+  }, new PushToTalkReleaseWatcher({ executablePath: nativeHelperPath(), exists: existsSync }));
   shortcuts.apply(store.get());
+  powerMonitor.on('suspend', () => {
+    windows?.setSessionLocked(true);
+    shortcuts?.cancelPushToTalk();
+    controller.cancelVoiceCapture();
+  });
+  powerMonitor.on('resume', () => {
+    windows?.setSessionLocked(false);
+    windows?.refreshCursorCompanion();
+  });
+  powerMonitor.on('lock-screen', () => {
+    windows?.setSessionLocked(true);
+    shortcuts?.cancelPushToTalk();
+    controller.cancelVoiceCapture();
+  });
+  powerMonitor.on('unlock-screen', () => {
+    windows?.setSessionLocked(false);
+    windows?.refreshCursorCompanion();
+  });
 
   const mainWindow = windows.createMainWindow();
 
@@ -311,8 +426,7 @@ export async function start(): Promise<void> {
 
   const showFallback = setTimeout(() => {
     if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      boot.warn('ready-to-show did not fire within 8s; showing the window anyway.');
-      mainWindow.showInactive();
+      boot.warn('ready-to-show did not fire within 8s; leaving the island hidden to avoid exposing an unpainted transparent window. Check renderer and GPU child-process diagnostics.');
     }
   }, 8000);
   mainWindow.once('closed', () => clearTimeout(showFallback));
@@ -335,13 +449,15 @@ export async function start(): Promise<void> {
   // Open external links in the user's browser, never inside the app window.
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://')) void shell.openExternal(url);
+      const safeUrl = safeExternalHttpUrl(url);
+      if (safeUrl) void shell.openExternal(safeUrl);
       return { action: 'deny' };
     });
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) windows?.show();
+  const main = windows?.getMainWindow();
+  if (!main || main.isDestroyed()) windows?.show();
   });
 }
 
@@ -365,6 +481,7 @@ app.on('before-quit', () => {
   shutdownAgentWorkers = null;
   shortcuts?.unregisterAll();
   tray?.destroy();
+  windows?.dispose();
 });
 
 app.on('will-quit', () => {

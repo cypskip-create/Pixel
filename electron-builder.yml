@@ -42,6 +42,8 @@ files:
 extraResources:
   - from: native/bin/PixelNative.exe
     to: native/PixelNative.exe
+  - from: python/dist/PixelVoiceWorker
+    to: voice-runtime
 
 # The main process bundle lives at dist/main/main/main.js and declares
 # "type": "commonjs" for the compiled tree.

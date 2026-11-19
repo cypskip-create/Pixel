@@ -6,7 +6,7 @@ import type { AssistantState } from '@shared/types';
  * Every state differs along at least three axes so that colour blindness,
  * monochrome displays and small sizes cannot collapse two states together:
  *
- *   tone    - hue (redundant signal, never the only one)
+ *   tone    - neutral shade (redundant signal, never the only one)
  *   shape   - the silhouette drawn inside the orb
  *   motion  - the animation applied (suppressed under reduced motion)
  *   label   - the accessible name announced to screen readers
@@ -24,7 +24,7 @@ export interface OrbVisual {
   label: string;
   /** One-line human description shown in menus. */
   blurb: string;
-  /** CSS colour for the orb's core glow. */
+  /** CSS grayscale fill for the orb body. */
   tone: string;
   /** Silhouette family: drives the inner mark. */
   shape: 'core' | 'ring' | 'diamond' | 'wave' | 'gear' | 'check' | 'cross' | 'pause';
@@ -54,6 +54,15 @@ export const ORB_VISUALS: Record<AssistantState, OrbVisual> = {
     motion: 'orb-pulse',
     busy: true,
     mark: { kind: 'ring', r: 7.5, width: 2.4 },
+  },
+  transcribing: {
+    label: 'Transcribing',
+    blurb: 'Converting the held voice instruction into text.',
+    tone: 'var(--color-state-thinking)',
+    shape: 'wave',
+    motion: 'orb-sheen',
+    busy: true,
+    mark: { kind: 'bars', widths: [1.5, 3.1, 4.2, 2.4, 1.4] },
   },
   thinking: {
     label: 'Thinking',

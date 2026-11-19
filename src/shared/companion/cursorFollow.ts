@@ -21,10 +21,25 @@ export interface FollowConfig {
 }
 
 export const DEFAULT_FOLLOW_CONFIG: FollowConfig = {
-  responseSeconds: 0.22,
-  dampingRatio: 0.78,
+  responseSeconds: 0.14,
+  dampingRatio: 1,
   speed: 1,
 };
+
+export const CURSOR_WINDOW_SIZE = 36;
+export const CURSOR_VISIBLE_SIZE = 28;
+export const CURSOR_ICON_VIEWBOX_SIZE = 32;
+export const CURSOR_ICON_HOTSPOT = { x: 2, y: 2 } as const;
+export const CURSOR_WINDOW_PADDING = (CURSOR_WINDOW_SIZE - CURSOR_VISIBLE_SIZE) / 2;
+export const CURSOR_WINDOW_HOTSPOT = {
+  x: CURSOR_WINDOW_PADDING + (CURSOR_ICON_HOTSPOT.x / CURSOR_ICON_VIEWBOX_SIZE) * CURSOR_VISIBLE_SIZE,
+  y: CURSOR_WINDOW_PADDING + (CURSOR_ICON_HOTSPOT.y / CURSOR_ICON_VIEWBOX_SIZE) * CURSOR_VISIBLE_SIZE,
+} as const;
+export const MAX_CURSOR_GAP_DIPS = 12;
+export const MAX_FOLLOW_LAG_DIPS = 12;
+export const CURSOR_DISCONTINUITY_DIPS = 160;
+export const CURSOR_RESUME_SNAP_MS = 500;
+export const CURSOR_EDGE_HYSTERESIS_DIPS = 8;
 
 export interface FollowState {
   position: Point;
@@ -80,6 +95,36 @@ export function stepFollower(
   return { position: { x: px, y: py }, velocity: { x: vx, y: vy } };
 }
 
+/** Keep the native-window anchor no more than 12 DIP from its expected point. */
+export function stepFollowerBounded(
+  state: FollowState,
+  target: Point,
+  dtSeconds: number,
+  config: FollowConfig = DEFAULT_FOLLOW_CONFIG,
+  maxLag = MAX_FOLLOW_LAG_DIPS,
+): FollowState {
+  const next = stepFollower(state, target, dtSeconds, { ...config, dampingRatio: 1 });
+  const dx = next.position.x - target.x;
+  const dy = next.position.y - target.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= maxLag || distance === 0) return next;
+  const scale = maxLag / distance;
+  return {
+    position: { x: target.x + dx * scale, y: target.y + dy * scale },
+    velocity: { x: 0, y: 0 },
+  };
+}
+
+export function shouldSnapCursorFollower(input: {
+  cursor: Point;
+  previousCursor: Point | null;
+  elapsedMs: number;
+  displayChanged: boolean;
+}): boolean {
+  if (input.previousCursor === null || input.displayChanged || input.elapsedMs >= CURSOR_RESUME_SNAP_MS) return true;
+  return Math.hypot(input.cursor.x - input.previousCursor.x, input.cursor.y - input.previousCursor.y) >= CURSOR_DISCONTINUITY_DIPS;
+}
+
 /** True once the follower is close enough and slow enough to stop animating. */
 export function isSettled(state: FollowState, target: Point): boolean {
   return (
@@ -93,44 +138,125 @@ export function settle(target: Point): FollowState {
   return createFollower(target);
 }
 
+export interface CursorOrientation {
+  /** Mirror the pointer horizontally so its hotspot remains nearest the cursor. */
+  flipX: boolean;
+  /** Mirror the pointer vertically so its hotspot remains nearest the cursor. */
+  flipY: boolean;
+}
+
+export interface CursorPlacement extends CursorOrientation {
+  position: Point;
+}
+
 export interface PlaceOptions {
-  /** Offset from the cursor to the companion's top-left, in DIP. */
+  /** Small pointer-to-character gap in global DIP; its magnitude is capped at 12. */
   offset: Point;
   /** Companion size, so it is kept fully on screen. */
   size: Size;
   /** Gap kept to the display edge. */
   margin: number;
+  /** Location of the visible cursor tip relative to the native window's top-left. */
+  hotspot: Point;
+  /** Avoid side flipping when the pointer crosses a display edge threshold. */
+  hysteresis: number;
 }
 
 export const DEFAULT_PLACE_OPTIONS: PlaceOptions = {
-  offset: { x: 22, y: 20 },
-  size: { width: 36, height: 36 },
-  margin: 8,
+  offset: { x: 8, y: 8 },
+  size: { width: CURSOR_WINDOW_SIZE, height: CURSOR_WINDOW_SIZE },
+  margin: 2,
+  hotspot: CURSOR_WINDOW_HOTSPOT,
+  hysteresis: CURSOR_EDGE_HYSTERESIS_DIPS,
 };
 
 /**
- * Where the companion's top-left should rest for a given cursor position.
- *
- * It sits at the configured offset, but flips to the other side of the cursor
- * when that would push it past the right or bottom edge, so it never covers the
- * pointer or hangs off-screen. The result is always clamped into `area`.
+ * Place the cursor character by its actual visible SVG tip, not by its native
+ * window corner. The window and pointer stay in Electron's global DIP space.
  */
-export function companionTarget(cursor: Point, area: Rect, options: PlaceOptions = DEFAULT_PLACE_OPTIONS): Point {
-  const { offset, size, margin } = options;
-  let x = cursor.x + offset.x;
-  let y = cursor.y + offset.y;
-
-  if (x + size.width > rectRight(area) - margin) x = cursor.x - offset.x - size.width;
-  if (y + size.height > rectBottom(area) - margin) y = cursor.y - offset.y - size.height;
-
+export function placeCursorCompanion(
+  cursor: Point,
+  area: Rect,
+  options: PlaceOptions = DEFAULT_PLACE_OPTIONS,
+  previous?: CursorOrientation,
+): CursorPlacement {
+  const { offset, size, margin, hotspot } = options;
+  const gapScale = Math.min(1, MAX_CURSOR_GAP_DIPS / Math.max(0.001, Math.hypot(offset.x, offset.y)));
+  const gap = { x: offset.x * gapScale, y: offset.y * gapScale };
+  const normalX = cursor.x + Math.abs(gap.x) - hotspot.x;
+  const flippedX = cursor.x - Math.abs(gap.x) - (size.width - hotspot.x);
+  const normalY = cursor.y + Math.abs(gap.y) - hotspot.y;
+  const flippedY = cursor.y - Math.abs(gap.y) - (size.height - hotspot.y);
+  const flipX = chooseFlip(
+    normalX,
+    flippedX,
+    area.x,
+    rectRight(area),
+    size.width,
+    margin,
+    options.hysteresis,
+    previous?.flipX,
+    gap.x < 0,
+  );
+  const flipY = chooseFlip(
+    normalY,
+    flippedY,
+    area.y,
+    rectBottom(area),
+    size.height,
+    margin,
+    options.hysteresis,
+    previous?.flipY,
+    gap.y < 0,
+  );
   const inner: Rect = {
     x: area.x + margin,
     y: area.y + margin,
-    width: Math.max(0, area.width - 2 * margin - size.width),
-    height: Math.max(0, area.height - 2 * margin - size.height),
+    width: area.width - 2 * margin - size.width,
+    height: area.height - 2 * margin - size.height,
   };
-  const clamped = clampPoint({ x, y }, inner, 0);
-  return clamped;
+  const clamped = clampPoint({ x: flipX ? flippedX : normalX, y: flipY ? flippedY : normalY }, inner, 0);
+  return { position: clamped, flipX, flipY };
+}
+
+/** Backwards-compatible position-only helper for geometry callers. */
+export function companionTarget(cursor: Point, area: Rect, options: PlaceOptions = DEFAULT_PLACE_OPTIONS): Point {
+  return placeCursorCompanion(cursor, area, options).position;
+}
+
+function chooseFlip(
+  normal: number,
+  flipped: number,
+  areaStart: number,
+  areaEnd: number,
+  size: number,
+  margin: number,
+  hysteresis: number,
+  previous: boolean | undefined,
+  preferredFlip: boolean,
+): boolean {
+  const fits = (position: number, extraMargin = 0): boolean =>
+    position >= areaStart + margin + extraMargin && position + size <= areaEnd - margin - extraMargin;
+
+  if (previous === true) return fits(normal, hysteresis) ? false : true;
+  if (previous === false) return fits(normal) ? false : true;
+  if (preferredFlip && fits(flipped)) return true;
+  if (!preferredFlip && fits(normal)) return false;
+  if (fits(normal)) return false;
+  if (fits(flipped)) return true;
+  return preferredFlip;
+}
+
+export function shouldShowCursorCompanion(input: {
+  enabled: boolean;
+  settingsOpen: boolean;
+  workspaceFocused: boolean;
+  sessionLocked: boolean;
+}): boolean {
+  // Cursor Buddy is its own desktop overlay; the focused Pixel Workspace is a
+  // valid place to show it. Settings remains hidden so its native preview is
+  // never confused with the real click-through desktop window.
+  return input.enabled && !input.settingsOpen && !input.sessionLocked;
 }
 
 export type BubbleSide = 'right' | 'left' | 'above' | 'below';

@@ -241,7 +241,7 @@ describe('agent loop - approval', () => {
   it('suspends, asks, and executes once approved', async () => {
     const tools = fakeTools({ type_text: { ok: true, content: 'typed 5 characters' } });
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Typed it.')],
+      outcomes: [toolStep('type_text', { text: 'hello', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Typed it.')],
       tools,
       approve: true,
     });
@@ -305,7 +305,7 @@ describe('agent loop - approval', () => {
   it('does not execute when the user denies, and tells the model so', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Understood.')],
+      outcomes: [toolStep('type_text', { text: 'hello', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Understood.')],
       tools,
       approve: false,
     });
@@ -323,7 +323,7 @@ describe('agent loop - approval', () => {
 
   it('records a denied tool call in the audit trail', async () => {
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('ok')],
+      outcomes: [toolStep('type_text', { text: 'hello', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('ok')],
       approve: false,
     });
     await run(h.agent);
@@ -332,7 +332,7 @@ describe('agent loop - approval', () => {
 
   it('sends the risk level so the UI can show an honest warning', async () => {
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'x', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('ok')],
+      outcomes: [toolStep('type_text', { text: 'x', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('ok')],
       approve: false,
     });
     await run(h.agent);
@@ -342,7 +342,7 @@ describe('agent loop - approval', () => {
   it('honors a pause requested while approval is open', async () => {
     const tools = fakeTools({ type_text: { ok: true, content: 'typed 5 characters' } });
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Typed it.')],
+      outcomes: [toolStep('type_text', { text: 'hello', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Typed it.')],
       tools,
       deferApproval: true,
     });
@@ -366,7 +366,7 @@ describe('agent loop - approval', () => {
   it('cancels promptly when the user stops a task with an approval open', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hello', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('should not run')],
+      outcomes: [toolStep('type_text', { text: 'hello', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('should not run')],
       tools,
       deferApproval: true,
     });
@@ -475,10 +475,39 @@ describe('agent loop - failures', () => {
     expect(result.task.steps[0].status).toBe('failed');
   });
 
+  it('blocks completion and requires a fresh observation after a state-changing failure', async () => {
+    const args = {
+      text: 'harmless test text',
+      selector: 'Editor',
+      role: 'Edit',
+      targetWindowId: 'window-test',
+      expectedWindowTitle: 'Test window',
+      expectedProcessId: 1234,
+      expectedProcessName: 'notepad',
+    };
+    const tools = fakeTools({
+      type_text: { ok: false, content: 'UI Automation could not confirm the action outcome.', errorCode: 'FAILED' },
+    });
+    const h = harness({
+      outcomes: [toolStep('type_text', args, 'uncertain-text'), toolStep('type_text', args, 'unsafe-retry'), plainAnswer('The text was entered.')],
+      tools,
+      approve: true,
+    });
+
+    const result = await run(h.agent);
+
+    expect(tools.calls).toEqual(['type_text']);
+    expect(result.task.status).toBe('blocked');
+    expect(result.task.reobserveRequired).toBe(true);
+    expect(result.task.pendingVerifications).toHaveLength(1);
+    expect(result.task.recoveryNote).toBeUndefined();
+    expect(result.finalContent).toMatch(/cannot mark this task complete/i);
+  });
+
   it('blocks a state-changing tool in Guide mode without asking', async () => {
     const tools = fakeTools();
     const h = harness({
-      outcomes: [toolStep('type_text', { text: 'hi', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Guide mode cannot type.')],
+      outcomes: [toolStep('type_text', { text: 'hi', selector: 'Editor', targetWindowId: 'window-test', expectedWindowTitle: 'Test window', expectedProcessId: 1234, expectedProcessName: 'notepad' }), plainAnswer('Guide mode cannot type.')],
       tools,
     });
     const result = await h.agent.run({

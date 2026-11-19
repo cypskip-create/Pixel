@@ -3,11 +3,19 @@ import {
   CAPABILITY_SCRIPT,
   MAX_LISTEN_MS,
   SPEAK_SCRIPT,
+  PLAY_WAV_SCRIPT,
   VoiceService,
+  MAX_VOICE_WAV_BYTES,
   buildRecognitionScript,
+  buildWaveRecognitionScript,
   parseCapability,
   parseRecognition,
+  splitSpeechText,
+  validateDiagnosticVoiceWav,
+  validateVoiceWav,
 } from '../src/main/voice/voice';
+import { encodePcm16Wav } from '../src/renderer/lib/audioCapture';
+import { mergeSettings } from '../src/shared/types';
 
 describe('parseCapability', () => {
   it('reads recognizer and voice counts', () => {
@@ -21,6 +29,21 @@ describe('parseCapability', () => {
   it('returns null when Windows prints something unexpected', () => {
     expect(parseCapability('Some error occurred')).toBeNull();
     expect(parseCapability('')).toBeNull();
+  });
+});
+
+describe('voice settings validation', () => {
+  it('keeps installed Windows voice names, bounds speech rate and rejects unknown engines/models', () => {
+    const settings = mergeSettings({ voice: {
+      sttModel: 'remote-model',
+      ttsEngine: 'cloud',
+      ttsVoice: 'Microsoft David - English (United States)',
+      ttsRate: 9,
+    } });
+    expect(settings.voice.sttModel).toBe('base.en');
+    expect(settings.voice.ttsEngine).toBe('system');
+    expect(settings.voice.ttsVoice).toBe('Microsoft David - English (United States)');
+    expect(settings.voice.ttsRate).toBe(1.3);
   });
 });
 
@@ -74,6 +97,59 @@ describe('recognition script', () => {
     // Callers must not be able to record indefinitely.
     expect(MAX_LISTEN_MS).toBeLessThanOrEqual(30_000);
   });
+
+  it('recognizes a captured WAV without reopening the default microphone', () => {
+    const script = buildWaveRecognitionScript(5000);
+    expect(script).toContain('SetInputToWaveStream');
+    expect(script).toContain('$env:CYPS_AUDIO_FILE');
+    expect(script).not.toContain('SetInputToDefaultAudioDevice');
+  });
+});
+
+describe('transient voice audio', () => {
+  it('encodes mono PCM WAV at 16 kHz and validates its structure', () => {
+    const audio = encodePcm16Wav(new Float32Array(3_200).fill(0.25), 16_000);
+    expect(Buffer.from(audio).toString('ascii', 0, 4)).toBe('RIFF');
+    expect(Buffer.from(audio).toString('ascii', 8, 12)).toBe('WAVE');
+    expect(validateVoiceWav(audio)).toBeNull();
+  });
+
+  it('rejects truncated, unsupported, and oversized buffers before a subprocess starts', () => {
+    expect(validateVoiceWav(new Uint8Array(40))).toMatch(/short|malformed/i);
+    expect(validateVoiceWav(encodePcm16Wav(new Float32Array(3_199), 16_000))).toMatch(/short/i);
+    const stereo = encodePcm16Wav(new Float32Array(4000), 16_000);
+    new DataView(stereo.buffer).setUint16(22, 2, true);
+    expect(validateVoiceWav(stereo)).toMatch(/unsupported/i);
+    expect(validateVoiceWav(new Uint8Array(44 + 16_000 * 2 * 121))).toMatch(/120-second/i);
+    const maxRecording = new Uint8Array(MAX_VOICE_WAV_BYTES);
+    maxRecording.set(encodePcm16Wav(new Float32Array(16), 16_000).subarray(0, 44));
+    const view = new DataView(maxRecording.buffer);
+    view.setUint32(4, maxRecording.byteLength - 8, true);
+    view.setUint32(40, maxRecording.byteLength - 44, true);
+    expect(validateVoiceWav(maxRecording)).toBeNull();
+  });
+
+  it('allows only valid short diagnostic audio for explicit export', () => {
+    expect(validateDiagnosticVoiceWav(encodePcm16Wav(new Float32Array(3_200), 16_000))).toBeNull();
+    expect(validateDiagnosticVoiceWav(new Uint8Array(44 + 16_000 * 2 * 31))).toMatch(/30 seconds/i);
+  });
+});
+
+describe('Kokoro speech segmentation', () => {
+  it('keeps sentences ordered and omits fenced code and URLs', () => {
+    const chunks = splitSpeechText('First sentence. Second sentence! ```ts\nsecret code\n``` See https://example.test/page.');
+    expect(chunks.join(' ')).toContain('First sentence. Second sentence!');
+    expect(chunks.join(' ')).not.toContain('secret code');
+    expect(chunks.join(' ')).not.toContain('https://');
+  });
+
+  it('bounds long chunks and preserves all plain text', () => {
+    const input = `${'First phrase. '.repeat(80)}Last word.`;
+    const chunks = splitSpeechText(input, 120);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 120)).toBe(true);
+    expect(chunks.join(' ')).toContain('Last word.');
+  });
 });
 
 describe('capability and speak scripts', () => {
@@ -87,7 +163,11 @@ describe('capability and speak scripts', () => {
 
   it('the speak script reads its text from the environment', () => {
     expect(SPEAK_SCRIPT).toContain('$env:CYPS_SPEAK_TEXT');
+    expect(SPEAK_SCRIPT).toContain('$env:CYPS_SPEAK_VOICE');
+    expect(SPEAK_SCRIPT).toContain('$env:CYPS_SPEAK_RATE');
     expect(SPEAK_SCRIPT).toContain('Speak');
+    expect(PLAY_WAV_SCRIPT).toContain('PlaySync');
+    expect(PLAY_WAV_SCRIPT).toContain('$env:CYPS_AUDIO_FILE');
   });
 });
 
@@ -99,8 +179,8 @@ describe('VoiceService', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('refuses unreasonably long speech', async () => {
-    const result = await service.speak('x'.repeat(3000));
+  it('refuses speech beyond the safety limit', async () => {
+    const result = await service.speak('x'.repeat(20_001));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/too long/i);
   });

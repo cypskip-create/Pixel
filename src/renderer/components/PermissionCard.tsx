@@ -8,6 +8,7 @@ interface PermissionCardProps {
   onDecide: (decision: PermissionDecision) => void;
   /** True while the decision is being written back to the shell. */
   pending?: boolean;
+  compact?: boolean;
 }
 
 const RISK_ICON: Record<RiskLevel, typeof ShieldCheck> = {
@@ -27,11 +28,10 @@ const RISK_SENTENCE: Record<RiskLevel, string> = {
 /**
  * The consent gate.
  *
- * Deliberately blocking: there is no auto-approve, no countdown, and no
- * "remember" default. Every control is a real button so the card is fully
- * keyboard operable, and the highest-risk affordance is styled as such.
+ * Deliberately blocking: every decision is explicit, keyboard operable and
+ * rendered the same in the floating Island and Workspace.
  */
-export function PermissionCard({ request, onDecide, pending = false }: PermissionCardProps) {
+export function PermissionCard({ request, onDecide, pending = false, compact = false }: PermissionCardProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const RiskIcon = RISK_ICON[request.risk];
   const argumentEntries = Object.entries(request.args);
@@ -43,10 +43,11 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
   return (
     <section
       role="alertdialog"
+      data-layout-panel
       aria-modal="false"
       aria-labelledby={`perm-title-${request.id}`}
       aria-describedby={`perm-body-${request.id}`}
-      className="glass-raised animate-pop flex w-[460px] flex-col gap-2.5 rounded-[var(--cyps-radius)] border-amber-300/25 p-3"
+      className={`pixel-surface-raised animate-pop flex ${compact ? 'w-full' : 'w-[460px]'} flex-col gap-2.5 rounded-[var(--cyps-radius)] border-neutral-300/25 p-3`}
     >
       <header className="flex items-start gap-2.5">
         <span
@@ -76,14 +77,14 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
           <p className="mt-1 text-[11px] text-[var(--color-ink-dim)]">
             {RISK_SENTENCE[request.risk]}
             {request.changesData ? (
-              <span className="ml-1 font-medium text-amber-200">Changes saved data.</span>
+              <span className="ml-1 font-medium text-neutral-200">Changes saved data.</span>
             ) : null}
           </p>
         </div>
       </header>
 
       {argumentEntries.length > 0 ? (
-        <div className="rounded-xl border border-[var(--color-glass-border)] bg-black/15">
+        <div className="rounded-xl border border-[var(--color-border)] bg-black/15">
           <button
             type="button"
             onClick={() => setDetailsOpen((open) => !open)}
@@ -120,39 +121,35 @@ export function PermissionCard({ request, onDecide, pending = false }: Permissio
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
+          disabled={pending || request.alwaysAllowed !== true}
+          onClick={() => decide(true, 'always')}
+          title={request.alwaysAllowed ? `Allow future matching actions for ${request.scopeLabel ?? request.target}` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
+          className="no-drag flex-1 rounded-xl border border-neutral-400/35 bg-neutral-500/12 px-3 py-2 text-[12px] font-semibold text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/22 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Always Allow
+        </button>
+        <button
+          type="button"
           disabled={pending}
           onClick={() => decide(true, 'once')}
           autoFocus
-          className="no-drag flex-1 rounded-xl border border-sky-400/40 bg-sky-500/25 px-3 py-2 text-[12px] font-semibold text-sky-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-sky-500/40 disabled:opacity-50"
+          className="no-drag flex-1 rounded-xl border border-neutral-400/45 bg-neutral-500/25 px-3 py-2 text-[12px] font-semibold text-neutral-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/40 disabled:opacity-50"
         >
-          Allow once
+          Allow Once
         </button>
-        {request.allowPersistent === true ? (
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => decide(true, 'session')}
-            title="Approve for the rest of this app session, limited to the displayed scope"
-            className="no-drag flex-1 rounded-xl border border-[var(--color-glass-border)] bg-white/8 px-3 py-2 text-[12px] font-semibold text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/16 hover:text-[var(--color-ink)] disabled:opacity-50"
-          >
-            Allow for session
-          </button>
-        ) : null}
         <button
           type="button"
           disabled={pending}
           onClick={() => decide(false, 'once')}
-          className="no-drag rounded-xl border border-rose-400/40 bg-rose-500/18 px-3 py-2 text-[12px] font-semibold text-rose-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-rose-500/32 disabled:opacity-50"
+          className="no-drag rounded-xl border border-neutral-400/40 bg-neutral-500/18 px-3 py-2 text-[12px] font-semibold text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/32 disabled:opacity-50"
         >
           Deny
         </button>
       </div>
 
-      {request.scopeLabel ? (
-        <p className="text-[10px] text-[var(--color-ink-dim)]">
-          {request.allowPersistent === true ? `Session approval is limited to ${request.scopeLabel}.` : 'This approval expires after one use.'}
-        </p>
-      ) : null}
+      <p className="text-[10px] text-[var(--color-ink-dim)]">
+        {request.alwaysAllowed ? `Always Allow is limited to ${request.scopeLabel ?? request.target}.` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
+      </p>
 
       <p className="text-[10px] leading-snug text-[var(--color-ink-dim)]">
         Pixel is paused until you choose. Nothing runs on its own.

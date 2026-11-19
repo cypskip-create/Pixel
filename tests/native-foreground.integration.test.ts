@@ -76,4 +76,24 @@ describe.skipIf(!enabled)('Windows foreground tracking integration', () => {
     expect(resolved.processStartTicks).toMatch(/^\d+$/);
     expect(resolved.window.windowId).toBe(foreground.windowId);
   });
+
+  it('captures only the exact harmless foreground window and returns in-memory PNG bytes', async () => {
+    if (!helper) throw new Error('Windows foreground helper was not initialized.');
+    const foreground = await helper.call('foreground_window', {});
+    if (!foreground) throw new Error('Windows did not return a foreground window.');
+    if (hostProcessIds.includes(foreground.pid)) throw new Error('Focus a harmless external fixture window before running this capture test.');
+    const captured = await helper.call('capture_window', {
+      targetWindowId: foreground.windowId,
+      expectedWindowTitle: foreground.title,
+      expectedProcessId: foreground.pid,
+      expectedProcessName: foreground.processName,
+      requireForeground: true,
+    });
+    expect(captured.window.windowId).toBe(foreground.windowId);
+    expect(captured.width).toBeGreaterThan(0);
+    expect(captured.height).toBeGreaterThan(0);
+    expect(captured.format).toBe('image/png');
+    expect(Buffer.from(captured.base64, 'base64').subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(Object.keys(captured.window).join(' ')).not.toMatch(/handle|hwnd/i);
+  });
 });

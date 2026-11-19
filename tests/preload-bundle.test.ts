@@ -7,6 +7,8 @@ const root = process.cwd();
 const preloadSource = readFileSync(`${root}/src/preload/index.ts`, 'utf8');
 const windowSource = readFileSync(`${root}/src/main/window.ts`, 'utf8');
 const appSource = readFileSync(`${root}/src/main/app.ts`, 'utf8');
+const electronRuntimeSource = readFileSync(`${root}/scripts/ensure-electron-runtime.mjs`, 'utf8');
+const ciWorkflow = readFileSync(`${root}/.github/workflows/windows-ci.yml`, 'utf8');
 const packageJson = JSON.parse(readFileSync(`${root}/package.json`, 'utf8')) as {
   scripts: Record<string, string>;
 };
@@ -31,7 +33,7 @@ describe('sandbox preload bundle', () => {
     expect(code).toContain('settings:get');
     expect(code).toContain('tasks:update');
     expect(code).toContain('permissions:request');
-  });
+  }, 15_000);
 
   it('preserves both narrow bridge surfaces and does not add a raw IPC export', async () => {
     const result = await build(createPreloadBuildOptions({
@@ -50,15 +52,19 @@ describe('sandbox preload bundle', () => {
     const exposedGlobals = [...preloadSource.matchAll(/exposeInMainWorld\(\s*['"]([^'"]+)['"]/g)]
       .map((match) => match[1]);
     expect(exposedGlobals).toEqual(['cyps', 'cypsShell']);
-  });
+  }, 15_000);
 
-  it('writes the bundled file at the path used by both BrowserWindows', () => {
+  it('writes the bundled file at the path used by each secure companion window', () => {
     expect(appSource).toContain("join(mainDir(), '..', 'preload', 'index.js')");
     expect(windowSource).toContain("join(mainDir, '..', 'preload', 'index.js')");
-    expect([...windowSource.matchAll(/contextIsolation: true/g)]).toHaveLength(2);
-    expect([...windowSource.matchAll(/nodeIntegration: false/g)]).toHaveLength(2);
-    expect([...windowSource.matchAll(/sandbox: true/g)]).toHaveLength(2);
-    expect([...windowSource.matchAll(/webSecurity: true/g)]).toHaveLength(2);
+    expect([...windowSource.matchAll(/contextIsolation: true/g)]).toHaveLength(5);
+    expect([...windowSource.matchAll(/nodeIntegration: false/g)]).toHaveLength(5);
+    expect([...windowSource.matchAll(/sandbox: true/g)]).toHaveLength(5);
+    expect([...windowSource.matchAll(/webSecurity: true/g)]).toHaveLength(5);
+    expect(windowSource).toContain('focusable: false');
+    expect(windowSource).toContain('win.setIgnoreMouseEvents(true, { forward: true })');
+    expect(windowSource).toContain("this.loadRenderer(win, '?window=workspace')");
+    expect(windowSource).toContain("this.loadRenderer(win, '?window=guidance')");
   });
 
   it('runs the bundler for development, builds and Windows packaging', () => {
@@ -66,6 +72,13 @@ describe('sandbox preload bundle', () => {
     expect(packageJson.scripts['dev:electron']).toContain('npm run build:main');
     expect(packageJson.scripts.build).toContain('npm run build:main');
     expect(packageJson.scripts.pack).toContain('npm run build');
-    expect(packageJson.scripts.dist).toContain('npm run build');
+    expect(packageJson.scripts.dist).toContain('npm run pack');
+    expect(packageJson.scripts.pack).toContain('build:voice-worker');
+    expect(packageJson.scripts.build).toContain('node scripts/make-icon.mjs');
+    expect(packageJson.scripts['ensure:electron-runtime']).toContain('ensure-electron-runtime.mjs');
+    expect(electronRuntimeSource).toContain("process.versions.electron");
+    expect(electronRuntimeSource).toContain("resolve(electronPackage, 'dist', 'electron.exe')");
+    expect(ciWorkflow).toContain('npm run ensure:electron-runtime');
+    expect(ciWorkflow).toContain('actions/upload-artifact@v4');
   });
 });

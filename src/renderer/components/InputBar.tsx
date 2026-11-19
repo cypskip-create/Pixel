@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { AssistantState, ImageAttachment, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
-import { Avatar } from '@/components/Avatar';
+import { PixelMark } from '@/components/PixelMark';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { truncate } from '@/lib/format';
@@ -40,6 +40,8 @@ interface InputBarProps {
   busy: boolean;
   /** Blocks submission when the native bridge is unavailable. */
   disabled: boolean;
+  /** Hover previews must never take keyboard focus from the foreground app. */
+  autoFocus?: boolean;
 }
 
 const PLACEHOLDER: Record<Mode, string> = {
@@ -69,9 +71,11 @@ export function InputBar(props: InputBarProps) {
     onCloseModeMenu,
     busy,
     disabled,
+    autoFocus = true,
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const modeButtonRef = useRef<HTMLButtonElement | null>(null);
   const descriptor = getModeDescriptor(mode);
   const trimmed = draft.trim();
   const canSend = trimmed.length > 0 && !busy && !disabled;
@@ -79,11 +83,11 @@ export function InputBar(props: InputBarProps) {
   // Auto-focus on activation: the user opened this to type.
   useEffect(() => {
     const node = textareaRef.current;
-    if (!node) return;
+    if (!node || !autoFocus) return;
     node.focus();
     const end = node.value.length;
     node.setSelectionRange(end, end);
-  }, []);
+  }, [autoFocus]);
 
   // Grow with content, then scroll internally. Never taller than 5 lines.
   useEffect(() => {
@@ -116,17 +120,19 @@ export function InputBar(props: InputBarProps) {
   const modeChip = useMemo(
     () => (
       <button
+        ref={modeButtonRef}
         type="button"
         onClick={onToggleModeMenu}
         aria-haspopup="menu"
         aria-expanded={modeMenuOpen}
+        aria-controls={modeMenuOpen ? 'pixel-mode-menu' : undefined}
         aria-label={`Mode: ${descriptor.label}. ${descriptor.summary} Change mode.`}
-        className="no-drag flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-glass-border)] bg-white/7 px-2 py-1 text-[11px] font-medium text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/14 hover:text-[var(--color-ink)]"
+        className="no-drag flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)] bg-white/7 px-2 py-1 text-[11px] font-medium text-[var(--color-ink-soft)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-white/14 hover:text-[var(--color-ink)]"
       >
         {descriptor.allowsStateChange ? (
-          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-neutral-300" />
         ) : (
-          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-sky-300" />
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-neutral-300" />
         )}
         {descriptor.label}
         <ChevronDown size={11} strokeWidth={2.5} aria-hidden="true" />
@@ -139,13 +145,13 @@ export function InputBar(props: InputBarProps) {
     <section
       aria-label="Pixel input"
       style={{ width: BAR_WIDTH }}
-      className="glass-raised animate-slide-down relative flex flex-col gap-2 rounded-[var(--cyps-radius)] p-2.5"
+      className="pixel-surface-raised animate-slide-down relative flex flex-col gap-2 rounded-[var(--cyps-radius)] p-2.5"
     >
       {attachments.length > 0 ? (
         <ul className="flex flex-wrap gap-1.5 px-1" aria-label="Attached images">
           {attachments.map((attachment, index) => (
             <li key={`${attachment.source}-${String(index)}`}>
-              <span className="flex items-center gap-1.5 rounded-lg border border-[var(--color-glass-border)] bg-white/7 py-0.5 pl-1 pr-1.5 text-[10px] text-[var(--color-ink-soft)]">
+              <span className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-white/7 py-0.5 pl-1 pr-1.5 text-[10px] text-[var(--color-ink-soft)]">
                 <img
                   src={attachment.dataUrl}
                   alt=""
@@ -170,9 +176,9 @@ export function InputBar(props: InputBarProps) {
       ) : null}
 
       <div className="flex items-end gap-2">
-        {/* Left rail: the orb doubles as the status indicator. */}
-        <div className="no-drag flex shrink-0 items-center pb-0.5 pl-0.5">
-          <Avatar state={state} size={28} halo />
+        {/* The brand stays constant; the state label remains explicit and accessible. */}
+        <div className="no-drag flex shrink-0 items-center pb-0.5 pl-0.5" data-state={state} title={`Pixel is ${state}`}>
+          <PixelMark size={22} />
         </div>
 
         <textarea
@@ -199,14 +205,14 @@ export function InputBar(props: InputBarProps) {
           </IconButton>
 
           <IconButton
-            label="Attach screenshot of active window"
+            label="Attach screenshot of an app window"
             onClick={onAttachScreenshot}
             disabled={disabled}
           >
             <Camera size={15} strokeWidth={2.2} aria-hidden="true" />
           </IconButton>
 
-          <IconButton label="Attach a file" onClick={onAttachFile} disabled={disabled}>
+          <IconButton label="Attach an image" onClick={onAttachFile} disabled={disabled}>
             <Paperclip size={15} strokeWidth={2.2} aria-hidden="true" />
           </IconButton>
 
@@ -221,7 +227,7 @@ export function InputBar(props: InputBarProps) {
               disabled={!canSend}
               aria-label="Send message"
               title="Send message (Enter)"
-              className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-sky-400/40 bg-sky-500/25 text-sky-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-sky-500/40 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-white/7 disabled:text-[var(--color-ink-dim)]"
+              className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-400/40 bg-neutral-500/25 text-neutral-50 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/40 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-white/7 disabled:text-[var(--color-ink-dim)]"
             >
               <ArrowUp size={16} strokeWidth={2.6} aria-hidden="true" />
             </button>
@@ -229,7 +235,7 @@ export function InputBar(props: InputBarProps) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 px-1">
+      <div className="flex items-center justify-between gap-2 px-1" data-layout-panel>
         <div className="relative flex items-center gap-1.5">
           {modeChip}
           <span className="text-[10px] text-[var(--color-ink-dim)]">
@@ -259,6 +265,7 @@ export function InputBar(props: InputBarProps) {
           onRequestMode={onRequestMode}
           onDismiss={onCloseModeMenu}
           variant="popover"
+          returnFocusRef={modeButtonRef}
         />
       ) : null}
     </section>

@@ -16,10 +16,10 @@ const TONE_CLASSES: Record<Tone, string> = {
   ghost:
     'text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] hover:bg-white/10 border-transparent',
   subtle:
-    'text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] bg-white/6 hover:bg-white/12 border-[var(--color-glass-border)]',
-  primary: 'text-sky-100 bg-sky-500/22 hover:bg-sky-500/32 border-sky-400/35',
-  danger: 'text-rose-100 bg-rose-500/22 hover:bg-rose-500/32 border-rose-400/40',
-  success: 'text-emerald-100 bg-emerald-500/22 hover:bg-emerald-500/32 border-emerald-400/40',
+    'text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] bg-white/6 hover:bg-white/12 border-[var(--color-border)]',
+  primary: 'text-neutral-100 bg-neutral-500/22 hover:bg-neutral-500/32 border-neutral-400/35',
+  danger: 'text-neutral-100 bg-neutral-500/22 hover:bg-neutral-500/32 border-neutral-400/40',
+  success: 'text-neutral-100 bg-neutral-500/22 hover:bg-neutral-500/32 border-neutral-400/40',
 };
 
 /**
@@ -49,7 +49,7 @@ export function IconButton(props: IconButtonProps) {
         'border transition-colors duration-[var(--cyps-duration-fast)]',
         'disabled:cursor-not-allowed disabled:opacity-40',
         TONE_CLASSES[tone],
-        active ? 'ring-1 ring-sky-300/50' : '',
+        active ? 'ring-1 ring-neutral-300/50' : '',
         className,
       ]
         .filter(Boolean)
@@ -60,7 +60,7 @@ export function IconButton(props: IconButtonProps) {
       {dot ? (
         <span
           aria-hidden="true"
-          className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-300 ring-2 ring-[var(--color-glass)]"
+          className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-300 ring-2 ring-[var(--color-surface)]"
         />
       ) : null}
     </button>

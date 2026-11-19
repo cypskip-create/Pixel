@@ -57,10 +57,10 @@ describe('Windows UI Automation tools', () => {
 
   it('returns the last external window and never requests a screenshot', async () => {
     const lastExternalForegroundWindow = vi.fn(async () => ({ status: 'available' as const, window: windowInfo }));
-    const captureDisplay = vi.fn();
+    const captureScreen = vi.fn();
     const executors = new ToolExecutors({
       nativeHelper: { lastExternalForegroundWindow } as unknown as NativeHelperType,
-      captureDisplay,
+      captureScreen,
       toDipRect: (rect) => ({ x: rect.x / 2, y: rect.y / 2, width: rect.width / 2, height: rect.height / 2 }),
     });
 
@@ -71,7 +71,7 @@ describe('Windows UI Automation tools', () => {
     expect(result.content).toContain(windowInfo.windowId);
     expect(result.detail?.status).toBe('available');
     expect(lastExternalForegroundWindow).toHaveBeenCalledTimes(1);
-    expect(captureDisplay).not.toHaveBeenCalled();
+    expect(captureScreen).not.toHaveBeenCalled();
   });
 
   it('reports unavailable when no trustworthy external window has been observed', async () => {
@@ -168,6 +168,80 @@ describe('Windows UI Automation tools', () => {
     }, undefined);
     expect(result.content).toMatch(/verify that the control is present/);
     expect(result.verification).toBeUndefined();
+  });
+
+  it('sets an exact UIA ValuePattern target and never returns the entered value', async () => {
+    const secretLikeText = 'ordinary harmless test text';
+    const call = vi.fn().mockResolvedValue({
+      window: windowInfo,
+      element: { ...element, name: 'Document text' },
+      valueLength: secretLikeText.length,
+      verified: true as const,
+    });
+    const executors = new ToolExecutors({ nativeHelper: { call } as unknown as NativeHelperType });
+    const result = await executors.run('type_text', {
+      text: secretLikeText,
+      selector: 'DocumentText',
+      role: 'Edit',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+    });
+    expect(result).toMatchObject({ ok: true, verification: { source: 'UI Automation ValuePattern read-back' } });
+    expect(result.content).not.toContain(secretLikeText);
+    expect(JSON.stringify(result.detail)).not.toContain(secretLikeText);
+    expect(call).toHaveBeenCalledWith('set_element_value', {
+      selector: 'DocumentText', value: secretLikeText,
+      targetWindowId: windowInfo.windowId, expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid, expectedProcessName: windowInfo.processName, role: 'Edit',
+    }, undefined);
+  });
+
+  it('masks text values from the approval card while identifying the selected control', () => {
+    const request = buildPermissionRequest(BUILTIN_TOOLS.find((tool) => tool.name === 'type_text')!, {
+      text: 'private value that must not be displayed',
+      selector: 'DocumentText',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+    });
+    expect(request.action).toContain('40 approved characters');
+    expect(request.args.text).not.toBe('private value that must not be displayed');
+    expect(String(request.args.text)).toContain('hidden for privacy');
+    expect(JSON.stringify(request)).not.toContain('private value that must not be displayed');
+  });
+
+  it('runs only bounded semantic controls and records a verified pattern read-back', async () => {
+    const call = vi.fn().mockResolvedValue({
+      window: windowInfo, element, action: 'toggle', observedState: 'on', verified: true as const,
+    });
+    const executors = new ToolExecutors({ nativeHelper: { call } as unknown as NativeHelperType });
+    const result = await executors.run('control_ui_element', {
+      selector: 'WifiToggle', role: 'Button', action: 'toggle', desiredToggleState: 'on',
+      targetWindowId: windowInfo.windowId, expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid, expectedProcessName: windowInfo.processName,
+    });
+    expect(result).toMatchObject({ ok: true, verification: { source: 'UI Automation pattern read-back' } });
+    expect(result.content).toContain('verified its UI Automation state (on)');
+    expect(call).toHaveBeenCalledWith('control_element', {
+      selector: 'WifiToggle', role: 'Button', action: 'toggle', desiredToggleState: 'on',
+      targetWindowId: windowInfo.windowId, expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid, expectedProcessName: windowInfo.processName,
+    }, undefined);
+  });
+
+  it('does not issue a semantic action when required state parameters are missing', async () => {
+    const call = vi.fn();
+    const executors = new ToolExecutors({ nativeHelper: { call } as unknown as NativeHelperType });
+    const result = await executors.run('control_ui_element', {
+      selector: 'WifiToggle', action: 'toggle',
+      targetWindowId: windowInfo.windowId, expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid, expectedProcessName: windowInfo.processName,
+    });
+    expect(result).toMatchObject({ ok: false, errorCode: 'FAILED' });
+    expect(call).not.toHaveBeenCalled();
   });
 
   it('can search a selected background window without activating it', async () => {
@@ -329,5 +403,122 @@ describe('Windows UI Automation tools', () => {
     })).toEqual({ ok: true });
     expect(registry.validateArgs('invoke_ui_element', { selector: 'Open' }).ok).toBe(false);
     expect(registry.validateArgs('invoke_ui_element', { selector: 'Open', arbitrary: true }).ok).toBe(false);
+    expect(registry.validateArgs('type_text', {
+      text: 'hello', selector: 'Editor', targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: 'Notepad', expectedProcessId: 1234, expectedProcessName: 'notepad',
+    })).toEqual({ ok: true });
+    expect(registry.validateArgs('type_text', {
+      text: 'hello', targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: 'Notepad', expectedProcessId: 1234, expectedProcessName: 'notepad',
+    }).ok).toBe(false);
+    expect(registry.validateArgs('control_ui_element', {
+      selector: 'WifiToggle', targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: 'Settings', expectedProcessId: 1234, expectedProcessName: 'SystemSettings',
+      action: 'toggle', desiredToggleState: 'on',
+    })).toEqual({ ok: true });
+    expect(registry.validateArgs('control_ui_element', {
+      selector: 'WifiToggle', targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: 'Settings', expectedProcessId: 1234, expectedProcessName: 'SystemSettings',
+      action: 'click',
+    }).ok).toBe(false);
+  });
+
+  it('keeps visual guidance in Guide Mode behind its own approval and outside app-state mutation', () => {
+    const registry = new ToolRegistry(BUILTIN_TOOLS);
+    const highlight = registry.get('screen_highlight_control');
+    const clear = registry.get('screen_clear_annotations');
+    expect(highlight).toMatchObject({ requiresApproval: true, changesState: false, risk: 'high' });
+    expect(registry.availableFor('guide')).toContainEqual(highlight);
+    expect(registry.validateArgs('screen_highlight_control', {
+      selector: 'NetworkCategory',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+      shape: 'circle',
+      step: 1,
+      durationMs: 8000,
+    })).toEqual({ ok: true });
+    expect(registry.validateArgs('screen_highlight_control', {
+      selector: 'NetworkCategory',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+      x: 100,
+      y: 200,
+    }).ok).toBe(false);
+    expect(clear).toMatchObject({ requiresApproval: false, changesState: false });
+  });
+
+  it('draws only one exact UIA control and reports that it did not click it', async () => {
+    const call = vi.fn().mockResolvedValue({ window: windowInfo, elements: [element], truncated: false });
+    const showVisualGuidance = vi.fn().mockResolvedValue('visible' as const);
+    const executors = new ToolExecutors({
+      nativeHelper: { call } as unknown as NativeHelperType,
+      toDipRect: (rect) => ({ x: rect.x / 2, y: rect.y / 2, width: rect.width / 2, height: rect.height / 2 }),
+      showVisualGuidance,
+    });
+    const result = await executors.run('screen_highlight_control', {
+      selector: 'NetworkCategory',
+      role: 'Button',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+      shape: 'circle',
+      label: 'Open network options',
+      step: 1,
+      durationMs: 12000,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain('highlighted its current bounds');
+    expect(result.content).toContain('did not click it');
+    expect(showVisualGuidance).toHaveBeenCalledWith(expect.objectContaining({
+      selector: 'NetworkCategory',
+      shape: 'circle',
+      step: 1,
+      durationMs: 12000,
+      bounds: { x: 12, y: 21, width: 105, height: 24 },
+    }));
+  });
+
+  it('refuses ambiguous exact control matches and does not create an annotation', async () => {
+    const call = vi.fn().mockResolvedValue({ window: windowInfo, elements: [element, { ...element }], truncated: false });
+    const showVisualGuidance = vi.fn();
+    const executors = new ToolExecutors({
+      nativeHelper: { call } as unknown as NativeHelperType,
+      showVisualGuidance,
+    });
+    const result = await executors.run('screen_highlight_control', {
+      selector: 'NetworkCategory',
+      targetWindowId: windowInfo.windowId,
+      expectedWindowTitle: windowInfo.title,
+      expectedProcessId: windowInfo.pid,
+      expectedProcessName: windowInfo.processName,
+    });
+    expect(result).toMatchObject({ ok: false, errorCode: 'NOT_FOUND' });
+    expect(result.content).toContain('Choose a more specific');
+    expect(showVisualGuidance).not.toHaveBeenCalled();
+  });
+
+  it('clears visual guidance by selector or all annotations through the narrow callback', async () => {
+    const clearVisualGuidance = vi.fn();
+    const executors = new ToolExecutors({ clearVisualGuidance });
+    expect(await executors.run('screen_clear_annotations', { selector: 'NetworkCategory' })).toMatchObject({ ok: true });
+    expect(await executors.run('screen_clear_annotations', {})).toMatchObject({ ok: true });
+    expect(clearVisualGuidance).toHaveBeenNthCalledWith(1, 'NetworkCategory');
+    expect(clearVisualGuidance).toHaveBeenNthCalledWith(2, undefined);
+  });
+
+  it('does not report screen analysis success when the vision provider returns no text', async () => {
+    const image = { dataUrl: 'data:image/png;base64,dGVzdA==', mimeType: 'image/png' as const, width: 1, height: 1, source: 'screenshot' as const };
+    const executors = new ToolExecutors({
+      captureScreen: vi.fn().mockResolvedValue({ ok: true, image }),
+      describeImage: vi.fn().mockResolvedValue(''),
+    });
+    const result = await executors.run('analyze_screen', { target: 'active_window' });
+    expect(result).toMatchObject({ ok: false, errorCode: 'FAILED' });
+    expect(result.content).toContain('returned no description');
   });
 });

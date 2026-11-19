@@ -93,20 +93,16 @@ rather than animated.
 **Fail:** the content is clipped, the window jumps to a corner, or the input bar
 spans the screen.
 
-### 2.4 Dragging and display scaling
+### 2.4 Pinned display and cursor companion
 
-1. Drag the orb around, including toward a screen edge.
-2. Quit Pixel from the tray, then start it again.
-3. If you have two monitors, drag Pixel to the second one, quit, restart, then
-   unplug that monitor and restart again.
-
-**Pass:** the orb follows the pointer smoothly; after restart it reappears where
-you left it; it never ends up off-screen or half under the taskbar. On a scaled
-display (125% or 150%) the orb stays crisp and the input bar does not overlap
-itself.
-
-**Fail:** the position resets to the centre each launch, the window drifts away
-from the pointer, or text is cut off at 150% scaling.
+The main bar is not draggable. In Settings, choose **Move to display**, restart,
+and confirm the bar remains centered at the top of that display. Enable **Show
+cursor companion** and confirm its independent orb follows without moving the
+bar, remains inside each display's work area, and does not intercept clicks.
+The follower pauses while the bar or an approval is open and resumes at idle.
+Disable it and confirm the overlay disappears. Repeat with 125%/150% scaling,
+negative-coordinate displays and monitor removal. The full acceptance steps
+are in [PIXEL_WINDOWS_ACCEPTANCE.md](validation/PIXEL_WINDOWS_ACCEPTANCE.md).
 
 ### 2.5 DeepSeek connection
 

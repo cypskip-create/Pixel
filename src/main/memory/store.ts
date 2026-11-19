@@ -44,6 +44,15 @@ interface MemoryRow {
 
 const DAY_MS = 86_400_000;
 export const MAX_MEMORY_RESULTS = 50;
+export const MAX_AUTOMATIC_MEMORIES_PER_PROJECT = 250;
+
+export interface MemoryRevision {
+  content: string;
+  source: string;
+  confidence: string;
+  updatedAt: number;
+  reason: string;
+}
 
 export interface SaveResult {
   memory: MemoryRecord;
@@ -154,6 +163,46 @@ export class MemoryStore {
     return { memory: saved, duplicate: false };
   }
 
+  /** Save a trusted main-process candidate without creating duplicate semantic preferences. */
+  saveAutomatic(draft: MemoryDraft & { slot?: string; replaceSlot?: boolean }): SaveResult {
+    const content = normalise(draft.content);
+    if (!content || content.length > 500) throw new Error('Automatic memories must contain 1 to 500 characters.');
+    if (looksLikeCredential(content)) throw new Error('Credential-like values cannot be saved in memory.');
+    const slot = draft.slot;
+    if (slot) {
+      const rows = this.db.query<MemoryRow>(
+        `SELECT * FROM memories WHERE project_id = ? AND kind = ? AND source LIKE 'auto:%'
+         ORDER BY updated_at DESC LIMIT ?`,
+        [draft.projectId, draft.kind, MAX_AUTOMATIC_MEMORIES_PER_PROJECT],
+      );
+      const existing = rows.find((row) => (row.tags ?? '').split(/\s+/).includes(`auto-slot:${slot}`));
+      if (existing) {
+        const current = toRecord(existing);
+        if (semanticallyEquivalent(current.content, content)) {
+          this.db.execute('UPDATE memories SET use_count = use_count + 1, last_used_at = ? WHERE id = ?', [Date.now(), current.id]);
+          return { memory: this.get(current.id) ?? current, duplicate: true };
+        }
+        if (draft.replaceSlot && draft.confidence === 'user_approved') {
+          const now = Date.now();
+          this.recordRevision(current, now, 'automatic preference correction');
+          const tags = [...new Set([...(draft.tags ?? []), `auto-slot:${slot}`])].join(' ');
+          this.db.execute(
+            `UPDATE memories SET content = ?, source = ?, content_hash = ?, confidence = ?, tags = ?, updated_at = ?, use_count = use_count + 1, last_used_at = ? WHERE id = ?`,
+            [content, draft.source, contentHash(draft.kind, content, draft.projectId), draft.confidence, tags, now, now, current.id],
+          );
+          const updated = this.get(current.id);
+          if (!updated) throw new Error('The updated automatic memory could not be read back.');
+          this.pruneAutomatic(draft.projectId);
+          return { memory: updated, duplicate: false };
+        }
+      }
+    }
+
+    const result = this.save(draft);
+    this.pruneAutomatic(draft.projectId);
+    return result;
+  }
+
   update(id: string, patch: { content?: string; kind?: MemoryKind; tags?: string[] }): MemoryRecord {
     const current = this.get(id);
     if (!current) throw new Error(`No memory with id ${id}.`);
@@ -169,6 +218,10 @@ export class MemoryStore {
     }
     const tags = nextTags.map((tag) => tag.trim()).filter(Boolean).join(' ');
 
+    if (content !== current.content || kind !== current.kind || tags !== current.tags.join(' ')) {
+      this.recordRevision(current, Date.now(), 'user correction');
+    }
+
     this.db.execute(
       `UPDATE memories
          SET content = ?, kind = ?, tags = ?, content_hash = ?, updated_at = ?
@@ -181,8 +234,47 @@ export class MemoryStore {
     return updated;
   }
 
+  history(id: string): MemoryRevision[] {
+    return this.db.query<{
+      content: string; source: string; confidence: string; updated_at: number; reason: string;
+    }>('SELECT content, source, confidence, updated_at, reason FROM memory_revisions WHERE memory_id = ? ORDER BY updated_at DESC LIMIT 100', [id])
+      .map((row) => ({ content: String(row.content), source: String(row.source), confidence: String(row.confidence), updatedAt: Number(row.updated_at), reason: String(row.reason) }));
+  }
+
+  private recordRevision(memory: MemoryRecord, at: number, reason: string): void {
+    this.db.execute(
+      'INSERT INTO memory_revisions (memory_id, project_id, content, source, confidence, updated_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [memory.id, memory.projectId, memory.content, memory.source, memory.confidence, at, reason],
+    );
+  }
+
+  private pruneAutomatic(projectId: string): void {
+    this.db.execute(
+      `DELETE FROM memories WHERE id IN (
+         SELECT id FROM memories WHERE project_id = ? AND source LIKE 'auto:%'
+         ORDER BY updated_at DESC LIMIT -1 OFFSET ?
+       )`,
+      [projectId, MAX_AUTOMATIC_MEMORIES_PER_PROJECT],
+    );
+  }
+
   delete(id: string): boolean {
     return this.db.execute('DELETE FROM memories WHERE id = ?', [id]) > 0;
+  }
+
+  /** Delete only an automatic preference in the explicitly selected project. */
+  deleteAutomaticSlot(projectId: string, slot: string): number {
+    if (!/^(theme|response-style|workflow)$/.test(slot)) return 0;
+    const tag = `auto-slot:${slot}`;
+    const rows = this.db.query<{ id: string; tags: string }>(
+      "SELECT id, tags FROM memories WHERE project_id = ? AND source LIKE 'auto:%'",
+      [projectId],
+    );
+    const matches = rows.filter((row) => String(row.tags).split(/\s+/).includes(tag));
+    for (const row of matches) {
+      this.db.execute("DELETE FROM memories WHERE id = ? AND project_id = ? AND source LIKE 'auto:%'", [row.id, projectId]);
+    }
+    return matches.length;
   }
 
   /** Remove expired records. Returns how many went. */
@@ -363,6 +455,24 @@ function boundedLimit(value: number | undefined, fallback: number): number {
 /** Collapse whitespace so trivial formatting cannot defeat duplicate detection. */
 export function normalise(content: string): string {
   return content.replace(/\s+/g, ' ').trim();
+}
+
+function semanticallyEquivalent(left: string, right: string): boolean {
+  const normaliseSemantic = (value: string): Set<string> => {
+    const tokens = value.toLocaleLowerCase().normalize('NFKC')
+      .replace(/\b(?:monochrome|black|dark|charcoal)\b/g, ' dark ')
+      .replace(/\b(?:interface|theme|look|palette|surface)\b/g, ' theme ')
+      .replace(/\b(?:the|user|prefers?|likes?|wants?|pixel|to|a|an|and|is|are|for|with|use)\b/g, ' ')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+    return new Set(tokens.split(/\s+/).filter((token) => token.length > 1));
+  };
+  const a = normaliseSemantic(left);
+  const b = normaliseSemantic(right);
+  if (a.size === 0 || b.size === 0) return false;
+  let common = 0;
+  for (const token of a) if (b.has(token)) common += 1;
+  return common / new Set([...a, ...b]).size >= 0.66;
 }
 
 /** Stable hash identifying an equivalent memory within a project. */

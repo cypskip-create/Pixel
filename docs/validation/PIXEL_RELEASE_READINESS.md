@@ -1,12 +1,81 @@
 # Pixel release readiness
 
-**Reviewed:** 2026-11-17
-**Version:** 0.2.1  
-**Branch:** `main`  
-**Repair base commit:** `6a62de336cf2005aa8ddd0b745dabd3a53674de0`
-**Decision:** TypeScript, automated tests, source build, native helper and unpacked package are verified. Pixel remains **not yet release-ready** because the sandboxed bridge was not observed in a live Electron renderer here, and packaged-app acceptance still needs the target laptop.
+> Historical report. Its dark-UI restoration evidence predates the latest
+> Experience Polish 5.0 working tree. For the current SHA, tests, CI status and
+> Windows acceptance commands, use
+> [`PIXEL_EXPERIENCE_POLISH_5_READINESS.md`](PIXEL_EXPERIENCE_POLISH_5_READINESS.md).
 
-## Baseline and integrity
+**Reviewed:** 2026-11-18 (original dark companion restoration)
+**Version:** 0.2.1
+**Branch:** `codex/ui-experience-2`
+**Restoration base:** `0da5b8b53c0bd8fe0ba38106c794456e0a9d50d1` (this focused restoration change)
+**Decision:** Pixel is **not release-ready** until the restored floating UI is visually checked on Windows and the packaged GPU path is validated.
+
+## Current local evidence — restored dark floating UI
+
+- The floating companion restores the reference commit's navy fills (`0.88` primary, `0.95` raised), border colors and shadow stack. Both native windows use system backdrop `none` on Windows. All CSS backdrop filters, Acrylic/Mica settings and Acrylic-specific variables/query mode are removed. The redesign-only Island gradient and toolbar capsule are removed. P logo, controls, layout, Workspace layout and dark colors are retained.
+- `npm run typecheck`: passed. `npm test -- --reporter=default`: **721 passed, 0 failed, 26 skipped (747 total; 39 files: 38 passed, 1 skipped)**. The skips are 17 browser tests without Playwright Chromium, 7 NSIS tests without `makensis`, and 2 opt-in native foreground tests.
+- `npm run build`: passed (main TypeScript, bundled preload, Vite renderer and icon). `git diff --check`: passed.
+- `npm run test:preload-sandbox`: **unverified**. Electron 45.2.3 exits with `2147483651` (`0x80000003`) before a smoke report is created. See `artifacts/windows-acceptance/preload-sandbox-smoke.log`.
+- The branch contains CI fixes for the observed run 7 (`44159366265`, PR #9 merge SHA `9ee0298fe4dcc738cf264f9b60b9673fd47e65d7`): Python 3.12 is provisioned for the document tests, and worker startup uses bounded polling. The old run had 10 document tests fail on a hard-coded developer interpreter path and one fixed-sleep cancellation race; native compilation and packaging were skipped. The workflow needs a push to rerun these changes.
+- Before this rollback, DWM readback showed Pixel Acrylic (type 3) and Workspace Mica (type 2) on build `26300.9974`. The restored build has not been visually launched or read back. Both window configurations now request no system backdrop.
+- White-page, dark-page and desktop screenshots were not captured. The existing visible Pixel process belongs to inaccessible `C:\dev\Pixel`; port 5199 was occupied, and this environment's Electron child process exited before startup when run from the writable checkout. The visual acceptance procedure remains outstanding; do not describe this rollback as visually accepted yet.
+- Existing Electron/Chromium Crashpad child-process failures remain separate and do not prove the GPU issue's cause on the user's laptop. No GPU driver report or post-restoration packaged launch is available.
+- Follow [`PIXEL_WINDOWS_ACCEPTANCE.md`](PIXEL_WINDOWS_ACCEPTANCE.md) for white webpage, dark webpage, desktop, interaction and packaged checks. No installer or native helper build was part of this visual restoration.
+
+Historical checkpoint results later in this report refer to earlier repository states; their test totals and package evidence are superseded by this current section.
+
+## Previous UI Experience 2.0 evidence (historical)
+
+- `npm run typecheck`: passed for renderer and main TypeScript projects.
+- Focused UI/history/search tests: **69 passed across 8 files**.
+- Full Vitest suite: **712 passed, 0 failed, 26 skipped across 36 files (738 tests total)**. Browser tests need Playwright Chromium, installer tests need NSIS, and the native foreground integration suite is opt-in.
+- A later repeat was interrupted before Vitest returned a result; the count above is the most recent completed run.
+- `npm run build`: passed (main TypeScript, esbuild sandbox preload, Vite renderer).
+- `git diff --check`: passed after the documentation edits.
+- `npm run test:preload-sandbox`: blocked before the smoke app starts. Electron 45.2.3 exited with `2147483651` (`0x80000003`); the log contains no main-entry marker and no smoke JSON was written, so bridge assertions did not run. The harness now clears stale output and records launcher metadata plus Electron stderr.
+- An isolated `electron-builder --win --dir --publish never` run targeting `release/ui-experience-2-validation` failed before creating output because `getaddrinfo ENOTFOUND github.com`. No existing `release` artifact was overwritten.
+- The Windows GUI attempt was stopped before an application was selected. No native layout, search-browser launch, restart, unpacked app or installer behavior is claimed as passed.
+- Remote GitHub `main` is `0be3ba45b5b94a2018969670490a8c9b6ad8e80b`; the GitHub connector returned no status checks for it and no PR-triggered workflow run for the local branch. The reported preload-smoke CI failure has no retrievable Actions log in this session. This runner reproduces a pre-main Electron exit, but it does not establish the remote failure cause. `npm run test:preload-sandbox` remains the laptop/CI repro command.
+
+### UI defect causes corrected
+
+- The mode selector was mounted in both `InputBar` and `App`, producing duplicate menus.
+- The native BrowserWindow retained a small fixed active-surface size. CSS stacking could not display a menu or response outside that native window's bounds.
+- UI panels measured and positioned themselves independently, so combined responses, task and approval content could clip or overlap.
+- The primary window reused saved arbitrary coordinates that cursor-follow could update, so returning to stationary mode could leave the bar off its intended anchor.
+- The response surface reported speech before playback was confirmed, and the screenshot and attachment labels did not match their actual capture/upload targets.
+
+The current architecture uses one measured panel stack and a display-anchored
+primary window. The optional cursor follower is a separate passive BrowserWindow.
+Recent Chats and search use the existing main-process history store and typed
+preload contract; default-browser search uses a validated provider URL built in
+main. See [UI architecture](../architecture/PIXEL_UI_ARCHITECTURE.md) and the
+[Windows acceptance checklist](PIXEL_WINDOWS_ACCEPTANCE.md).
+
+## Laptop-side commands
+
+Run these from the repository root on a connected Windows development machine.
+The package commands write to `release`; if existing artifacts must be kept,
+use the isolated output command in the acceptance guide.
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run typecheck
+npm test
+npm run build
+npm run build:native
+npm run test:preload-sandbox
+npm run dev
+npm run pack
+npm run dist
+```
+
+The sections below are historical evidence for the earlier preload repair and
+must not be read as validation of the UI Experience 2.0 tree.
+
+## Previous preload-checkpoint notes (historical)
 
 - The local branch was clean at task start at the base commit shown above.
 - The focused preload repair is committed locally at the user's request. No push, tag or release was created; the resulting commit SHA is reported in the final response.

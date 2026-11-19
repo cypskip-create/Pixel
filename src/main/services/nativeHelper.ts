@@ -51,6 +51,14 @@ export interface UiElement {
   enabled: boolean;
 }
 
+export interface NativeWindowCapture {
+  window: WindowInfo;
+  width: number;
+  height: number;
+  format: 'image/png';
+  base64: string;
+}
+
 export interface FindElementsQuery {
   /** Case-insensitive text to look for in the element's accessible name. */
   text: string;
@@ -74,6 +82,15 @@ export interface VerifyElementStateQuery {
   role?: string;
 }
 
+export interface NativeElementTarget {
+  selector: string;
+  targetWindowId: string;
+  expectedWindowTitle: string;
+  expectedProcessId: number;
+  expectedProcessName: string;
+  role?: string;
+}
+
 export interface NativeCommands {
   ping: { args: Record<string, never>; result: { version: string; trackingMode?: string } };
   foreground_window: { args: Record<string, never>; result: WindowInfo | null };
@@ -84,11 +101,30 @@ export interface NativeCommands {
     /** HWND stays inside the main process and is never returned to React or the model. */
     result: { handle: string; processStartTicks: string; window: WindowInfo };
   };
+  capture_window: {
+    args: { targetWindowId: string; expectedWindowTitle: string; expectedProcessId: number; expectedProcessName: string; requireForeground: boolean };
+    /** Bounded in-memory pixels returned only for the exact revalidated HWND. */
+    result: NativeWindowCapture;
+  };
   find_elements: { args: FindElementsQuery; result: { window: WindowInfo; elements: UiElement[]; truncated: boolean } };
   verify_element_state: { args: VerifyElementStateQuery; result: { window: WindowInfo; matches: boolean; matchedCount: number; element?: UiElement } };
   invoke_element: {
     args: { selector: string; targetWindowId: string; expectedWindowTitle: string; expectedProcessId: number; expectedProcessName: string; role?: string; expectedResult: { selector: string; state: 'present' | 'absent'; role?: string } };
     result: { window: WindowInfo; element: UiElement; invoked: true };
+  };
+  set_element_value: {
+    args: NativeElementTarget & { value: string };
+    /** Value is verified inside the helper but never returned or logged. */
+    result: { window: WindowInfo; element: UiElement; valueLength: number; verified: true };
+  };
+  control_element: {
+    args: NativeElementTarget & {
+      action: 'select' | 'toggle' | 'scroll' | 'expand' | 'collapse';
+      desiredToggleState?: 'on' | 'off';
+      scrollAxis?: 'vertical' | 'horizontal';
+      scrollDirection?: 'increment' | 'decrement';
+    };
+    result: { window: WindowInfo; element: UiElement; action: string; observedState: string; verified: true };
   };
 }
 

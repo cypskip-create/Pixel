@@ -12,10 +12,13 @@ export interface CompanionStateSignals {
   hasAnswer: boolean;
   error: boolean;
   listening: boolean;
+  transcribing?: boolean;
   /** A task is planning/running in the existing TaskManager flow. */
   executing?: boolean;
   /** Local speech playback is currently in progress. */
   speaking?: boolean;
+  /** A real task just reached a verified or failed terminal outcome. */
+  taskOutcome?: 'success' | 'error' | null;
   /** Reserved for the screen-guidance flow when it is wired into the UI. */
   pointing?: boolean;
 }
@@ -27,7 +30,9 @@ export function deriveAssistantState(input: CompanionStateSignals): AssistantSta
   if (input.error) return 'error';
   if (input.pointing) return 'pointing';
   if (input.executing) return 'executing';
+  if (input.taskOutcome) return input.taskOutcome;
   if (input.listening) return 'listening';
+  if (input.transcribing) return 'transcribing';
   if (input.speaking) return 'speaking';
   if (input.streaming) return input.hasAnswer ? 'responding' : 'thinking';
   return 'idle';

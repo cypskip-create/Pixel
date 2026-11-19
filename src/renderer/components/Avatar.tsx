@@ -18,8 +18,8 @@ interface AvatarProps {
  *
  * This is the whole product at rest: a single round avatar floating at the top
  * of the screen. It renders the state as a *shape* (core / ring / diamond /
- * wave / gear / check / cross / pause), a *motion* programme, and a *hue* -
- * three redundant channels so no two states are confusable without colour.
+ * wave / gear / check / cross / pause), a *motion* programme, and a neutral
+ * shade. Status never depends on colour.
  *
  * The mark geometry is inline SVG rather than an icon font so it inherits
  * `currentColor` and stays crisp at any zoom.
@@ -36,30 +36,15 @@ export const Avatar = memo(function Avatar({ state, size = 30, halo = false }: A
       aria-label={`Pixel is ${visual.label.toLowerCase()}`}
       data-state={state}
     >
-      {/* Halo: a soft ring that signals "the bar is open". */}
+      {/* A quiet outline signals that the bar is open. */}
       {halo ? (
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-full opacity-70"
-          style={{
-            boxShadow: `0 0 0 1px ${visual.tone}33, 0 0 18px 2px ${visual.tone}55`,
-          }}
+          className="absolute inset-0 rounded-full border border-[var(--color-border-strong)] opacity-70"
         />
       ) : null}
 
-      {/* Ambient bloom, always present; stronger while busy. */}
-      <span
-        aria-hidden="true"
-        className="absolute rounded-full"
-        style={{
-          inset: -size * 0.22,
-          background: `radial-gradient(circle at 50% 50%, ${visual.tone}${visual.busy ? '4d' : '33'} 0%, transparent 70%)`,
-          filter: 'blur(3px)',
-          transition: 'background var(--cyps-duration) ease',
-        }}
-      />
-
-      {/* Expanding sonar rings: listening / speaking read as "broadcasting". */}
+      {/* Outline rings mark microphone and speech activity. */}
       {(state === 'listening' || state === 'speaking') && (
         <span
           aria-hidden="true"
@@ -71,28 +56,15 @@ export const Avatar = memo(function Avatar({ state, size = 30, halo = false }: A
         />
       )}
 
-      {/* The orb body. The outer element breathes/spins; the inner stays put. */}
+      {/* The flat grayscale orb body. Shape and motion carry status. */}
       <span
         aria-hidden="true"
         className={`absolute inset-0 rounded-full ${visual.motion}`}
         style={{
-          background: `radial-gradient(circle at 34% 28%, ${visual.tone} 0%, ${visual.tone}cc 42%, ${visual.tone}66 72%, ${visual.tone}22 100%)`,
-          boxShadow: `inset 0 1px 1px rgb(255 255 255 / 0.45), 0 2px 10px -2px ${visual.tone}99`,
+          background: visual.tone,
+          border: '1px solid var(--color-border-strong)',
         }}
-      >
-        {/* Glossy top-left highlight gives the orb its spherical read. */}
-        <span
-          className="absolute rounded-full"
-          style={{
-            left: '20%',
-            top: '14%',
-            width: '34%',
-            height: '26%',
-            background: 'radial-gradient(circle, rgb(255 255 255 / 0.85), transparent 70%)',
-            filter: 'blur(0.5px)',
-          }}
-        />
-      </span>
+      />
 
       {/* The inner mark - the shape channel. Drawn above the body. */}
       <svg
@@ -101,7 +73,7 @@ export const Avatar = memo(function Avatar({ state, size = 30, halo = false }: A
         width={size * 0.62}
         height={size * 0.62}
         className="relative"
-        style={{ color: 'rgb(9 12 20 / 0.82)' }}
+        style={{ color: 'var(--color-app-bg)' }}
       >
         <Mark mark={visual.mark} stroke={stroke} />
       </svg>

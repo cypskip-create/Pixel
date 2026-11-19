@@ -24,11 +24,21 @@ import {
   type DisplayInfo,
 } from '../src/shared/companion/geometry';
 import {
+  CURSOR_ICON_VIEWBOX_SIZE,
+  CURSOR_VISIBLE_SIZE,
+  CURSOR_WINDOW_HOTSPOT,
+  CURSOR_WINDOW_SIZE,
+  DEFAULT_PLACE_OPTIONS,
+  MAX_FOLLOW_LAG_DIPS,
   companionTarget,
   createFollower,
   isSettled,
   placeBubble,
+  placeCursorCompanion,
   stepFollower,
+  stepFollowerBounded,
+  shouldShowCursorCompanion,
+  shouldSnapCursorFollower,
   DEFAULT_FOLLOW_CONFIG,
 } from '../src/shared/companion/cursorFollow';
 import {
@@ -493,36 +503,78 @@ describe('cursor follower', () => {
     expect(stepFollower(state, target, 0)).toBe(state);
     expect(stepFollower(state, target, -1)).toBe(state);
   });
+
+  it('bounds transient lag and uses direct repositioning after discontinuities', () => {
+    const bounded = stepFollowerBounded(createFollower({ x: 0, y: 0 }), { x: 400, y: 300 }, 1 / 30);
+    expect(Math.hypot(bounded.position.x - 400, bounded.position.y - 300)).toBeLessThanOrEqual(MAX_FOLLOW_LAG_DIPS + 0.001);
+    expect(shouldSnapCursorFollower({ cursor: { x: 400, y: 300 }, previousCursor: { x: 0, y: 0 }, elapsedMs: 33, displayChanged: false })).toBe(true);
+    expect(shouldSnapCursorFollower({ cursor: { x: 402, y: 301 }, previousCursor: { x: 400, y: 300 }, elapsedMs: 33, displayChanged: false })).toBe(false);
+    expect(shouldSnapCursorFollower({ cursor: { x: 402, y: 301 }, previousCursor: { x: 400, y: 300 }, elapsedMs: 600, displayChanged: false })).toBe(true);
+    expect(shouldSnapCursorFollower({ cursor: { x: 402, y: 301 }, previousCursor: { x: 400, y: 300 }, elapsedMs: 33, displayChanged: true })).toBe(true);
+  });
 });
 
 describe('companion placement', () => {
   const area = primary.workArea;
 
-  it('sits at the offset from the cursor in open space', () => {
-    expect(companionTarget({ x: 500, y: 300 }, area)).toEqual({ x: 522, y: 320 });
+  it('uses a 36 DIP window around a 28 DIP character and anchors its SVG tip to the configured gap', () => {
+    expect(CURSOR_WINDOW_SIZE).toBe(36);
+    expect(CURSOR_VISIBLE_SIZE).toBe(28);
+    expect(CURSOR_ICON_VIEWBOX_SIZE).toBe(32);
+    const cursor = { x: 500, y: 300 };
+    const placement = placeCursorCompanion(cursor, area);
+    const tip = {
+      x: placement.position.x + CURSOR_WINDOW_HOTSPOT.x,
+      y: placement.position.y + CURSOR_WINDOW_HOTSPOT.y,
+    };
+    expect(placement.position.x + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.x + area.width);
+    expect(Math.hypot(tip.x - cursor.x, tip.y - cursor.y)).toBeLessThanOrEqual(12);
+    expect(companionTarget(cursor, area)).toEqual(placement.position);
   });
 
-  it('flips to the left of the cursor near the right edge, so it never covers the pointer', () => {
-    const pos = companionTarget({ x: 1520, y: 300 }, area);
-    expect(pos.x).toBeLessThan(1520);
+  it('flips the character toward the pointer near the right edge without leaving the display', () => {
+    const cursor = { x: 1500, y: 300 };
+    const placement = placeCursorCompanion(cursor, area);
+    const tip = { x: placement.position.x + CURSOR_WINDOW_SIZE - CURSOR_WINDOW_HOTSPOT.x, y: placement.position.y + CURSOR_WINDOW_HOTSPOT.y };
+    expect(placement.flipX).toBe(true);
+    expect(placement.position.x).toBeGreaterThanOrEqual(area.x);
+    expect(placement.position.x + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.x + area.width);
+    expect(tip.x).toBeCloseTo(cursor.x - DEFAULT_PLACE_OPTIONS.offset.x, 0);
   });
 
-  it('flips above the cursor near the bottom edge', () => {
-    const pos = companionTarget({ x: 500, y: 815 }, area);
-    expect(pos.y).toBeLessThan(815);
+  it('flips vertically near the bottom edge and handles all four corners', () => {
+    const bottom = placeCursorCompanion({ x: 500, y: 800 }, area);
+    expect(bottom.flipY).toBe(true);
+    const corner = placeCursorCompanion({ x: 1500, y: 800 }, area);
+    expect(corner.flipX).toBe(true);
+    expect(corner.flipY).toBe(true);
+    expect(corner.position.x + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.x + area.width);
+    expect(corner.position.y + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.y + area.height);
   });
 
   it('always stays inside the work area, even in a corner', () => {
-    const pos = companionTarget({ x: 1535, y: 823 }, area);
-    expect(pos.x).toBeGreaterThanOrEqual(area.x);
-    expect(pos.y).toBeGreaterThanOrEqual(area.y);
-    expect(pos.x + 36).toBeLessThanOrEqual(area.x + area.width);
-    expect(pos.y + 36).toBeLessThanOrEqual(area.y + area.height);
+    const { position } = placeCursorCompanion({ x: 1535, y: 823 }, area);
+    expect(position.x).toBeGreaterThanOrEqual(area.x);
+    expect(position.y).toBeGreaterThanOrEqual(area.y);
+    expect(position.x + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.x + area.width);
+    expect(position.y + CURSOR_WINDOW_SIZE).toBeLessThanOrEqual(area.y + area.height);
   });
 
   it('works on a display with negative coordinates', () => {
-    const pos = companionTarget({ x: -1200, y: 400 }, leftMonitor.workArea);
-    expect(rectContains(leftMonitor.workArea, pos)).toBe(true);
+    const { position } = placeCursorCompanion({ x: -1200, y: 400 }, leftMonitor.bounds);
+    expect(rectContains(leftMonitor.bounds, position)).toBe(true);
+  });
+
+  it('uses edge hysteresis and shows the follower independently from the hidden Island', () => {
+    const nearEdge = placeCursorCompanion({ x: 1500, y: 300 }, area);
+    const slightlyBack = placeCursorCompanion({ x: 1495, y: 300 }, area, DEFAULT_PLACE_OPTIONS, nearEdge);
+    expect(nearEdge.flipX).toBe(true);
+    expect(slightlyBack.flipX).toBe(true);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: false, workspaceFocused: false, sessionLocked: false })).toBe(true);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: true, workspaceFocused: false, sessionLocked: false })).toBe(false);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: false, workspaceFocused: true, sessionLocked: false })).toBe(true);
+    expect(shouldShowCursorCompanion({ enabled: true, settingsOpen: false, workspaceFocused: false, sessionLocked: true })).toBe(false);
+    expect(shouldShowCursorCompanion({ enabled: false, settingsOpen: false, workspaceFocused: false, sessionLocked: false })).toBe(false);
   });
 });
 
@@ -722,6 +774,21 @@ describe('companion settings', () => {
     expect(s.followSpeed).toBe(1.5);
   });
 
+  it('migrates legacy cursor presentation to an independent follower and clamps anchor preferences', () => {
+    const migrated = mergeSettings({
+      companion: { visualMode: 'cursor', position: { x: -1200, y: 80 }, topOffset: 64 },
+    }).companion;
+    expect(migrated.cursorCompanionEnabled).toBe(true);
+    expect(migrated.position).toEqual({ x: -1200, y: 80 });
+    expect(migrated.topOffset).toBe(14);
+
+    const explicitOff = mergeSettings({
+      companion: { visualMode: 'cursor', cursorCompanionEnabled: false },
+    }).companion;
+    expect(explicitOff.cursorCompanionEnabled).toBe(false);
+    expect(mergeSettings({ companion: { topOffset: 1 } }).companion.topOffset).toBe(10);
+  });
+
   it('upgrades an old settings file that has none of the new fields', () => {
     const old = { companion: { mode: 'hybrid', position: { x: 10, y: 20 } } };
     const s = mergeSettings(old).companion;
@@ -742,8 +809,14 @@ describe('companion settings', () => {
     }).companion;
     expect(s.followSpeed).toBe(3);
     expect(s.transientIdleMs).toBe(1000);
-    expect(s.cursorOffset.x).toBe(200);
-    expect(s.cursorOffset.y).toBe(DEFAULT_SETTINGS.companion.cursorOffset.y);
+    expect(Math.hypot(s.cursorOffset.x, s.cursorOffset.y)).toBeLessThanOrEqual(12);
+    expect(s.cursorOffset.y).toBeGreaterThan(0);
+  });
+
+  it('migrates the previous default cursor offset and caps custom offsets to a 12 DIP radius', () => {
+    expect(mergeSettings({ companion: { cursorOffset: { x: 22, y: 20 } } }).companion.cursorOffset).toEqual({ x: 8, y: 8 });
+    const custom = mergeSettings({ companion: { cursorOffset: { x: 12, y: 12 } } }).companion.cursorOffset;
+    expect(Math.hypot(custom.x, custom.y)).toBeCloseTo(12, 8);
   });
 
   it('treats a non-boolean transientMode as off', () => {

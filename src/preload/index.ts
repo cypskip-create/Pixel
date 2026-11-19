@@ -13,16 +13,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
+  AssistantState,
   Mode,
   AuditEntry,
   CaptureResult,
-  ChatMessage,
   ChatRequest,
+  ConversationRecordView,
+  ConversationSummary,
   ConnectionTestResult,
   CypsBridge,
   DeepSeekSettingsPatch,
   DiagnosticsSnapshot,
   EmergencyStopReport,
+  HistoryQuery,
   PermissionDecision,
   PermissionGrant,
   PermissionRequest,
@@ -35,7 +38,15 @@ import type {
   RoutineRunRecord,
   MemoryRecordView,
   MemoryExportView,
+  MemoryRevisionView,
   PixelMemoryKind,
+  ProjectView,
+  WorkspaceWindowState,
+  ToolCatalogEntry,
+  ScreenWindowTarget,
+  VisualGuidanceSnapshot,
+  VoiceModelInfo,
+  VoiceModelProgress,
 } from '../shared/types';
 
 export { CHANNELS } from '../shared/channels';
@@ -73,45 +84,68 @@ const bridge: CypsBridge = {
     clearApiKey: () => ipcRenderer.invoke(CH.settingsClearApiKey) as Promise<void>,
     testConnection: (model?: string) =>
       ipcRenderer.invoke(CH.settingsTestConnection, model) as Promise<ConnectionTestResult>,
+    onChanged: (handler: (settings: AppSettings) => void) => subscribe(CH.settingsChanged, handler),
+    onApiKeyStatus: (handler: (configured: boolean) => void) => subscribe(CH.settingsApiKeyStatusChanged, handler),
   },
 
   window: {
     setSurface: (surface: Surface) =>
       ipcRenderer.invoke(CH.windowSetSurface, surface) as Promise<void>,
+    setLayout: (surface: Surface, size: { width: number; height: number }) =>
+      ipcRenderer.invoke(CH.windowSetLayout, surface, size) as Promise<void>,
     setExpanded: (expanded: boolean) =>
       ipcRenderer.invoke(CH.windowSetExpanded, expanded) as Promise<void>,
-    setPosition: (x: number, y: number) =>
-      ipcRenderer.invoke(CH.windowSetPosition, x, y) as Promise<void>,
-    getPosition: () =>
-      ipcRenderer.invoke(CH.windowGetPosition) as Promise<{ x: number; y: number }>,
-    getWorkArea: () =>
-      ipcRenderer.invoke(CH.windowGetWorkArea) as Promise<{
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-        scaleFactor: number;
-      }>,
     hide: () => ipcRenderer.invoke(CH.windowHide) as Promise<void>,
     show: () => ipcRenderer.invoke(CH.windowShow) as Promise<void>,
     openSettings: () => ipcRenderer.invoke(CH.windowOpenSettings) as Promise<void>,
     closeSettings: () => ipcRenderer.invoke(CH.windowCloseSettings) as Promise<void>,
+    openWorkspace: () => ipcRenderer.invoke(CH.workspaceOpen) as Promise<void>,
+    closeWorkspace: () => ipcRenderer.invoke(CH.workspaceClose) as Promise<void>,
+    minimizeWorkspace: () => ipcRenderer.invoke(CH.workspaceMinimize) as Promise<void>,
+    toggleWorkspaceMaximize: () => ipcRenderer.invoke(CH.workspaceToggleMaximize) as Promise<boolean>,
+    setWorkspaceFullscreen: (fullscreen: boolean) => ipcRenderer.invoke(CH.workspaceSetFullscreen, fullscreen) as Promise<void>,
+    getWorkspaceState: () => ipcRenderer.invoke(CH.workspaceGetState) as Promise<WorkspaceWindowState>,
+    onWorkspaceState: (handler: (state: WorkspaceWindowState) => void) => subscribe(CH.workspaceState, handler),
     setIgnoreMouseEvents: (ignore: boolean) =>
       ipcRenderer.invoke(CH.windowSetIgnoreMouseEvents, ignore) as Promise<void>,
+    onFocusLost: (handler: () => void) => subscribe(CH.windowFocusLost, handler),
+    onSummon: (handler: () => void) => subscribe(CH.windowSummon, handler),
+    onCursorMotion: (handler: (reducedMotion: boolean) => void) =>
+      subscribe(CH.windowCursorMotion, handler),
+    onCursorPlacement: (handler: (orientation: { flipX: boolean; flipY: boolean }) => void) =>
+      subscribe(CH.windowCursorPlacement, handler),
+    setCursorAssistantState: (state: AssistantState) =>
+      ipcRenderer.invoke(CH.windowSetCursorState, state) as Promise<void>,
+    cursorRendererReady: () => ipcRenderer.invoke(CH.windowCursorRendererReady) as Promise<void>,
+    onCursorAssistantState: (handler: (state: AssistantState) => void) =>
+      subscribe(CH.windowCursorState, handler),
   },
 
   chat: {
     send: (request: ChatRequest) =>
-      ipcRenderer.invoke(CH.chatSend, request) as Promise<{ requestId: string }>,
+      ipcRenderer.invoke(CH.chatSend, request) as Promise<{ requestId: string; persistence?: 'persistent' | 'session' }>,
     cancel: (requestId: string) =>
       ipcRenderer.invoke(CH.chatCancel, requestId) as Promise<void>,
     onStream: (handler: (event: StreamEvent) => void) => subscribe(CH.chatStream, handler),
   },
 
   history: {
-    list: (limit?: number) =>
-      ipcRenderer.invoke(CH.historyList, limit) as Promise<ChatMessage[]>,
+    list: (query?: HistoryQuery) =>
+      ipcRenderer.invoke(CH.historyList, query) as Promise<ConversationSummary[]>,
+    open: (id: string) =>
+      ipcRenderer.invoke(CH.historyOpen, id) as Promise<ConversationRecordView | null>,
+    create: () => ipcRenderer.invoke(CH.historyCreate) as Promise<ConversationRecordView>,
+    rename: (id: string, title: string) =>
+      ipcRenderer.invoke(CH.historyRename, id, title) as Promise<ConversationSummary | null>,
+    delete: (id: string) => ipcRenderer.invoke(CH.historyDelete, id) as Promise<boolean>,
     clear: () => ipcRenderer.invoke(CH.historyClear) as Promise<void>,
+    getActive: () => ipcRenderer.invoke(CH.historyGetActive) as Promise<ConversationRecordView | null>,
+    onActiveChanged: (handler: (record: ConversationRecordView | null) => void) => subscribe(CH.historyActiveChanged, handler),
+  },
+
+  browser: {
+    openSearch: (query: string, requestText: string, conversationId: string) =>
+      ipcRenderer.invoke(CH.browserOpenSearch, query, requestText, conversationId) as Promise<{ query: string; provider: import('../shared/types').SearchProvider }>,
   },
 
   screen: {
@@ -119,17 +153,26 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.screenListDisplays) as Promise<
         DiagnosticsSnapshot['displays']
       >,
+    listExternalWindows: () =>
+      ipcRenderer.invoke(CH.screenListExternalWindows) as Promise<{ windows: ScreenWindowTarget[]; truncated: boolean }>,
     captureActiveWindow: () =>
       ipcRenderer.invoke(CH.screenCaptureActiveWindow) as Promise<CaptureResult>,
+    captureLastExternalWindow: () =>
+      ipcRenderer.invoke(CH.screenCaptureLastExternalWindow) as Promise<CaptureResult>,
+    captureSelectedWindow: (target: ScreenWindowTarget) =>
+      ipcRenderer.invoke(CH.screenCaptureSelectedWindow, target) as Promise<CaptureResult>,
     captureDisplay: (displayId?: string) =>
       ipcRenderer.invoke(CH.screenCaptureDisplay, displayId) as Promise<CaptureResult>,
     captureRegion: (region: { x: number; y: number; width: number; height: number }) =>
       ipcRenderer.invoke(CH.screenCaptureRegion, region) as Promise<CaptureResult>,
+    onGuidanceUpdate: (handler: (snapshot: VisualGuidanceSnapshot) => void) =>
+      subscribe(CH.screenGuidanceUpdate, handler),
   },
 
   system: {
     diagnostics: () =>
       ipcRenderer.invoke(CH.systemDiagnostics) as Promise<DiagnosticsSnapshot>,
+    isEmergencyStopped: () => ipcRenderer.invoke(CH.systemIsEmergencyStopped) as Promise<boolean>,
     emergencyStop: () =>
       ipcRenderer.invoke(CH.systemEmergencyStop) as Promise<EmergencyStopReport>,
     emergencyClear: () => ipcRenderer.invoke(CH.systemEmergencyClear) as Promise<void>,
@@ -140,10 +183,14 @@ const bridge: CypsBridge = {
   permissions: {
     onRequest: (handler: (request: PermissionRequest) => void) =>
       subscribe(CH.permissionsRequest, handler),
+    listPending: () => ipcRenderer.invoke(CH.permissionsListPending) as Promise<PermissionRequest[]>,
+    onResolved: (handler: (requestId: string) => void) => subscribe(CH.permissionsResolved, handler),
     respond: (decision: PermissionDecision) =>
       ipcRenderer.invoke(CH.permissionsRespond, decision) as Promise<void>,
     listActiveGrants: () =>
       ipcRenderer.invoke(CH.permissionsListActiveGrants) as Promise<PermissionGrant[]>,
+    revokeGrant: (grantId: string) => ipcRenderer.invoke(CH.permissionsRevokeGrant, grantId) as Promise<boolean>,
+    clearExpired: () => ipcRenderer.invoke(CH.permissionsClearExpired) as Promise<number>,
     revokeAll: () => ipcRenderer.invoke(CH.permissionsRevokeAll) as Promise<number>,
   },
 
@@ -179,14 +226,22 @@ const bridge: CypsBridge = {
 
   memory: {
     list: () => ipcRenderer.invoke(CH.memoryList) as Promise<MemoryRecordView[]>,
+    listProjects: () => ipcRenderer.invoke(CH.memoryProjectsList) as Promise<ProjectView[]>,
+    setActiveProject: (name: string) => ipcRenderer.invoke(CH.memorySetActiveProject, name) as Promise<ProjectView>,
+    onProjectChanged: (handler: (project: ProjectView) => void) => subscribe(CH.memoryProjectChanged, handler),
     update: (id: string, patch: { content?: string; kind?: PixelMemoryKind; tags?: string[] }) =>
       ipcRenderer.invoke(CH.memoryUpdate, id, patch) as Promise<MemoryRecordView>,
     delete: (id: string) => ipcRenderer.invoke(CH.memoryDelete, id) as Promise<boolean>,
+    history: (id: string) => ipcRenderer.invoke(CH.memoryHistory, id) as Promise<MemoryRevisionView[]>,
     export: () => ipcRenderer.invoke(CH.memoryExport) as Promise<MemoryExportView>,
   },
 
   audit: {
     list: (limit?: number) => ipcRenderer.invoke(CH.auditList, limit) as Promise<AuditEntry[]>,
+  },
+
+  tools: {
+    list: () => ipcRenderer.invoke(CH.toolsList) as Promise<ToolCatalogEntry[]>,
   },
 
   app: {
@@ -206,6 +261,64 @@ const shell = {
   onModeChanged: (handler: (mode: Mode) => void): (() => void) =>
     subscribe(CH.modeChanged, handler),
 
+  getPushToTalkStatus: () =>
+    ipcRenderer.invoke(CH.shortcutsGetStatus) as Promise<{
+      accelerator: string;
+      ok: boolean;
+      reason?: string;
+    } | null>,
+
+  onPushToTalkState: (handler: (event: {
+    state: 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting' | 'failed' | 'cancelled';
+    error?: string;
+    sessionId?: number;
+  }) => void): (() => void) => subscribe(CH.voicePttState, handler),
+
+  onPushToTalkStopCapture: (handler: (event: { sessionId: number; action: 'submit' | 'cancel' }) => void): (() => void) =>
+    subscribe(CH.voicePttStopCapture, handler),
+
+  voicePttCaptureReady: (sessionId: number, error?: string) =>
+    ipcRenderer.invoke(CH.voicePttCaptureReady, sessionId, error) as Promise<boolean>,
+
+  voicePttTranscribe: (sessionId: number, audio: Uint8Array) =>
+    ipcRenderer.invoke(CH.voicePttTranscribe, sessionId, audio) as Promise<{ ok: boolean; error?: string }>,
+
+  voiceTranscribeWav: (audio: Uint8Array) =>
+    ipcRenderer.invoke(CH.voiceTranscribeWav, audio) as Promise<{
+      ok: boolean;
+      text: string;
+      confidence?: number;
+      error?: string;
+      noSpeech?: boolean;
+      backend?: string;
+      model?: string;
+      processingMs?: number;
+      audioSeconds?: number;
+    }>,
+
+  /** Save only a short, user-approved diagnostic WAV through the native dialog. */
+  voiceSaveDiagnosticWav: (audio: Uint8Array) => ipcRenderer.invoke(CH.voiceSaveDiagnosticWav, audio) as Promise<{
+    ok: boolean; cancelled?: boolean; error?: string;
+  }>,
+
+  voiceModelsList: () => ipcRenderer.invoke(CH.voiceModelsList) as Promise<VoiceModelInfo[]>,
+  voiceVoicesList: () => ipcRenderer.invoke(CH.voiceVoicesList) as Promise<string[]>,
+  voiceModelDownload: (id: VoiceModelInfo['id']) =>
+    ipcRenderer.invoke(CH.voiceModelDownload, id) as Promise<{ ok: boolean; error?: string }>,
+  voiceModelCancelDownload: () => ipcRenderer.invoke(CH.voiceModelCancelDownload) as Promise<boolean>,
+  voiceModelRemove: (id: VoiceModelInfo['id']) =>
+    ipcRenderer.invoke(CH.voiceModelRemove, id) as Promise<{ ok: boolean; error?: string }>,
+  onVoiceModelsProgress: (handler: (progress: VoiceModelProgress | null) => void): (() => void) =>
+    subscribe(CH.voiceModelsProgress, handler),
+
+  voiceCaptureAcquire: () => ipcRenderer.invoke(CH.voiceCaptureAcquire) as Promise<boolean>,
+  voiceCaptureRelease: () => ipcRenderer.invoke(CH.voiceCaptureRelease) as Promise<boolean>,
+  onVoiceCaptureCancel: (handler: () => void): (() => void) => subscribe(CH.voiceCaptureCancel, handler),
+
+  /** The main companion routes this one-shot transcript through chat.send. */
+  onPushToTalkSubmit: (handler: (request: { sessionId: number; text: string }) => void): (() => void) =>
+    subscribe(CH.voicePttSubmit, handler),
+
   /** Windows speech capability. Reports honestly when speech is unavailable. */
   voiceCapability: () =>
     ipcRenderer.invoke(CH.voiceCapability) as Promise<{
@@ -219,7 +332,7 @@ const shell = {
     ipcRenderer.invoke(CH.voiceListen, timeoutMs) as Promise<{
       ok: boolean;
       text: string;
-      confidence: number;
+      confidence?: number;
       error?: string;
       noSpeech?: boolean;
     }>,
@@ -227,7 +340,7 @@ const shell = {
 
   /** Speak text aloud with the installed Windows voice. */
   voiceSpeak: (text: string) =>
-    ipcRenderer.invoke(CH.voiceSpeak, text) as Promise<{ ok: boolean; error?: string }>,
+    ipcRenderer.invoke(CH.voiceSpeak, text) as Promise<{ ok: boolean; error?: string; backend?: string; generationMs?: number; playbackMs?: number; elapsedMs?: number }>,
 };
 
 contextBridge.exposeInMainWorld('cypsShell', shell);

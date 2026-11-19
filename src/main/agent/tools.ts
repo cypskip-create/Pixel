@@ -16,7 +16,7 @@ import { getModeDescriptor } from '../../shared/types';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 
-import { deriveGrantScope, scopeCovers } from './scope';
+import { deriveGrantScope, scopeCovers, standingGrantEligibility, validateStandingGrant, PERMISSION_POLICY_VERSION } from './scope';
 
 export interface ToolContext {
   /** User's current mode. */
@@ -27,6 +27,7 @@ export interface ToolContext {
   stopped: boolean;
   /** Arguments of the invocation being evaluated, used to check grant scope. */
   args?: Record<string, unknown>;
+  onGrantUsed?: (grant: PermissionGrant) => void;
   /** Records an audit line; injected so this module stays dependency-free. */
   audit: (entry: {
     kind: 'tool' | 'permission' | 'system';
@@ -88,22 +89,29 @@ export function evaluateInvocation(
 
 /** A grant is valid when it has not expired. 'always' grants never expire. */
 export function hasValidGrant(toolName: string, context: ToolContext): boolean {
-  const grant = context.grants.get(toolName);
-  if (!grant) return false;
-  // A grant aimed at one origin/application never covers a different target.
-  if (!scopeCovers(grant.target, deriveGrantScope(toolName, context.args ?? {}))) return false;
-  if (grant.scope === 'always') return true;
-  if (grant.expiresAt !== undefined && Date.now() > grant.expiresAt) {
-    context.grants.delete(toolName);
-    return false;
+  const wanted = deriveGrantScope(toolName, context.args ?? {});
+  for (const [key, grant] of context.grants) {
+    if (grant.toolName !== toolName) continue;
+    if (grant.scope !== 'always' && grant.expiresAt !== undefined && Date.now() > grant.expiresAt) {
+      context.grants.delete(key);
+      continue;
+    }
+    if (!scopeCovers(grant.target, wanted)) continue;
+    if (grant.scope === 'always') {
+      const used = { ...grant, lastUsedAt: Date.now() };
+      context.grants.set(key, used);
+      context.onGrantUsed?.(used);
+      return true;
+    }
+    return true;
   }
-  return true;
+  return false;
 }
 
 /** Apply an approval decision, producing the grant to store (if any). */
 export function applyDecision(
   decision: PermissionDecision,
-  request: { toolName: string; args?: Record<string, unknown> },
+  request: { toolName: string; args?: Record<string, unknown>; risk?: RiskLevel },
 ): PermissionGrant | null {
   if (!decision.approved) return null;
   const now = Date.now();
@@ -114,6 +122,9 @@ export function applyDecision(
     toolName: request.toolName,
     scope: decision.duration,
     grantedAt: now,
+    risk: request.risk,
+    lastUsedAt: null,
+    ...(decision.duration === 'always' ? { policyVersion: PERMISSION_POLICY_VERSION } : {}),
     // 'once' is consumed after a single call, 'session' lasts 8 hours, and
     // 'always' persists until the user revokes it.
     expiresAt:
@@ -179,10 +190,15 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
       properties: {
         target: {
           type: 'string',
-          enum: ['active_window', 'display'],
+          enum: ['active_window', 'last_external', 'selected_window', 'display'],
           description: 'What to capture.',
         },
         question: { type: 'string', description: 'What to look for on screen.' },
+        targetWindowId: { type: 'string', minLength: 1, maxLength: 64 },
+        expectedWindowTitle: { type: 'string', maxLength: 500 },
+        expectedProcessId: { type: 'integer', minimum: 1 },
+        expectedProcessName: { type: 'string', maxLength: 260 },
+        displayId: { type: 'string', maxLength: 64 },
       },
       required: ['target'],
       additionalProperties: false,
@@ -234,6 +250,44 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
         expectedProcessName: { type: 'string', maxLength: 260 },
       },
       required: ['text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'screen_highlight_control',
+    description: 'Finds one exact accessible control in a recently observed window and draws temporary, passive visual guidance around it. Requires the exact opaque window reference, title and process identity from a recent observation. It never clicks, types, activates or switches applications.',
+    category: 'screen',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        role: { type: 'string', maxLength: 80 },
+        targetWindowId: { type: 'string', minLength: 1, maxLength: 64 },
+        expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
+        expectedProcessId: { type: 'integer', minimum: 1 },
+        expectedProcessName: { type: 'string', minLength: 1, maxLength: 260 },
+        shape: { type: 'string', enum: ['rectangle', 'circle', 'arrow'] },
+        label: { type: 'string', maxLength: 100 },
+        step: { type: 'integer', minimum: 1, maximum: 99 },
+        durationMs: { type: 'integer', minimum: 3000, maximum: 30000 },
+      },
+      required: ['selector', 'targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'screen_clear_annotations',
+    description: 'Clears temporary Pixel visual guidance annotations. This does not interact with the selected application.',
+    category: 'screen',
+    risk: 'safe',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: { selector: { type: 'string', maxLength: 300 } },
       additionalProperties: false,
     },
   },
@@ -291,6 +345,31 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'control_ui_element',
+    description: 'Performs one bounded semantic UI Automation operation on one exact, unique, enabled control in the approved selected Windows window. Supports select, set a switch to an explicit on/off state, one small scroll increment/decrement, and expand/collapse. Pixel revalidates the selected window/process immediately before acting and reads the same UIA pattern again to verify the result. Unsupported patterns fail clearly. It never activates a window, clicks coordinates, or sends raw keyboard input.',
+    category: 'input',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        role: { type: 'string', maxLength: 80 },
+        expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
+        targetWindowId: { type: 'string', minLength: 1, maxLength: 64 },
+        expectedProcessId: { type: 'integer', minimum: 1 },
+        expectedProcessName: { type: 'string', minLength: 1, maxLength: 260 },
+        action: { type: 'string', enum: ['select', 'toggle', 'scroll', 'expand', 'collapse'] },
+        desiredToggleState: { type: 'string', enum: ['on', 'off'] },
+        scrollAxis: { type: 'string', enum: ['vertical', 'horizontal'] },
+        scrollDirection: { type: 'string', enum: ['increment', 'decrement'] },
+      },
+      required: ['selector', 'targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName', 'action'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'open_application',
     description: 'Launches an installed application by name.',
     category: 'system',
@@ -320,6 +399,20 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
         url: { type: 'string', description: 'Absolute URL, including https://' },
       },
       required: ['url'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_open_search',
+    description: 'Opens an explicit web search in the configured default browser. It does not read or summarize the search results. Requires user approval.',
+    category: 'browser',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', minLength: 1, maxLength: 500 } },
+      required: ['query'],
       additionalProperties: false,
     },
   },
@@ -413,7 +506,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },  {
     name: 'type_text',
-    description: 'Types approved text only if the selected opaque window ID, exact title and process identity still match the current foreground immediately before input. Pixel never switches applications.',
+    description: 'Sets an approved value on one exact accessible editable control using Windows UI Automation ValuePattern. Requires the selected opaque window ID, exact title and process identity. Pixel refuses password and read-only controls, never focuses or switches applications, verifies the value by reading it back, and does not return or log the entered value.',
     category: 'input',
     risk: 'high',
     requiresApproval: true,
@@ -422,12 +515,14 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
       type: 'object',
       properties: {
         text: { type: 'string', minLength: 1, maxLength: 2_000 },
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        role: { type: 'string', maxLength: 80 },
         targetWindowId: { type: 'string', minLength: 1, maxLength: 64 },
         expectedWindowTitle: { type: 'string', minLength: 1, maxLength: 500 },
         expectedProcessId: { type: 'integer', minimum: 1 },
         expectedProcessName: { type: 'string', minLength: 1, maxLength: 260 },
       },
-      required: ['text', 'targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'],
+      required: ['text', 'selector', 'targetWindowId', 'expectedWindowTitle', 'expectedProcessId', 'expectedProcessName'],
       additionalProperties: false,
     },
   },
@@ -438,9 +533,11 @@ export class ToolRegistry {
   private readonly argumentSchemas = new Map<string, ZodType>();
   private stopped = false;
   private readonly grants = new Map<string, PermissionGrant>();
+  private readonly onGrantUsed?: (grant: PermissionGrant) => void;
 
-  constructor(tools: readonly ToolDefinition[] = BUILTIN_TOOLS) {
+  constructor(tools: readonly ToolDefinition[] = BUILTIN_TOOLS, onGrantUsed?: (grant: PermissionGrant) => void) {
     for (const t of tools) this.tools.set(t.name, t);
+    this.onGrantUsed = onGrantUsed;
   }
 
   list(): ToolDefinition[] {
@@ -496,26 +593,34 @@ export class ToolRegistry {
       args,
       grants: this.grants,
       stopped: this.stopped,
+      onGrantUsed: this.onGrantUsed,
       audit: () => {},
     });
   }
 
-  grant(grant: PermissionGrant): void {
-    // A grant is keyed by tool name, not by arguments. For a high-risk tool such
-    // as type_text, a standing grant would approve any text into any window, so
-    // high-risk tools are always downgraded to single use and re-asked each time.
-    const tool = this.tools.get(grant.toolName);
-    const hasNarrowTarget = Object.keys(grant.target ?? {}).length > 0;
-    if (grant.scope !== 'once' && (tool?.risk === 'high' || !hasNarrowTarget)) {
-      this.grants.set(grant.toolName, { ...grant, scope: 'once', expiresAt: undefined });
-      return;
-    }
-    this.grants.set(grant.toolName, grant);
+  canGrantAlways(toolName: string, args: Record<string, unknown>): { allowed: boolean; target: ReturnType<typeof deriveGrantScope>; reason: string } {
+    const tool = this.tools.get(toolName);
+    if (!tool || tool.risk === 'high') return { allowed: false, target: {}, reason: 'This action is sensitive and always requires fresh approval.' };
+    return standingGrantEligibility(toolName, args);
   }
 
-  /** Revoke a single tool grant. Returns true when one existed. */
-  revoke(toolName: string): boolean {
-    return this.grants.delete(toolName);
+  /** Add one exact grant. Persistent entries are rejected unless policy and scope match. */
+  grant(grant: PermissionGrant): boolean {
+    if (grant.scope === 'always' && (
+      grant.risk === 'high' ||
+      grant.policyVersion !== PERMISSION_POLICY_VERSION ||
+      !validateStandingGrant(grant.toolName, grant.target)
+    )) return false;
+    this.grants.set(grant.id, { ...grant });
+    return true;
+  }
+
+  /** Revoke a specific grant id, or one single-use grant for legacy callers. */
+  revoke(idOrToolName: string): boolean {
+    if (this.grants.delete(idOrToolName)) return true;
+    const once = [...this.grants.entries()].find(([, grant]) => grant.toolName === idOrToolName && grant.scope === 'once');
+    if (!once) return false;
+    return this.grants.delete(once[0]);
   }
 
   revokeAll(): number {
@@ -527,7 +632,7 @@ export class ToolRegistry {
   activeGrants(): PermissionGrant[] {
     const now = Date.now();
     return [...this.grants.values()].filter(
-      (g) => g.scope === 'always' || g.expiresAt === undefined || g.expiresAt > now,
+      (g) => !g.revokedAt && (g.scope === 'always' || g.expiresAt === undefined || g.expiresAt > now),
     );
   }
 }

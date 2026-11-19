@@ -41,7 +41,7 @@ import type { RunTurnOptions } from './conversation';
 import type { ToolResult } from './executors';
 import type { AuditLog, PermissionBroker, TaskManager } from './runtime';
 import { ToolRegistry } from './tools';
-import { deriveGrantScope, describeScope } from './scope';
+import { describeScope, standingGrantEligibility } from './scope';
 
 /** Hard ceiling on model turns per request. */
 export const MAX_STEPS = 8;
@@ -51,7 +51,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_read', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_list', 'file_read', 'file_search', 'file_metadata', 'documents_search', 'documents_list']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {
@@ -271,14 +271,21 @@ export class AgentExecutor {
         // No tool calls: the model answered. Done.
         if (outcome.toolCalls.length === 0) {
           if (tasks.get(task.id)?.reobserveRequired) {
-            const warning = 'Pixel is waiting for a fresh observation after your handoff. The environment was not rechecked, so this task is blocked.';
+            const failedMutation = (task.pendingVerifications ?? []).some((item) =>
+              item.toolName !== undefined && task.steps.find((step) => step.id === item.stepId)?.status === 'failed');
+            const warning = failedMutation
+              ? 'A state-changing step failed and may have partly completed. Pixel cannot mark this task complete. Re-observe and verify the target before retrying.'
+              : 'Pixel is waiting for a fresh observation after your handoff. The environment was not rechecked, so this task is blocked.';
             return this.finish(requestId, task, executed, [finalContent, warning].filter(Boolean).join('\n\n'), 'blocked', false);
           }
           const pending = task.pendingVerifications ?? [];
           if (pending.length > 0) {
             const latest = pending[pending.length - 1];
             const unverifiedTitle = task.steps.find((item) => item.id === latest?.stepId)?.title ?? latest?.toolName ?? 'unknown action';
-            const warning = `Pixel performed the requested action, but could not verify the result. Please check it before treating this task as complete. Unverified step: ${unverifiedTitle}.`;
+            const failedStep = task.steps.find((item) => item.id === latest?.stepId)?.status === 'failed';
+            const warning = failedStep
+              ? `A state-changing step failed and may have partly completed. Pixel cannot mark this task complete. Re-observe and verify the target before retrying. Step: ${unverifiedTitle}.`
+              : `Pixel performed the requested action, but could not verify the result. Please check it before treating this task as complete. Unverified step: ${unverifiedTitle}.`;
             return this.finish(requestId, task, executed, [finalContent, warning].filter(Boolean).join('\n\n'), 'blocked', false);
           }
           return this.finish(requestId, task, executed, finalContent, 'completed', false);
@@ -647,7 +654,23 @@ export class AgentExecutor {
       task.recoveryNote = 'The operation was interrupted and may have partly completed. Re-observe its target before retrying.';
     }
 
-    tasks.update(task.id, { steps: [...task.steps] });
+    const uncertainMutationFailure = !succeeded && tool.changesState &&
+      ['FAILED', 'TIMEOUT', 'CANCELLED', 'CRASHED', 'UNKNOWN'].includes(result.errorCode ?? '');
+    if (uncertainMutationFailure) {
+      task.reobserveRequired = true;
+      task.pendingVerifications = [
+        ...(task.pendingVerifications ?? []),
+        { stepId: step.id, toolName: call.name },
+      ];
+    }
+
+    tasks.update(task.id, {
+      steps: [...task.steps],
+      ...(uncertainMutationFailure ? {
+        reobserveRequired: true,
+        pendingVerifications: task.pendingVerifications,
+      } : {}),
+    });
 
     audit.record(
       'tool',
@@ -771,6 +794,10 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return 'Read system information';
     case 'analyze_screen':
       return 'Looked at the screen';
+    case 'screen_highlight_control':
+      return 'Highlight an exact accessible control';
+    case 'screen_clear_annotations':
+      return 'Clear visual guidance';
     case 'get_foreground_window':
       return 'Read the foreground window title and bounds';
     case 'get_last_external_foreground_window':
@@ -787,8 +814,17 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
         const expectedRole = typeof expected.role === 'string' ? ` (${expected.role})` : '';
         return `Invoke ${typeof args.selector === 'string' ? args.selector : 'the selected control'}; then verify ${String(expected.selector ?? 'the specified UI state')}${expectedRole} is ${expected.state === 'absent' ? 'absent' : 'present'}`;
       }
+    case 'control_ui_element': {
+      const action = typeof args.action === 'string' ? args.action : 'control';
+      const selector = typeof args.selector === 'string' ? args.selector : 'the selected control';
+      const state = args.action === 'toggle' ? ` ${String(args.desiredToggleState ?? '')}`
+        : args.action === 'scroll' ? ` ${String(args.scrollDirection ?? '')} ${String(args.scrollAxis ?? '')}` : '';
+      return `${action}${state} ${selector}`;
+    }
     case 'open_application':
       return `Open ${typeof args.name === 'string' ? args.name : 'an application'}`;
+    case 'browser_open_search':
+      return `Open browser search for “${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : 'the requested query'}”`;
     case 'type_text': {
       return `Type ${typeof args.text === 'string' ? args.text.length : 0} approved characters into the specified foreground window`;
     }
@@ -798,6 +834,16 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return `Read file ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
     case 'file_write':
       return `${args.overwrite === true ? 'Replace' : 'Create'} file ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_search':
+      return `Search ${typeof args.directory === 'string' ? args.directory : 'a folder'} for files matching “${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : ''}”`;
+    case 'file_metadata':
+      return `Inspect metadata for ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'directory_create':
+      return `Create directory ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_copy':
+      return `Copy ${typeof args.source === 'string' ? args.source : '(unknown source)'} to ${typeof args.destination === 'string' ? args.destination : '(unknown destination)'}`;
+    case 'file_rename':
+      return `Rename ${typeof args.source === 'string' ? args.source : '(unknown source)'} to ${typeof args.destination === 'string' ? args.destination : '(unknown destination)'}`;
     default:
       return name;
   }
@@ -808,8 +854,9 @@ export function buildPermissionRequest(
   tool: ToolDefinition,
   args: Record<string, unknown>,
 ): PermissionRequest {
-  const scope = deriveGrantScope(tool.name, args);
-  const allowPersistent = tool.risk !== 'high' && Object.keys(scope).length > 0;
+  const eligibility = standingGrantEligibility(tool.name, args);
+  const scope = eligibility.target;
+  const allowPersistent = tool.risk !== 'high' && eligibility.allowed;
   return {
     id: `perm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     toolName: tool.name,
@@ -818,9 +865,13 @@ export function buildPermissionRequest(
     changesData: tool.changesState,
     risk: tool.risk,
     duration: 'once',
-    args,
+    args: permissionArgsForDisplay(tool.name, args),
     createdAt: Date.now(),
     allowPersistent,
+    alwaysAllowed: allowPersistent,
+    alwaysDisabledReason: allowPersistent ? undefined : tool.risk === 'high'
+      ? 'Sensitive actions always require fresh approval.'
+      : eligibility.reason,
     scopeLabel: allowPersistent ? describeScope(scope) : 'this exact action, one time',
   };
 }
@@ -828,15 +879,19 @@ export function buildPermissionRequest(
 function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'analyze_screen') return 'this screen';
   if (name === 'browser_navigate' && typeof args.url === 'string') return args.url;
+  if (name === 'browser_open_search' && typeof args.query === 'string') return `Search: ${args.query.trim().slice(0, 120)}`;
   if (name === 'documents_index' && typeof args.directory === 'string') return args.directory;
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
   if (name === 'get_last_external_foreground_window') return 'the last observed non-Pixel foreground window';
   if (name === 'list_external_windows') return 'visible non-Pixel windows on this desktop';
-  if (name === 'type_text') return describeWindowTarget(args);
+  if (name === 'type_text' || name === 'control_ui_element') return describeWindowTarget(args);
   if (name === 'get_foreground_window') return 'the foreground window';
   if (name === 'find_ui_elements') return typeof args.targetWindowId === 'string' ? describeWindowTarget(args) : 'the foreground window';
   if (name === 'invoke_ui_element' || name === 'verify_ui_state') return describeWindowTarget(args);
   if (name === 'file_list' && typeof args.directory === 'string') return args.directory;
+  if (name === 'file_search' && typeof args.directory === 'string') return `${args.directory} (name: ${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : ''})`;
+  if ((name === 'file_metadata' || name === 'directory_create') && typeof args.path === 'string') return args.path;
+  if ((name === 'file_copy' || name === 'file_rename') && typeof args.source === 'string' && typeof args.destination === 'string') return `${args.source} → ${args.destination}`;
   if ((name === 'file_read' || name === 'file_write') && typeof args.path === 'string') return args.path;
   return 'this computer';
 }
@@ -849,10 +904,24 @@ function describeWindowTarget(args: Record<string, unknown>): string {
   return `${processName}${pid}, window titled "${title}"${windowId}`;
 }
 
+function permissionArgsForDisplay(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const displayed = { ...args };
+  if (toolName === 'type_text' && typeof displayed.text === 'string') {
+    displayed.text = `[hidden for privacy; ${displayed.text.length} characters]`;
+  }
+  for (const key of Object.keys(displayed)) {
+    if (/(password|passwd|passphrase|secret|token|api[_-]?key|authorization|cookie|credential|cvv|otp)/i.test(key)) {
+      displayed[key] = '[redacted]';
+    }
+  }
+  return displayed;
+}
+
 function summariseResult(result: ToolResult): string {
   if (result.ok && result.verification) return `Verified: ${redactTaskText(result.verification.summary).slice(0, 160)}`;
   if (result.ok) return 'Action completed; postcondition verification is still pending.';
-  return `Operation failed (${result.errorCode ?? 'FAILED'}).`;
+  const safeReason = redactTaskText(result.content).replace(/\s+/g, ' ').trim().slice(0, 160);
+  return `Operation failed (${result.errorCode ?? 'FAILED'}).${safeReason ? ` ${safeReason}` : ''}`;
 }
 
 function estimateTextTokens(text: string): number {

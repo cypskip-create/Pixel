@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { CypsBridge, Mode } from '@shared/types';
+import type { CypsBridge, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
 
 declare global {
   interface Window {
@@ -13,11 +13,36 @@ declare global {
 
     /**
      * Shell-originated notifications that are not part of the CypsBridge data
-     * contract (the tray changing mode, and local speech services). Optional
+     * contract (the tray changing mode, local speech services and the narrow
+     * push-to-talk lifecycle). Optional
      * for the same reason.
      */
     cypsShell?: {
       onModeChanged(handler: (mode: Mode) => void): () => void;
+      getPushToTalkStatus(): Promise<{ accelerator: string; ok: boolean; reason?: string } | null>;
+      onPushToTalkState(handler: (event: {
+        state: 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting' | 'failed' | 'cancelled';
+        error?: string;
+        sessionId?: number;
+      }) => void): () => void;
+      onPushToTalkStopCapture(handler: (event: { sessionId: number; action: 'submit' | 'cancel' }) => void): () => void;
+      voicePttCaptureReady(sessionId: number, error?: string): Promise<boolean>;
+      voicePttTranscribe(sessionId: number, audio: Uint8Array): Promise<{ ok: boolean; error?: string }>;
+      voiceTranscribeWav(audio: Uint8Array): Promise<{
+        ok: boolean; text: string; confidence?: number; error?: string; noSpeech?: boolean;
+        backend?: string; model?: string; processingMs?: number; audioSeconds?: number;
+      }>;
+      voiceSaveDiagnosticWav(audio: Uint8Array): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
+      voiceModelsList(): Promise<VoiceModelInfo[]>;
+      voiceVoicesList(): Promise<string[]>;
+      voiceModelDownload(id: VoiceModelInfo['id']): Promise<{ ok: boolean; error?: string }>;
+      voiceModelCancelDownload(): Promise<boolean>;
+      voiceModelRemove(id: VoiceModelInfo['id']): Promise<{ ok: boolean; error?: string }>;
+      onVoiceModelsProgress(handler: (progress: VoiceModelProgress | null) => void): () => void;
+      voiceCaptureAcquire(): Promise<boolean>;
+      voiceCaptureRelease(): Promise<boolean>;
+      onVoiceCaptureCancel(handler: () => void): () => void;
+      onPushToTalkSubmit(handler: (request: { sessionId: number; text: string }) => void): () => void;
       voiceCapability(): Promise<{
         speechToText: boolean;
         textToSpeech: boolean;
@@ -26,12 +51,12 @@ declare global {
       voiceListen(timeoutMs?: number): Promise<{
         ok: boolean;
         text: string;
-        confidence: number;
+        confidence?: number;
         error?: string;
         noSpeech?: boolean;
       }>;
       voiceCancel(): Promise<number>;
-      voiceSpeak(text: string): Promise<{ ok: boolean; error?: string }>;
+      voiceSpeak(text: string): Promise<{ ok: boolean; error?: string; backend?: string; generationMs?: number; playbackMs?: number; elapsedMs?: number }>;
     };
   }
 }

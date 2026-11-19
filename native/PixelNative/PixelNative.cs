@@ -7,10 +7,11 @@
 // Protocol: one JSON request per line on stdin, one JSON response per line on
 // stdout.   {"id":1,"cmd":"ping","args":{}}  ->  {"id":1,"ok":true,"result":{...}}
 //
-// Safety: observations are read-only. The only action is InvokePattern on one
-// exact, unique, enabled control in the approved selected window. It requires
-// a separately named exact UIA presence/absence state that is false beforehand.
-// There is no coordinate click, typing, arbitrary script, or generic pattern call.
+// Safety: actions are limited to exact, unique controls in a revalidated selected
+// window. Supported operations use Invoke, Value, SelectionItem, Toggle, Scroll,
+// or ExpandCollapse UIA patterns with read-back verification. Password controls,
+// raw input events, coordinates, arbitrary scripts, and generic pattern dispatch
+// are not supported.
 // Rectangles are physical screen pixels; Pixel converts them to Electron DIP.
 //
 // Targets .NET Framework 4.x so it can be compiled by the csc.exe that ships with
@@ -20,6 +21,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -36,11 +39,15 @@ internal static class Program
     private const int BudgetMs = 1500;
     private const int DefaultResults = 8;
     private const int MaxResults = 25;
+    private const uint PrintWindowFullContent = 2;
+    private const int MaxCaptureDimension = 8192;
+    private const long MaxCapturePixels = 24000000;
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -51,6 +58,7 @@ internal static class Program
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref NativeMessage message);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref NativeMessage message);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsDelegate callback, IntPtr state);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
 
     private const uint EventSystemForeground = 0x0003;
     private const uint EventSystemMinimizeStart = 0x0016;
@@ -64,6 +72,8 @@ internal static class Program
     private const int TargetLimit = 512;
     private const int MaxExternalWindows = 50;
     private const int FallbackPollMs = 250;
+    private const int PushToTalkSafetyTimeoutMs = 20000;
+    private const int PushToTalkPollMs = 20;
     private static readonly object WindowLock = new object();
     private static readonly HashSet<int> PixelProcessIds = new HashSet<int>();
     private static readonly Dictionary<IntPtr, WindowRecord> TargetsByHandle = new Dictionary<IntPtr, WindowRecord>();
@@ -111,8 +121,15 @@ internal static class Program
         public long ObservedAt;
     }
 
-    private static int Main()
+    private static int Main(string[] commandLineArgs)
     {
+        // This short-lived mode observes only the configured chord while Pixel's
+        // registered PTT shortcut is active. It never records or forwards key events.
+        if (commandLineArgs != null && commandLineArgs.Length == 1 && String.Equals(commandLineArgs[0], "--watch-ptt-release", StringComparison.Ordinal))
+            return 3;
+        if (commandLineArgs != null && commandLineArgs.Length == 2 && String.Equals(commandLineArgs[0], "--watch-ptt-release", StringComparison.Ordinal))
+            return WatchPushToTalkRelease(commandLineArgs[1]);
+
         // PER_MONITOR_AWARE_V2 = -4. Must run before any UI Automation call so
         // that bounding rectangles come back in physical pixels.
         try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (Exception) { }
@@ -153,6 +170,124 @@ internal static class Program
         return 0;
     }
 
+    private static int WatchPushToTalkRelease(string accelerator)
+    {
+        List<int> keys;
+        if (!TryParsePushToTalkKeys(accelerator, out keys))
+        {
+            Console.Out.WriteLine("unavailable");
+            return 3;
+        }
+        var timer = Stopwatch.StartNew();
+        if (!PushToTalkChordDown(keys))
+        {
+            Console.Out.WriteLine("released");
+            return 0;
+        }
+
+        while (timer.ElapsedMilliseconds < PushToTalkSafetyTimeoutMs)
+        {
+            if (!PushToTalkChordDown(keys))
+            {
+                Console.Out.WriteLine("released");
+                return 0;
+            }
+            Thread.Sleep(PushToTalkPollMs);
+        }
+
+        Console.Out.WriteLine("timeout");
+        return 2;
+    }
+
+    private static bool PushToTalkChordDown(List<int> keys)
+    {
+        // Only the configured chord's key states are sampled. No unrelated key
+        // state or sequence is read or retained.
+        for (int index = 0; index < keys.Count; index++)
+            if (!IsKeyDown(keys[index])) return false;
+        return keys.Count > 1;
+    }
+
+    private static bool TryParsePushToTalkKeys(string accelerator, out List<int> keys)
+    {
+        keys = new List<int>();
+        bool hasModifier = false;
+        bool hasPrimary = false;
+        if (String.IsNullOrWhiteSpace(accelerator)) return false;
+        string[] parts = accelerator.Split('+');
+        if (parts.Length < 2 || parts.Length > 4) return false;
+        for (int index = 0; index < parts.Length; index++)
+        {
+            string part = parts[index].Trim();
+            if (part.Length == 0) return false;
+            int key;
+            bool modifier;
+            if (!TryVirtualKey(part, out key, out modifier)) return false;
+            if (modifier && index == parts.Length - 1) return false;
+            if (!modifier && hasPrimary) return false;
+            hasModifier = hasModifier || modifier;
+            hasPrimary = hasPrimary || !modifier;
+            if (keys.Contains(key)) return false;
+            keys.Add(key);
+        }
+        return hasModifier && hasPrimary;
+    }
+
+    private static bool TryVirtualKey(string keyName, out int virtualKey, out bool modifier)
+    {
+        string key = keyName.ToLowerInvariant();
+        modifier = true;
+        if (key == "control" || key == "ctrl" || key == "commandorcontrol") { virtualKey = 0x11; return true; }
+        else if (key == "shift") { virtualKey = 0x10; return true; }
+        else if (key == "alt") { virtualKey = 0x12; return true; }
+        else if (key == "super" || key == "meta" || key == "command") { virtualKey = 0x5B; return true; }
+        else
+        {
+            modifier = false;
+            if (key.Length == 1 && ((key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9')))
+            {
+                virtualKey = Char.ToUpperInvariant(key[0]);
+                return true;
+            }
+            if (key.Length >= 2 && key[0] == 'f')
+            {
+                int functionNumber;
+                if (Int32.TryParse(key.Substring(1), out functionNumber) && functionNumber >= 1 && functionNumber <= 24)
+                {
+                    virtualKey = 0x70 + functionNumber - 1;
+                    return true;
+                }
+            }
+            switch (key)
+            {
+                case "space": virtualKey = 0x20; return true;
+                case "enter":
+                case "return": virtualKey = 0x0D; return true;
+                case "escape":
+                case "esc": virtualKey = 0x1B; return true;
+                case "tab": virtualKey = 0x09; return true;
+                case "backspace": virtualKey = 0x08; return true;
+                case "delete": virtualKey = 0x2E; return true;
+                case "insert": virtualKey = 0x2D; return true;
+                case "home": virtualKey = 0x24; return true;
+                case "end": virtualKey = 0x23; return true;
+                case "pageup": virtualKey = 0x21; return true;
+                case "pagedown": virtualKey = 0x22; return true;
+                case "up": virtualKey = 0x26; return true;
+                case "down": virtualKey = 0x28; return true;
+                case "left": virtualKey = 0x25; return true;
+                case "right": virtualKey = 0x27; return true;
+            }
+        }
+        virtualKey = 0;
+        return false;
+    }
+
+    private static bool IsKeyDown(int virtualKey)
+    {
+        return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    }
+
     private static object Handle(string command, Dictionary<string, object> args)
     {
         switch (command)
@@ -167,12 +302,18 @@ internal static class Program
                 return ListExternalWindows();
             case "resolve_window_target":
                 return ResolveWindowTarget(args);
+            case "capture_window":
+                return CaptureWindow(args);
             case "find_elements":
                 return FindElements(args);
             case "verify_element_state":
                 return VerifyElementState(args);
             case "invoke_element":
                 return InvokeElement(args);
+            case "set_element_value":
+                return SetElementValue(args);
+            case "control_element":
+                return ControlElement(args);
             default:
                 throw new InvalidOperationException("Unknown command: " + command);
         }
@@ -324,6 +465,60 @@ internal static class Program
             { "processStartTicks", target.ProcessStartTicks.ToString() },
             { "window", PublicWindow(target) }
         };
+    }
+
+    // Captures only the exact, freshly revalidated HWND selected through the
+    // in-memory foreground observer. There is deliberately no fallback to a
+    // desktopCapturer source or another window if PrintWindow is unsupported.
+    private static object CaptureWindow(Dictionary<string, object> args)
+    {
+        WindowRecord selected = ResolveRecord(args);
+        bool requireForeground = args != null && args.ContainsKey("requireForeground") && Convert.ToBoolean(args["requireForeground"]);
+        if (requireForeground && GetForegroundWindow() != selected.Handle)
+            throw new InvalidOperationException("The foreground window changed after observation. Nothing was captured; re-observe the active application.");
+        if (selected.IsMinimized || !IsWindowVisible(selected.Handle))
+            throw new InvalidOperationException("The selected target window is minimized or hidden. Restore it and re-observe before capture.");
+        if (selected.Width < 2 || selected.Height < 2 || selected.Width > MaxCaptureDimension ||
+            selected.Height > MaxCaptureDimension || (long)selected.Width * selected.Height > MaxCapturePixels)
+            throw new InvalidOperationException("The selected target window has unavailable or unsupported capture dimensions.");
+
+        int width = selected.Width;
+        int height = selected.Height;
+        using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            IntPtr hdc = graphics.GetHdc();
+            bool captured;
+            try { captured = PrintWindow(selected.Handle, hdc, PrintWindowFullContent); }
+            finally { graphics.ReleaseHdc(hdc); }
+            if (!captured)
+                throw new InvalidOperationException("Windows did not provide pixels for the selected application. The window was not substituted.");
+
+            // A successful API return is not enough if the HWND was recycled,
+            // renamed or moved during capture.
+            WindowRecord current = RefreshTarget(selected);
+            if (current == null || current.ProcessId != selected.ProcessId ||
+                current.ProcessStartTicks != selected.ProcessStartTicks ||
+                !String.Equals(current.Title, selected.Title, StringComparison.Ordinal) ||
+                current.X != selected.X || current.Y != selected.Y ||
+                current.Width != selected.Width || current.Height != selected.Height)
+                throw new InvalidOperationException("The selected application changed during capture. Re-observe before trying again.");
+            if (requireForeground && GetForegroundWindow() != selected.Handle)
+                throw new InvalidOperationException("The foreground window changed during capture. The image was discarded.");
+
+            using (var output = new MemoryStream())
+            {
+                bitmap.Save(output, ImageFormat.Png);
+                byte[] bytes = output.ToArray();
+                if (bytes.Length > 16 * 1024 * 1024)
+                    throw new InvalidOperationException("The selected window image exceeded Pixel's safe in-memory capture limit.");
+                return new Dictionary<string, object> {
+                    { "window", PublicWindow(current) },
+                    { "width", width }, { "height", height },
+                    { "format", "image/png" }, { "base64", Convert.ToBase64String(bytes) }
+                };
+            }
+        }
     }
 
     private static WindowRecord ResolveRecord(Dictionary<string, object> args)
@@ -707,7 +902,24 @@ internal static class Program
         if (!string.Equals(expectedWindowTitle, actualWindowTitle, StringComparison.Ordinal) || revalidated.ProcessId != ProcessIdOf(handle))
             throw new InvalidOperationException("The approved target window or process changed before invocation; no action was taken.");
 
-        ((InvokePattern)pattern).Invoke();
+        // Re-resolve the exact control after the window identity check. Some
+        // providers invalidate pattern proxies while their accessibility tree
+        // is refreshed, so invoking a proxy captured during the initial search
+        // can fail even when the same control is still present.
+        root = AutomationElement.FromHandle(handle);
+        match = FindUniqueActionElement(root, selector, role);
+        matchInfo = ReadActionElement(match, "invocation target revalidation");
+        if (!matchInfo.IsEnabled || matchInfo.IsOffscreen)
+            throw new InvalidOperationException("The matching control became disabled or offscreen; no action was taken.");
+        if (!match.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+            throw new InvalidOperationException("The control no longer exposes the safe InvokePattern; no action was taken.");
+
+        try { ((InvokePattern)pattern).Invoke(); }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "InvokePattern was rejected by the target UI Automation provider. The action may have partly completed; re-observe before retrying. Provider error: " + ex.Message);
+        }
         return new Dictionary<string, object>
         {
             { "window", DescribeWindow(root, handle) },
@@ -779,6 +991,276 @@ internal static class Program
             };
         }
         return result;
+    }
+
+    private static object SetElementValue(Dictionary<string, object> args)
+    {
+        string selector = ReadRequiredString(args, "selector", 300);
+        string expectedTitle = ReadRequiredString(args, "expectedWindowTitle", 500);
+        string value = args != null && args.ContainsKey("value") ? Convert.ToString(args["value"]) ?? "" : "";
+        if (value.Length == 0 || value.Length > 2000)
+            throw new ArgumentException("A value of 1 to 2000 characters is required.");
+        string role = args != null && args.ContainsKey("role") ? (Convert.ToString(args["role"]) ?? "").Trim() : "";
+        WindowRecord selected = ResolveRecord(args);
+        EnsureActionWindow(selected, expectedTitle);
+        IntPtr handle = selected.Handle;
+        AutomationElement root = AutomationElement.FromHandle(handle);
+        AutomationElement match = FindUniqueActionElement(root, selector, role);
+        AutomationElement.AutomationElementInformation info = ReadActionElement(match, "value entry");
+        if (!info.IsEnabled || info.IsOffscreen)
+            throw new InvalidOperationException("The matching control is disabled or offscreen; no value was set.");
+        if (info.IsPassword)
+            throw new InvalidOperationException("Pixel will not enter or read back a password control.");
+
+        object rawPattern;
+        if (!match.TryGetCurrentPattern(ValuePattern.Pattern, out rawPattern))
+            throw new InvalidOperationException("The control does not expose ValuePattern; no value was set.");
+        ValuePattern pattern = (ValuePattern)rawPattern;
+        if (pattern.Current.IsReadOnly)
+            throw new InvalidOperationException("The control is read-only; no value was set.");
+
+        // Re-resolve the opaque window and process identity immediately before
+        // the state-changing UI Automation call. Do not activate the target.
+        EnsureActionWindow(ResolveRecord(args), expectedTitle, handle);
+        string existing = pattern.Current.Value ?? "";
+        if (!String.Equals(existing, value, StringComparison.Ordinal)) pattern.SetValue(value);
+        string observed = pattern.Current.Value ?? "";
+        if (!String.Equals(observed, value, StringComparison.Ordinal))
+            throw new InvalidOperationException("ValuePattern did not return the requested value; the result is not verified.");
+
+        return new Dictionary<string, object>
+        {
+            { "window", DescribeWindow(root, handle) },
+            { "element", DescribeActionElement(match) },
+            { "valueLength", observed.Length },
+            { "verified", true }
+        };
+    }
+
+    private static object ControlElement(Dictionary<string, object> args)
+    {
+        string selector = ReadRequiredString(args, "selector", 300);
+        string expectedTitle = ReadRequiredString(args, "expectedWindowTitle", 500);
+        string action = args != null && args.ContainsKey("action") ? Convert.ToString(args["action"]) ?? "" : "";
+        string role = args != null && args.ContainsKey("role") ? (Convert.ToString(args["role"]) ?? "").Trim() : "";
+        WindowRecord selected = ResolveRecord(args);
+        EnsureActionWindow(selected, expectedTitle);
+        IntPtr handle = selected.Handle;
+        AutomationElement root = AutomationElement.FromHandle(handle);
+        AutomationElement match = FindUniqueActionElement(root, selector, role);
+        AutomationElement.AutomationElementInformation info = ReadActionElement(match, action);
+        if (!info.IsEnabled || info.IsOffscreen)
+            throw new InvalidOperationException("The matching control is disabled or offscreen; no action was taken.");
+
+        string observedState;
+        switch (action)
+        {
+            case "select":
+            {
+                object raw;
+                if (!match.TryGetCurrentPattern(SelectionItemPattern.Pattern, out raw))
+                    throw new InvalidOperationException("The control does not expose SelectionItemPattern; no action was taken.");
+                SelectionItemPattern pattern = (SelectionItemPattern)raw;
+                EnsureActionWindow(ResolveRecord(args), expectedTitle, handle);
+                if (!pattern.Current.IsSelected) pattern.Select();
+                if (!pattern.Current.IsSelected)
+                    throw new InvalidOperationException("The selection was not confirmed by UI Automation.");
+                observedState = "selected";
+                break;
+            }
+            case "toggle":
+            {
+                string desired = args != null && args.ContainsKey("desiredToggleState") ? Convert.ToString(args["desiredToggleState"]) ?? "" : "";
+                if (desired != "on" && desired != "off") throw new ArgumentException("Toggle requires desiredToggleState 'on' or 'off'.");
+                object raw;
+                if (!match.TryGetCurrentPattern(TogglePattern.Pattern, out raw))
+                    throw new InvalidOperationException("The control does not expose TogglePattern; no action was taken.");
+                TogglePattern pattern = (TogglePattern)raw;
+                ToggleState desiredState = desired == "on" ? ToggleState.On : ToggleState.Off;
+                EnsureActionWindow(ResolveRecord(args), expectedTitle, handle);
+                // Some UIA providers hand out short-lived pattern proxies while
+                // their tree is being refreshed. Resolve the exact control again
+                // immediately before the mutation, then verify through a fresh
+                // proxy after it. A stale proxy must never be treated as success.
+                match = FindUniqueActionElement(AutomationElement.FromHandle(handle), selector, role);
+                info = ReadActionElement(match, "toggle target revalidation");
+                if (!info.IsEnabled || info.IsOffscreen)
+                    throw new InvalidOperationException("The matching toggle became disabled or offscreen; no action was taken.");
+                if (!match.TryGetCurrentPattern(TogglePattern.Pattern, out raw))
+                    throw new InvalidOperationException("The control no longer exposes TogglePattern; no action was taken.");
+                pattern = (TogglePattern)raw;
+                ToggleState before;
+                try { before = pattern.Current.ToggleState; }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("TogglePattern state could not be read before action; no change was attempted. Provider error: " + ex.Message);
+                }
+                if (before != desiredState)
+                {
+                    try { pattern.Toggle(); }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException("TogglePattern was rejected by the target UI Automation provider. The action may have partly completed; re-observe before retrying. Provider error: " + ex.Message);
+                    }
+                }
+                ToggleState observed;
+                try
+                {
+                    AutomationElement verificationTarget = FindUniqueActionElement(
+                        AutomationElement.FromHandle(handle), selector, role);
+                    object verificationPattern;
+                    if (!verificationTarget.TryGetCurrentPattern(TogglePattern.Pattern, out verificationPattern))
+                        throw new InvalidOperationException("The control no longer exposes TogglePattern.");
+                    observed = ((TogglePattern)verificationPattern).Current.ToggleState;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("TogglePattern returned without a readable postcondition; the action outcome is unknown. Re-observe before retrying. Provider error: " + ex.Message);
+                }
+                if (observed != desiredState)
+                    throw new InvalidOperationException("TogglePattern did not reach the requested state; the result is not verified.");
+                observedState = observed == ToggleState.On ? "on" : "off";
+                break;
+            }
+            case "scroll":
+            {
+                string axis = args != null && args.ContainsKey("scrollAxis") ? Convert.ToString(args["scrollAxis"]) ?? "" : "";
+                string direction = args != null && args.ContainsKey("scrollDirection") ? Convert.ToString(args["scrollDirection"]) ?? "" : "";
+                if ((axis != "vertical" && axis != "horizontal") || (direction != "increment" && direction != "decrement"))
+                    throw new ArgumentException("Scroll requires a supported axis and direction.");
+                object raw;
+                if (!match.TryGetCurrentPattern(ScrollPattern.Pattern, out raw))
+                    throw new InvalidOperationException("The control does not expose ScrollPattern; no action was taken.");
+                ScrollPattern pattern = (ScrollPattern)raw;
+                ScrollPattern.ScrollPatternInformation before = pattern.Current;
+                bool canScroll = axis == "vertical" ? before.VerticallyScrollable : before.HorizontallyScrollable;
+                if (!canScroll) throw new InvalidOperationException("The requested scroll axis is not scrollable.");
+                double beforePercent = axis == "vertical" ? before.VerticalScrollPercent : before.HorizontalScrollPercent;
+                if (beforePercent < 0) throw new InvalidOperationException("The UI Automation provider does not expose a verifiable scroll position.");
+                ScrollAmount amount = direction == "increment" ? ScrollAmount.SmallIncrement : ScrollAmount.SmallDecrement;
+                EnsureActionWindow(ResolveRecord(args), expectedTitle, handle);
+                pattern.Scroll(axis == "horizontal" ? amount : ScrollAmount.NoAmount,
+                    axis == "vertical" ? amount : ScrollAmount.NoAmount);
+                double afterPercent = axis == "vertical" ? pattern.Current.VerticalScrollPercent : pattern.Current.HorizontalScrollPercent;
+                bool moved = direction == "increment" ? afterPercent > beforePercent : afterPercent < beforePercent;
+                if (!moved)
+                    throw new InvalidOperationException("The requested small scroll did not change the UI Automation position; the result is not verified.");
+                observedState = axis + " scroll percent " + beforePercent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    + " to " + afterPercent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+                break;
+            }
+            case "expand":
+            case "collapse":
+            {
+                object raw;
+                if (!match.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out raw))
+                    throw new InvalidOperationException("The control does not expose ExpandCollapsePattern; no action was taken.");
+                ExpandCollapsePattern pattern = (ExpandCollapsePattern)raw;
+                ExpandCollapseState desiredState = action == "expand" ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+                EnsureActionWindow(ResolveRecord(args), expectedTitle, handle);
+                ExpandCollapseState before = pattern.Current.ExpandCollapseState;
+                if (before == ExpandCollapseState.LeafNode)
+                    throw new InvalidOperationException("The control cannot expand or collapse.");
+                if (before != desiredState)
+                {
+                    if (action == "expand") pattern.Expand(); else pattern.Collapse();
+                }
+                ExpandCollapseState observed = pattern.Current.ExpandCollapseState;
+                if (observed != desiredState)
+                    throw new InvalidOperationException("ExpandCollapsePattern did not reach the requested state; the result is not verified.");
+                observedState = observed == ExpandCollapseState.Expanded ? "expanded" : "collapsed";
+                break;
+            }
+            default:
+                throw new ArgumentException("Unsupported semantic UI Automation action.");
+        }
+
+        EnsureActionWindow(ResolveRecord(args), expectedTitle, handle);
+        return new Dictionary<string, object>
+        {
+            { "window", DescribeWindow(AutomationElement.FromHandle(handle), handle) },
+            { "element", DescribeActionElement(match) },
+            { "action", action },
+            { "observedState", observedState },
+            { "verified", true }
+        };
+    }
+
+    private static string ReadRequiredString(Dictionary<string, object> args, string key, int maxLength)
+    {
+        string value = args != null && args.ContainsKey(key) ? Convert.ToString(args[key]) ?? "" : "";
+        if (String.IsNullOrWhiteSpace(value) || value.Length > maxLength)
+            throw new ArgumentException("A " + key + " of 1 to " + maxLength + " characters is required.");
+        return value.Trim();
+    }
+
+    private static void EnsureActionWindow(WindowRecord target, string expectedTitle, IntPtr expectedHandle = default(IntPtr))
+    {
+        if (target == null || target.Handle == IntPtr.Zero || (expectedHandle != IntPtr.Zero && target.Handle != expectedHandle))
+            throw new InvalidOperationException("The approved window identity changed; no UI Automation action was taken.");
+        if (target.IsMinimized || !IsWindowVisible(target.Handle))
+            throw new InvalidOperationException("The selected target window is minimized or hidden; no action was taken.");
+        try
+        {
+            string actualTitle = AutomationElement.FromHandle(target.Handle).Current.Name ?? "";
+            if (!String.Equals(expectedTitle, actualTitle, StringComparison.Ordinal) || target.ProcessId != ProcessIdOf(target.Handle))
+                throw new InvalidOperationException("The selected window title or process changed; no action was taken.");
+        }
+        catch (InvalidOperationException) { throw; }
+        catch (Exception) { throw new InvalidOperationException("Could not revalidate the selected window before action; no action was taken."); }
+    }
+
+    private static AutomationElement FindUniqueActionElement(AutomationElement root, string selector, string role)
+    {
+        AutomationElement match = null;
+        var stack = new Stack<AutomationElement>();
+        stack.Push(root);
+        var clock = Stopwatch.StartNew();
+        int visited = 0;
+        TreeWalker walker = TreeWalker.ControlViewWalker;
+        while (stack.Count > 0)
+        {
+            if (visited >= MaxNodes || clock.ElapsedMilliseconds > BudgetMs)
+                throw new InvalidOperationException("The UI Automation tree exceeded the action safety limit; no action was taken.");
+            AutomationElement element = stack.Pop();
+            visited++;
+            AutomationElement.AutomationElementInformation info = ReadActionElement(element, "target selection");
+            bool exact = String.Equals(info.Name ?? "", selector, StringComparison.OrdinalIgnoreCase)
+                || String.Equals(info.AutomationId ?? "", selector, StringComparison.OrdinalIgnoreCase);
+            if (exact && (role.Length == 0 || String.Equals(RoleName(info.ControlType), role, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (match != null)
+                    throw new InvalidOperationException("The selector matches more than one control; no action was taken.");
+                match = element;
+            }
+            try
+            {
+                for (AutomationElement child = walker.GetFirstChild(element); child != null; child = walker.GetNextSibling(child))
+                    stack.Push(child);
+            }
+            catch (Exception) { throw new InvalidOperationException("The selected UI Automation subtree could not be read safely; no action was taken."); }
+        }
+        if (match == null) throw new InvalidOperationException("No control in the selected window exactly matches the selector.");
+        return match;
+    }
+
+    private static AutomationElement.AutomationElementInformation ReadActionElement(AutomationElement element, string operation)
+    {
+        try { return element.Current; }
+        catch (Exception) { throw new InvalidOperationException("The control changed during " + operation + "; no action was taken."); }
+    }
+
+    private static Dictionary<string, object> DescribeActionElement(AutomationElement element)
+    {
+        AutomationElement.AutomationElementInformation info = ReadActionElement(element, "result verification");
+        return new Dictionary<string, object>
+        {
+            { "name", info.Name ?? "" },
+            { "role", RoleName(info.ControlType) },
+            { "automationId", info.AutomationId ?? "" },
+            { "rect", RectOf(info.BoundingRectangle) },
+            { "enabled", info.IsEnabled }
+        };
     }
 
     private static List<AutomationElement.AutomationElementInformation> FindExactElements(AutomationElement root, string selector, string role)

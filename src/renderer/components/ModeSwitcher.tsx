@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { AlertTriangle, Check } from 'lucide-react';
 import type { Mode, ModeDescriptor } from '@shared/types';
 import { MODE_DESCRIPTORS } from '@shared/types';
@@ -11,7 +11,10 @@ interface ModeSwitcherProps {
   disabled?: boolean;
   /** Rendered as a popover under the bar rather than inline. */
   variant?: 'popover' | 'inline';
+  /** Anchors the popover to a compact Workspace header trigger. */
+  placement?: 'default' | 'anchored';
   onDismiss?: () => void;
+  returnFocusRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /**
@@ -28,62 +31,97 @@ export function ModeSwitcher({
   onRequestMode,
   disabled = false,
   variant = 'popover',
+  placement = 'default',
   onDismiss,
+  returnFocusRef,
 }: ModeSwitcherProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const isPopover = variant === 'popover';
 
   // Dismiss on outside click / Escape for the popover presentation.
   useEffect(() => {
     if (variant !== 'popover' || !onDismiss) return;
-    const onPointerDown = (event: MouseEvent): void => {
+    const onPointerDown = (event: PointerEvent): void => {
       if (!ref.current) return;
       if (!ref.current.contains(event.target as Node)) onDismiss();
     };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
+        event.preventDefault();
         event.stopPropagation();
         onDismiss();
+        window.requestAnimationFrame(() => returnFocusRef?.current?.focus());
       }
     };
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown, true);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [variant, onDismiss]);
+  }, [variant, onDismiss, returnFocusRef]);
 
-  const isPopover = variant === 'popover';
+  useEffect(() => {
+    if (variant !== 'popover') return;
+    window.requestAnimationFrame(() => {
+      ref.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    });
+  }, [variant]);
+
+  const focusNextItem = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+    const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const last = items.length - 1;
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? last
+        : event.key === 'ArrowDown' || event.key === 'ArrowRight'
+          ? (current + 1 + items.length) % items.length
+          : (current - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
 
   return (
     <div
       ref={ref}
-      role="radiogroup"
+      id={isPopover ? 'pixel-mode-menu' : undefined}
+      role={isPopover ? 'menu' : 'radiogroup'}
       aria-label="Pixel operating mode"
+      onKeyDown={isPopover ? focusNextItem : undefined}
+      data-layout-panel
       className={[
         isPopover
-          ? 'glass-raised animate-slide-down absolute left-0 top-[calc(100%+8px)] z-40 w-[288px] rounded-2xl p-2'
-          : 'w-full rounded-2xl border border-[var(--color-glass-border)] bg-white/4 p-2',
+          ? placement === 'anchored'
+            ? 'workspace-mode-popover w-[min(292px,calc(100vw-24px))] rounded-xl p-1.5'
+            : 'pixel-surface-raised animate-slide-down ml-11 mt-2 w-[288px] rounded-2xl p-2'
+          : 'w-full rounded-2xl border border-[var(--color-border)] bg-white/4 p-2',
       ].join(' ')}
     >
       {isPopover ? (
-        <p className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ink-dim)]">
+        <p role="none" className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-ink-dim)]">
           How much may Pixel do?
         </p>
       ) : null}
 
-      <ul className="flex flex-col gap-1">
+      <div role="group" className="flex flex-col gap-1">
         {MODE_DESCRIPTORS.map((descriptor) => (
-          <li key={descriptor.id}>
-            <ModeRow
-              descriptor={descriptor}
-              selected={descriptor.id === current}
-              disabled={disabled}
-              onSelect={() => onRequestMode(descriptor.id)}
-            />
-          </li>
+          <ModeRow
+            key={descriptor.id}
+            descriptor={descriptor}
+            selected={descriptor.id === current}
+            disabled={disabled}
+            menuItem={isPopover}
+            onSelect={() => {
+              onRequestMode(descriptor.id);
+              window.requestAnimationFrame(() => returnFocusRef?.current?.focus());
+            }}
+          />
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
@@ -92,18 +130,21 @@ function ModeRow({
   descriptor,
   selected,
   disabled,
+  menuItem,
   onSelect,
 }: {
   descriptor: ModeDescriptor;
   selected: boolean;
   disabled: boolean;
+  menuItem: boolean;
   onSelect: () => void;
 }) {
   return (
     <button
       type="button"
-      role="radio"
+      role={menuItem ? 'menuitemradio' : 'radio'}
       aria-checked={selected}
+      tabIndex={menuItem ? (selected ? 0 : -1) : undefined}
       disabled={disabled}
       onClick={onSelect}
       className={[
@@ -111,7 +152,7 @@ function ModeRow({
         'transition-colors duration-[var(--cyps-duration-fast)]',
         'disabled:cursor-not-allowed disabled:opacity-50',
         selected
-          ? 'bg-sky-500/18 ring-1 ring-inset ring-sky-400/40'
+          ? 'bg-neutral-500/18 ring-1 ring-inset ring-neutral-400/40'
           : 'hover:bg-white/8',
       ].join(' ')}
     >
@@ -119,10 +160,10 @@ function ModeRow({
         aria-hidden="true"
         className={[
           'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
-          selected ? 'border-sky-300 bg-sky-400/25' : 'border-[var(--color-ink-dim)]',
+          selected ? 'border-neutral-300 bg-neutral-400/25' : 'border-[var(--color-ink-dim)]',
         ].join(' ')}
       >
-        {selected ? <Check size={11} strokeWidth={3} className="text-sky-100" /> : null}
+        {selected ? <Check size={11} strokeWidth={3} className="text-neutral-100" /> : null}
       </span>
 
       <span className="min-w-0 flex-1">
@@ -132,7 +173,7 @@ function ModeRow({
           </span>
           {descriptor.allowsStateChange ? (
             <span
-              className="inline-flex items-center gap-1 rounded-full border border-amber-400/35 bg-amber-400/10 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-200"
+              className="inline-flex items-center gap-1 rounded-full border border-neutral-400/35 bg-neutral-400/10 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-neutral-200"
               title="This mode can change things on your computer"
             >
               <AlertTriangle size={9} strokeWidth={2.6} aria-hidden="true" />

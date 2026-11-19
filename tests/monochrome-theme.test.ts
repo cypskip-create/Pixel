@@ -1,0 +1,118 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+import mark from '../src/shared/pixelMark.json';
+import { PixelMark } from '../src/renderer/components/PixelMark';
+import {
+  CURSOR_ICON_HOTSPOT,
+  CURSOR_ICON_VIEWBOX_SIZE,
+  CURSOR_VISIBLE_SIZE,
+  CURSOR_WINDOW_HOTSPOT,
+  CURSOR_WINDOW_SIZE,
+} from '../src/shared/companion/cursorFollow';
+
+const rendererRoot = join(process.cwd(), 'src', 'renderer');
+
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return /\.(?:tsx?|css)$/.test(entry.name) ? [path] : [];
+  });
+}
+
+function expandHex(hex: string): string[] {
+  if (hex.length === 3 || hex.length === 4) {
+    const expanded = [...hex].map((channel) => channel + channel);
+    return expanded.slice(0, 3);
+  }
+  return [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)];
+}
+
+describe('charcoal Pixel design system', () => {
+  const files = sourceFiles(rendererRoot);
+  const allRendererSource = files.map((file) => readFileSync(file, 'utf8')).join('\n');
+  const css = readFileSync(join(rendererRoot, 'index.css'), 'utf8');
+
+  it('defines the charcoal surfaces and the approved restrained sage, amber and red accents', () => {
+    for (const [token, value] of [
+      ['--color-app-bg', '#0E1013'],
+      ['--color-sidebar', '#1A1E23'],
+      ['--color-surface', '#20252A'],
+      ['--color-surface-raised', '#2A3138'],
+      ['--color-hover', '#333A40'],
+      ['--color-selected', '#394147'],
+      ['--color-border', '#3A4147'],
+      ['--color-ink', '#E6E9ED'],
+      ['--color-ink-soft', '#C6CACD'],
+      ['--color-ink-dim', '#9AA1A6'],
+      ['--color-accent', '#A7D7C2'],
+      ['--color-accent-hover', '#D6EDE3'],
+      ['--color-warning', '#D5AB72'],
+      ['--color-destructive', '#D88B83'],
+      ['--pix-face', '#0E1013'],
+      ['--pix-fold', '#A7D7C2'],
+      ['--pix-eye', '#9BE5C7'],
+    ]) {
+      expect(css).toContain(`${token}: ${value}`);
+    }
+    expect(css).toContain('.theme-light');
+    expect(css).toContain('--color-brand-foreground: var(--color-icon)');
+  });
+
+  it('limits chromatic color values to the approved palette', () => {
+    expect(allRendererSource).not.toMatch(/(?:sky|blue|cyan|teal|emerald|green|yellow|rose|orange|violet|purple|indigo)-\d{2,3}/i);
+    const approvedTints = new Set([
+      '0e1013', '101113', '1a1e23', '20252a', '2a3138', '333a40', '394147', '3a4147', '515a61',
+      'e6e9ed', 'c6cacd', '9aa1a6', 'd2d7db', 'a7d7c2', 'd6ede3', 'd5ab72', 'd88b83',
+      '9be5c7', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',
+      'f1f3f3', 'e7eaea', 'f7f9f9', 'e3e7e7', 'd7dedd', 'c8d0ce', '9aa6a2', 'f5f7f6',
+      '161b1a', '414947', '68716e',
+    ]);
+
+    for (const match of allRendererSource.matchAll(/#([\da-f]{3,8})\b/gi)) {
+      if (approvedTints.has((match[1] ?? '').toLowerCase())) continue;
+      const channels = expandHex(match[1] ?? '');
+      expect(channels[0]?.toLowerCase()).toBe(channels[1]?.toLowerCase());
+      expect(channels[1]?.toLowerCase()).toBe(channels[2]?.toLowerCase());
+    }
+    for (const match of allRendererSource.matchAll(/rgba?\(\s*(\d+)\s*[, ]\s*(\d+)\s*[, ]\s*(\d+)/gi)) {
+      expect(match[1]).toBe(match[2]);
+      expect(match[2]).toBe(match[3]);
+    }
+  });
+
+  it('uses opaque neutral surfaces without frosted-glass materials or decorative gradients', () => {
+    expect(css).toContain('background: var(--color-surface);');
+    expect(css).not.toMatch(/backdrop-filter|backdrop-blur|Acrylic|Mica|gradient\(/i);
+    expect(allRendererSource).not.toMatch(/--color-glass|color-popover-glass|\bglass-raised\b|\bglass\b/i);
+  });
+
+  it('renders the approved master P geometry in a monochrome variant', () => {
+    const component = readFileSync(join(rendererRoot, 'components', 'PixelMark.tsx'), 'utf8');
+    expect(mark.viewBox).toEqual([0, 0, 262, 324]);
+    expect(mark.shapes.length).toBeGreaterThan(0);
+    expect(component).toContain('monochrome = true');
+    expect(component).toContain('mark.shapes');
+    expect(component).toContain('MONOCHROME_PALETTE');
+    expect(component).toContain('width="262" height="324"');
+    const rendered = renderToStaticMarkup(createElement(PixelMark, { size: 24 }));
+    expect(rendered).toContain('fill="var(--color-brand-foreground)"');
+    expect(rendered).toContain('fill="var(--color-ink-soft)"');
+  });
+
+  it('keeps the cursor character small and aligns native geometry to the SVG tip', () => {
+    const cursor = readFileSync(join(rendererRoot, 'components', 'CursorBuddy.tsx'), 'utf8');
+    expect(CURSOR_VISIBLE_SIZE).toBe(28);
+    expect(CURSOR_WINDOW_SIZE).toBe(36);
+    expect(CURSOR_ICON_VIEWBOX_SIZE).toBe(32);
+    expect(CURSOR_WINDOW_HOTSPOT.x).toBeCloseTo(4 + CURSOR_ICON_HOTSPOT.x * CURSOR_VISIBLE_SIZE / CURSOR_ICON_VIEWBOX_SIZE, 8);
+    expect(CURSOR_WINDOW_HOTSPOT.y).toBeCloseTo(4 + CURSOR_ICON_HOTSPOT.y * CURSOR_VISIBLE_SIZE / CURSOR_ICON_VIEWBOX_SIZE, 8);
+    expect(cursor).toContain('width="28"');
+    expect(cursor).toContain('height="28"');
+    expect(cursor).toContain('viewBox="0 0 32 32"');
+    expect(cursor).not.toMatch(/#(?:02f3fe|73f9fd)/i);
+  });
+});

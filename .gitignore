@@ -1,11 +1,15 @@
 # Dependencies
 node_modules/
+.venv-voice-build/
 .npm-cache/
 
 # Build output
 dist/
 dist-electron/
 release/
+python/build/
+python/dist/
+python/**/__pycache__/
 out/
 *.tsbuildinfo
 

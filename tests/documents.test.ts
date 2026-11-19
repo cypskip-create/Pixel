@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -25,8 +25,21 @@ import { PythonWorker } from '../src/main/services/python-worker';
  * instead of pretending to pass.
  */
 
-const py = 'C:\\Users\\cypri\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\python\\python.exe';
-const worker = new PythonWorker({ pythonPath: py, requestTimeoutMs: 20_000, workerRoot: process.cwd() + '/python' });
+const userRuntimePython = join(
+  process.env.USERPROFILE ?? '',
+  '.dsh',
+  'dsh-runtimes',
+  'dsh-primary-runtime',
+  'dependencies',
+  'python',
+  'python.exe',
+);
+const py = process.env.PIXEL_PYTHON ?? (existsSync(userRuntimePython) ? userRuntimePython : undefined);
+const worker = new PythonWorker({
+  ...(py ? { pythonPath: py } : {}),
+  requestTimeoutMs: 20_000,
+  workerRoot: process.cwd() + '/python',
+});
 const availability = worker.availability();
 
 if (!availability.available) {

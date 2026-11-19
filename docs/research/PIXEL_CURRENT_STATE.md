@@ -1,8 +1,8 @@
 # Pixel current state
 
-**Reviewed:** 2026-11-16  
-**Repository:** Pixel 0.2.1, `main` at review start  
-**Method:** source inspection, the repository's automated suite, TypeScript checks, production renderer/main builds and direct Windows helper checks. Electron GUI startup and packaging were attempted but blocked by this Codex environment.
+**Reviewed:** 2026-11-17
+**Repository:** Pixel 0.2.1, local branch `codex/ui-experience-2`; current `HEAD` is `f10084e6f11129e4c453ba546ed09e50e6b9d8de` and the worktree is uncommitted.
+**Method:** source inspection, TypeScript checks, full Vitest suite and production source build. GUI acceptance was not completed; the isolated package build failed before producing an artifact because DNS resolution for `github.com` failed.
 
 ## Status meanings
 
@@ -17,7 +17,7 @@
 
 | Capability | Current status | Source evidence and limits |
 | --- | --- | --- |
-| Electron desktop shell, renderer and typed preload bridge | Implemented but unverified | Electron main, React renderer and allow-listed bridge exist. Compile/build checks pass. A live window, tray, shortcuts, focus, DPI and monitor behavior were not exercised in this run. |
+| Electron desktop shell, renderer and typed preload bridge | Implemented; branch GUI acceptance unverified | Main, renderer and the narrow sandboxed preload build. The primary window is anchored to a selected display and renderer-measured content determines its bounds. This run did not verify native window visuals, focus, DPI or monitor behavior. |
 | DeepSeek conversation and streaming | Working and tested at protocol level | Provider parsing, errors, streaming and conversation tests pass. No live DeepSeek request was made. Ollama is an optional local provider. |
 | Agent tool loop | Working and tested | `src/main/agent/executor.ts` runs bounded model/tool turns, enforces mode and stop policy, and validates model arguments. It is one active run at a time. Planning is implicit in model tool calls; there is no separately persisted plan object. |
 | Durable tasks and restart recovery | Implemented and unit tested | `TaskStore` persists validated SQLite snapshots and transition summaries. Active or paused tasks restore as paused with a recovery note; old approvals and call stacks are not resumed. Recovery is review-and-restart, not continuation from a serialized instruction pointer. |
@@ -27,10 +27,12 @@
 | Pause and cancellation | Working in unit tests; live worker coverage incomplete | Agent, tool deadlines, browser closure, Python worker, child processes, voice worker and the native helper process accept cancellation or bounded termination. Cancellation cannot undo an external action that already completed. |
 | Approval policy | Working and unit tested | Main-process policy gates state changes. High-risk grants are single-use. Medium-or-lower persistent grants require a target scope; scopes currently cover app, browser navigation origin and document-index directory. Grants live in memory and reset on restart. |
 | Prompt-injection boundaries | Partially implemented | System instructions and file/document result framing treat retrieved content as untrusted; browser network policy blocks private destinations. A model may still be influenced by malicious content, so consequential actions still require main-process authorization and user approval. |
-| Browser | Implemented and automated suite verified | Playwright session, visible DOM snapshot, CSS actions, screenshots, URL verification, private-address checks, per-request routing and post-connect address checks exist. All 22 browser tests passed after Chromium installation and allowing the test browser to reach its local loopback fixture. DNS rebinding is detected after Chromium connects; preventing the connection itself would require a controlled egress proxy. |
+| Browser automation | Implemented; unit and integration tests depend on Chromium | Playwright session, visible DOM snapshot, CSS actions, screenshots, URL verification, private-address checks, per-request routing and post-connect address checks exist. In the current checkpoint, Chromium-dependent tests were skipped because the browser was unavailable. DNS rebinding is detected after Chromium connects; preventing the connection itself would require a controlled egress proxy. |
+| Persistent chat history and Recent Chats | Implemented; Windows restart acceptance unverified | Main-process history owns conversation IDs and trusted context retrieval. Sanitized user/assistant transcripts are stored through the existing HistoryStore when `privacy.persistHistory` is enabled; disabled/failed persistence uses a bounded session-only map. Recent Chats supports search, project scope, paging, create, restore, rename and confirmed delete/clear. Reasoning, tool records and image payloads are excluded. |
+| Explicit web search | Implemented; system-browser GUI acceptance unverified | Clear search commands are parsed before model invocation; ordinary questions are not treated as searches. Query URLs use a configured Google, Bing or DuckDuckGo HTTPS endpoint and are opened through main-process `shell.openExternal`. Model-proposed searches use the existing approval gateway. Pixel reports launch success only; it does not read search results. |
 | Windows input and app launching | Partially implemented | Allow-listed app launch, approved `SendKeys` and a shared lease exist. `type_text` requires the exact foreground title in its approval args and rechecks it inside the Windows child process before input. A focus change can still race after that final check; no input action can be rolled back. |
 | Native Windows accessibility | Implemented; UI task acceptance unverified | The C# helper compiled. Tool contracts and timeout/cancellation/crash recovery tests pass; timeout/cancellation stop the helper tree, and unconfirmed termination quarantines it while retaining the desktop-input lease. The fixture-driven AgentExecutor harness is prepared, but this desktop session could not foreground its test form, so no real control was invoked. Visible Pixel approval-card behavior and real provider postconditions remain unverified. |
-| Cursor companion | Implemented but GUI-unverified | Settings expose stationary/cursor presentation. The main process follows the global DIP pointer with spring motion, display work-area clamping and polling only while the compact orb is visible. It pauses while expanded; focus, click-through, edge transitions and mixed-DPI behavior need desktop acceptance. |
+| Cursor companion | Implemented but GUI-unverified | Settings independently enable a separate 36 DIP transparent, non-focusable, click-through window with 28 DIP monochrome artwork. Bounded spring motion, work-area edge flipping, lifecycle hiding and resume snapping are implemented; native click-through, visual size and mixed-DPI behavior still need desktop acceptance. |
 | Screen capture and visual analysis | Implemented but unverified on desktop | On-demand screen capture and a vision-model call are connected. Capture requires approval. The Windows capture, DPI, active-window and multi-monitor paths were not exercised in a GUI session. UIA can search and invoke, but there is no end-to-end highlight/pointing overlay. |
 | Voice | Partially implemented | Local Windows System.Speech, capability probing and cancellation are present. Recognition/synthesis probe results differed by execution context during this checkpoint; capability is not fixed or assumed. Push-to-talk state logic is tested; microphone interaction was not verified in the UI. |
 | Memory | Working and tested | SQLite memory is project-scoped and supports save, search, list, correction, deletion and JSON export. Secret-like values are rejected; writes/deletes are read back. It is not the permission system. |
@@ -39,9 +41,9 @@
 | Routines and scheduler | Implemented; runtime not GUI-verified | Daily local schedules persist timezone, enabled state, idempotent occurrence keys and history. Missed occurrences are marked/skipped, interrupted work is not replayed, runs serialize, failures pause the routine, and retry is a user-confirmed one-time action. They run only while Pixel is alive. |
 | General credential vault | Missing | The DeepSeek API key is encrypted using Electron `safeStorage` (DPAPI on Windows) and is not returned to the renderer. There is no service-scoped login vault or secure form-fill broker. |
 | Audit | Working and tested | JSONL audit is persistent and redacted; task transitions have a separate SQLite event history. The complete audit/task timeline has no dedicated export or review panel. |
-| Installer and package identity | Build verified; runtime lifecycle unverified | Unpacked, ZIP, portable and NSIS outputs built successfully with publishing disabled. The appId, NSIS GUID, user-data path and repair scripts are unchanged. Installer launch, clean install, upgrade, uninstall and data preservation were not run. |
+| Installer and package identity | Previous build verified; current branch packaging blocked | Earlier unpacked/ZIP/portable/NSIS outputs were built with publishing disabled, and the existing appId, NSIS GUID, user-data path and repair scripts remain intact. The current UI Experience 2.0 package attempt failed on DNS lookup for `github.com` before output; runtime launch, clean install, upgrade, uninstall and data preservation remain unverified for this branch. |
 
-## Validation observed for this review
+## Earlier validation (before UI Experience 2.0)
 
 - `npm run typecheck`: passed for renderer and main TypeScript projects.
 - `npm test`: **651 passed, 0 failed, 0 skipped across 25 test files**. The final run included all 22 Chromium browser tests and all 9 NSIS tests. It ran with Chromium installed and outside the default sandbox because Chromium's local HTTP fixture was denied loopback access in the sandbox.
@@ -52,7 +54,24 @@
 - `npm run test:native-uia-e2e`: prepared but could not be completed here because the harmless fixture did not appear in the foreground desktop session. It stopped before invoking the control; no action is reported as passed.
 - Voice capability output varied by execution context; it is not recorded as a stable machine capability. Pixel UI/microphone behavior remains unverified.
 
-See [PIXEL_RELEASE_READINESS.md](../validation/PIXEL_RELEASE_READINESS.md) for the exact commit, artifact sizes and laptop-side validation commands. Older reports in `docs/WINDOWS-VALIDATION.md` and installer notes describe older revisions and must not be used as current test counts.
+The preceding review's counts describe its own source revision only. See
+[`PIXEL_RELEASE_READINESS.md`](../validation/PIXEL_RELEASE_READINESS.md) for the
+current checkpoint totals, package outcome and Windows acceptance limits.
+
+## Current UI Experience 2.0 validation
+
+- `npm run typecheck`: passed.
+- Focused changed-area suite: **69 passed across 8 files**.
+- Full suite: **712 passed, 0 failed, 26 skipped across 36 files (738 tests total)**. The skipped tests need Playwright Chromium, NSIS, or the opt-in Windows foreground integration.
+- A later repeat was interrupted before Vitest returned a result; the total above is the latest completed run.
+- `npm run build`: passed for main TypeScript output, esbuild sandbox preload and Vite renderer.
+- `npm run test:preload-sandbox`: blocked before the harness main-entry marker. Electron 45.2.3 exited with `2147483651` (`0x80000003`) without writing the smoke report, so this run did not execute bridge assertions. The harness now clears stale reports and records launcher metadata and Electron stderr for the next run.
+- Isolated unpacked package build: blocked before output by electron-builder `getaddrinfo ENOTFOUND github.com`; no new package was produced and existing `release` artifacts were preserved.
+- Windows GUI, packaged launch, settings/history restart behavior, browser launch, DPI and monitor behavior: unverified in this run. The Computer Use attempt ended before app selection.
+- GitHub status for the remote `main` HEAD (`0be3ba45b5b94a2018969670490a8c9b6ad8e80b`) returned no status checks, and the GitHub connector exposed no workflow run for this unpushed local branch. The CI preload-smoke failure therefore has no accessible Actions job log here. This runner's smoke failure occurs before app/preload execution; the remote cause remains unknown without its Actions log. `npm run test:preload-sandbox` remains the exact laptop/CI repro command.
+
+See [`PIXEL_WINDOWS_ACCEPTANCE.md`](../validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+for the exact UI, persistence, browser-search and packaging procedure.
 
 ## Architectural conclusion
 

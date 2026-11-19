@@ -1,0 +1,8 @@
+# Python 3.12 x64 only. Build-time dependencies; end users do not need Python.
+faster-whisper==1.2.1
+kokoro-onnx==0.6.1
+numpy==2.2.6
+onnxruntime==1.23.2
+phonemizer==3.4.1
+espeakng-loader==0.2.4
+PyInstaller==6.22.3

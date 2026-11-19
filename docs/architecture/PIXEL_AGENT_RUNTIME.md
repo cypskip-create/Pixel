@@ -37,6 +37,19 @@ flowchart TD
 
 The plan is currently the sequence of model-proposed calls. There is no separate structured plan object or independent planner approval stage.
 
+## Experience Polish 5.0 file-operation subset
+
+`src/main/files/toolset.ts` retains the existing list/read/write tools and adds
+bounded `file_search`, `file_metadata`, one-level `directory_create`,
+`file_copy` and `file_rename`. Search is capped by depth and entry count,
+skips hidden/sensitive/symlink entries, and returns metadata rather than file
+contents. The new operations are constrained to the user's home scope, use
+the existing approval gateway, avoid overwrite, and verify destination
+metadata/content before reporting success. Rename copies exclusively and
+verifies the destination before source deletion; a failed copy verification
+leaves the source intact. Clipboard orchestration and additional unrestricted
+application-control interfaces were not added in this checkpoint.
+
 ## Durable state and restart behavior
 
 SQLite migration 6 includes task snapshots/events, project memories, versioned skills and durable routine occurrences. Each task snapshot is Zod-validated, written transactionally with a compact status/step event, and redacted before storage. A malformed task row is skipped rather than preventing other rows from loading.
@@ -53,7 +66,15 @@ Task snapshots preserve a sanitized request and result, step metadata, budget co
 - Browser actions share a session and close it during cancellation/shutdown. Actions already completed on a website or in Windows cannot be rolled back.
 - The native C# helper is attached to `ToolExecutors`. It observes the foreground title and bounded UIA name/AutomationId matches, and it can invoke only one exact, unique, enabled `InvokePattern` element in the same foreground window named in the approval. Every invocation includes an expected exact visible UIA control state (`present` or `absent`); the helper confirms that state did not already hold before activation. `verify_ui_state` checks the postcondition in the same exact foreground window. Incomplete UIA trees fail closed. The helper does not type or click by coordinates.
 - `DesktopInputLease` serializes `type_text` and `invoke_ui_element`. Text entry requires an expected window title and checks it inside the Windows input process immediately before sending. A focus change can still race after that check.
-- The optional cursor presentation uses the shared spring and work-area placement functions only while the collapsed orb is visible. It pauses while expanded and does not create a second overlay window.
+- The optional cursor companion uses bounded shared spring and work-area placement functions in an independent 36 DIP transparent, non-focusable, click-through BrowserWindow; its pointer artwork is 28 DIP. It is hidden while the Island is expanded/hidden, a Pixel Settings or Workspace window is visible, or the session is locked/suspended. Resume snaps to the current pointer. It does not use desktop input or screen capture.
+
+## Screen observation and visual guidance
+
+- `analyze_screen` reuses the screen permission path and returns capture identity, time, target bounds, display ID, scale and actual pixel dimensions. Window capture uses the native helper's exact opaque window reference; display/region capture correlates by Electron display ID. Regions use global virtual-desktop DIP and cross-display or stale-layout requests fail instead of guessing.
+- `find_ui_elements` returns accessibility-backed controls with source and observation time. Vision descriptions are labeled as model interpretation, not UIA verification. Empty vision output and failed capture are errors. A provider without image support returns unavailable rather than fabricated analysis.
+- `screen_highlight_control` requires a complete selected-window identity and one exact, unique UI Automation name or AutomationId. It draws only the current accessible control bounds in a separate, transparent, sandboxed, passive window. The user must approve the high-risk guidance request. The tool never clicks or types; `screen_clear_annotations` is narrowly scoped and safe.
+- The overlay repeatedly validates the target, foreground state and control bounds, expires within 3–30 seconds and clears on stale targets, lock and emergency stop. It receives a narrow typed update subscription only; it has no native handle, unrestricted IPC or window-creation API.
+- Unit/build evidence is recorded in `PROGRESS.md`. The native foreground integration currently fails in this environment before capture with `The observed window or process is no longer available`; the real Pixel GUI and annotation workflow remain unverified until target-laptop acceptance passes.
 
 ## Runtime ceilings
 
