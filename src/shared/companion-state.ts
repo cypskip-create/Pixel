@@ -26,14 +26,14 @@ export interface CompanionStateSignals {
 /** Resolve one authoritative visual state from current UI/runtime signals. */
 export function deriveAssistantState(input: CompanionStateSignals): AssistantState {
   if (input.stopped) return 'stopped';
+  if (input.error || input.taskOutcome === 'error') return 'error';
   if (input.permission) return 'waiting_for_approval';
-  if (input.error) return 'error';
-  if (input.pointing) return 'pointing';
-  if (input.executing) return 'executing';
   if (input.listening) return 'listening';
-  if (input.transcribing) return 'transcribing';
   if (input.speaking) return 'speaking';
+  if (input.executing) return 'executing';
+  if (input.pointing) return 'pointing';
+  if (input.transcribing) return 'transcribing';
   if (input.streaming) return input.hasAnswer ? 'responding' : 'thinking';
-  if (input.taskOutcome) return input.taskOutcome;
+  if (input.taskOutcome === 'success') return 'success';
   return 'idle';
 }

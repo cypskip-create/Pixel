@@ -16,7 +16,6 @@ import { MemoryPanel } from '@/components/MemoryPanel';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelBoard } from '@/components/PixelBoard';
 import { PixelMark } from '@/components/PixelMark';
-import { PixMascot } from '@/components/PixMascot';
 import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
@@ -447,8 +446,6 @@ export function Workspace(): React.JSX.Element {
               canSearch={bridge.kind === 'ready' && Boolean(chat.conversationId)}
               hasTaskDetails={activeTask !== null}
               onOpenTaskDetails={() => setContextOpen(true)}
-              assistantState={assistantState}
-              reducedMotion={settings.companion.reducedMotion}
             />
             {pendingApproval}
             {activeTask ? <WorkspaceTaskActivity task={activeTask} onOpenDetails={() => setContextOpen(true)} /> : null}
@@ -469,12 +466,11 @@ export function Workspace(): React.JSX.Element {
               }}
               aria-label="Conversation"
             >
-              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><PixMascot size={108} state="idle" reducedMotion={settings.companion.reducedMotion} decorative className="workspace-empty-mascot" /><h2>What can Pixel help with?</h2></div> : null}
+              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><h2>What can Pixel help with?</h2></div> : null}
               {chat.messages.map((message) => <article key={message.id} className={`workspace-message ${message.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
-                {message.role === 'assistant' ? <div className="workspace-message-mark"><PixMascot size={22} state="idle" animate={false} reducedMotion decorative /></div> : null}
                 <div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>{message.role === 'user' ? 'You' : 'Pixel'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{message.aborted ? <span>Stopped</span> : null}</div>{message.error && !message.content ? <p role="alert" className="text-neutral-200">{message.error}</p> : <MarkdownMessage text={message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')} />}{message.error && message.content ? <p role="alert" className="mt-2 text-neutral-200">{message.error}</p> : null}</div>
               </article>)}
-              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="workspace-message-mark"><PixMascot size={22} state="thinking" animate={false} reducedMotion decorative /></div><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
+              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
               {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
             </div>
             <WorkspacePixPlay state={assistantState} reducedMotion={settings.companion.reducedMotion} />
@@ -528,7 +524,52 @@ function TasksView({ tasks, audit, onAction, onContinue }: { tasks: TaskRecord[]
 }
 
 function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element {
-  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Tools</h1><p>Available tools.</p></div><div className="workspace-tool-grid">{tools.map((tool) => <article key={tool.name} className="workspace-tool-card"><header><Wrench size={15} /><strong>{tool.name}</strong><span className={`risk risk-${tool.risk}`}>{tool.risk}</span></header><p>{tool.description}</p><footer>{tool.category}{tool.changesState ? ' · changes state' : ' · read only'}{tool.requiresApproval ? ' · approval required' : ''}</footer></article>)}</div></section>;
+  const categories: Array<{ id: ToolCatalogEntry['category']; title: string }> = [
+    { id: 'screen', title: 'Screen' },
+    { id: 'input', title: 'Computer control' },
+    { id: 'browser', title: 'Browser' },
+    { id: 'files', title: 'Files' },
+    { id: 'documents', title: 'Documents' },
+    { id: 'board', title: 'Pixel Board' },
+    { id: 'system', title: 'System' },
+    { id: 'memory', title: 'Memory' },
+    { id: 'code', title: 'Code' },
+  ];
+  const capabilityNotes = [
+    { title: 'Desktop drawing editor', status: 'Partial', detail: 'Pixel can show passive highlights and arrows on verified accessible controls. Freehand desktop editing and saved overlay sessions are not available.' },
+    { title: 'File organization', status: 'Partial', detail: 'Scoped list, search, metadata, read, write, create, copy and single-file rename/move are available. Batch previews, duplicate detection and Recycle Bin recovery are not available.' },
+    { title: 'Document creation', status: 'Partial', detail: 'Documents can be indexed and searched. There is no direct document authoring or editing tool.' },
+    { title: 'Workflow recording', status: 'Partial', detail: 'Saved workflow and local routine infrastructure exists. A live semantic recorder integrated with normal tasks is not available.' },
+    { title: 'Specialist delegation', status: 'Partial', detail: 'The bounded coordinator exists but is not connected to live conversation execution. Infrastructure and Pixel Code specialists are unavailable.' },
+    { title: 'Clipboard access', status: 'Unavailable', detail: 'Pixel does not read, monitor, or write the Windows clipboard through agent tools.' },
+    { title: 'Expanded system diagnostics', status: 'Partial', detail: 'CPU, memory, disk, uptime and display facts are available. Network adapter, running-app, selected-process and audio-device diagnostics are not available.' },
+  ];
+  return <section className="workspace-page">
+    <div className="workspace-page-heading"><h1>Tools</h1><p>Registered capabilities and their prerequisites. Runtime-dependent tools are checked again when used.</p></div>
+    {tools.length === 0 ? <div className="workspace-empty-card">No agent tools are registered in this build.</div> : categories.map((category) => {
+      const members = tools.filter((tool) => tool.category === category.id);
+      if (members.length === 0) return null;
+      return <section className="workspace-tool-group" key={category.id} aria-label={`${category.title} tools`}>
+        <h2 className="workspace-section-title">{category.title}<span>{members.length}</span></h2>
+        <div className="workspace-tool-grid">{members.map((tool) => <article key={tool.name} className="workspace-tool-card">
+          <header><Wrench size={15} /><strong>{tool.name.replaceAll('_', ' ')}</strong><span className={`risk risk-${tool.risk}`}>{tool.risk}</span></header>
+          <p>{tool.description}</p>
+          <footer>{tool.changesState ? 'Changes computer or document state' : 'Read only'} · {tool.requiresApproval ? 'Approval may be required' : 'No approval required by tool policy'}</footer>
+          {tool.dependency ? <small className={`workspace-tool-availability availability-${tool.availability ?? 'not_checked'}`}>
+            {tool.availability === 'ready' ? 'Dependency verified' : tool.availability === 'unavailable' ? 'Currently unavailable' : tool.availability === 'not_checked' ? 'Checked when first used' : 'Conditional · checked when used'} · {tool.dependency}
+          </small> : null}
+          {tool.availabilityReason ? <small className="workspace-tool-unavailable-reason">{tool.availabilityReason}</small> : null}
+        </article>)}</div>
+      </section>;
+    })}
+    <section className="workspace-tool-group" aria-label="Partial and unavailable capabilities">
+      <h2 className="workspace-section-title">Partial or unavailable</h2>
+      <div className="workspace-tool-gap-grid">{capabilityNotes.map((item) => <article className="workspace-tool-gap" key={item.title}>
+        <header><strong>{item.title}</strong><span className={`workspace-capability-status status-${item.status.toLowerCase()}`}>{item.status}</span></header>
+        <p>{item.detail}</p>
+      </article>)}</div>
+    </section>
+  </section>;
 }
 
 function mergeTask(current: TaskRecord[], next: TaskRecord): TaskRecord[] {

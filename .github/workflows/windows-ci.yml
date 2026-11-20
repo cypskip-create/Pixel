@@ -56,17 +56,72 @@ jobs:
       - name: Install NSIS for installer integration tests
         shell: pwsh
         run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis --yes --no-progress --limit-output 2>&1 | Tee-Object artifacts/logs/nsis-install.log
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $knownNsisPaths = @('C:\Program Files (x86)\NSIS', 'C:\Program Files\NSIS')
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $makensis) {
+            foreach ($candidate in $knownNsisPaths) {
+              $exe = Join-Path $candidate 'makensis.exe'
+              if (Test-Path -LiteralPath $exe) { $makensis = Get-Item -LiteralPath $exe; break }
+            }
           }
-          $nsisPath = 'C:\Program Files (x86)\NSIS'
-          if (Test-Path (Join-Path $nsisPath 'makensis.exe')) {
-            Add-Content -Path $env:GITHUB_PATH -Value $nsisPath
-            $env:PATH = "$env:PATH;$nsisPath"
+          if (-not $makensis) {
+            $installExit = 1
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Write-Host "Installing NSIS with Chocolatey (attempt $attempt of 3)."
+              choco install nsis --yes --no-progress --limit-output 2>&1 | Tee-Object -FilePath artifacts/logs/nsis-install-attempt-$attempt.log
+              $installExit = $LASTEXITCODE
+              if ($installExit -eq 0) { break }
+              foreach ($candidate in $knownNsisPaths) {
+                $exe = Join-Path $candidate 'makensis.exe'
+                if (Test-Path -LiteralPath $exe) { $makensis = Get-Item -LiteralPath $exe; break }
+              }
+              if ($makensis) { break }
+              if ($attempt -lt 3) {
+                $delay = [Math]::Min(120, 15 * [Math]::Pow(2, $attempt - 1))
+                Write-Warning "NSIS feed/install failed (exit $installExit). Retrying in $delay seconds."
+                Start-Sleep -Seconds $delay
+              }
+            }
+            if (-not $makensis) {
+              $fallbackVersion = '3.11'
+              $fallbackUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
+              $fallbackPath = Join-Path $env:RUNNER_TEMP 'nsis-3.11-setup.exe'
+              $expectedHash = '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a'
+              Write-Warning "Chocolatey provisioning failed; using the official NSIS $fallbackVersion SourceForge release with pinned SHA-256 verification."
+              try {
+                Invoke-WebRequest -Uri $fallbackUrl -OutFile $fallbackPath -MaximumRedirection 10
+                $actualHash = (Get-FileHash -LiteralPath $fallbackPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actualHash -ne $expectedHash) { throw "Official NSIS $fallbackVersion checksum mismatch: $actualHash" }
+                $installer = Start-Process -FilePath $fallbackPath -ArgumentList '/S' -Wait -PassThru
+                if ($installer.ExitCode -ne 0) { throw "Official NSIS installer exited with code $($installer.ExitCode)." }
+                foreach ($candidate in $knownNsisPaths) {
+                  $exe = Join-Path $candidate 'makensis.exe'
+                  if (Test-Path -LiteralPath $exe) { $makensis = Get-Item -LiteralPath $exe; break }
+                }
+              } catch {
+                $_ | Out-String | Tee-Object -FilePath artifacts/logs/nsis-install-fallback.log | Write-Host
+                throw "Chocolatey NSIS provisioning and the checksum-verified official fallback both failed. See artifacts/logs/nsis-install-attempt-*.log and nsis-install-fallback.log."
+              }
+            }
+            if (-not $makensis) {
+              throw "NSIS installation returned without a usable makensis.exe after bounded retries (last Chocolatey exit $installExit). See artifacts/logs/nsis-install-attempt-*.log."
+            }
           }
-          makensis /VERSION 2>&1 | Tee-Object artifacts/logs/nsis-version.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($makensis) { $nsisExe = $makensis.Source }
+          else {
+            $nsisExe = $null
+            foreach ($candidate in $knownNsisPaths) {
+              $exe = Join-Path $candidate 'makensis.exe'
+              if (Test-Path -LiteralPath $exe) { $nsisExe = $exe; break }
+            }
+          }
+          if (-not $nsisExe) { throw 'NSIS installation returned success but makensis.exe is not present in PATH or a standard install directory.' }
+          $nsisPath = Split-Path -Parent $nsisExe
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisPath
+          $env:PATH = "$env:PATH;$nsisPath"
+          & $nsisExe /VERSION 2>&1 | Tee-Object artifacts/logs/nsis-version.log
+          if ($LASTEXITCODE -ne 0) { throw "makensis version check failed with exit code $LASTEXITCODE." }
 
       - name: Type check
         shell: pwsh

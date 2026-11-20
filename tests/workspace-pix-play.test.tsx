@@ -3,7 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkspacePixPlay } from '../src/renderer/components/WorkspacePixPlay';
+import { choosePixPetActivity, WorkspacePixPlay } from '../src/renderer/components/WorkspacePixPlay';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | null = null;
@@ -26,18 +26,40 @@ function mount(state: 'idle' | 'listening', reducedMotion = false): void {
 }
 
 describe('Workspace Pix play lane', () => {
-  it('plays briefly inside its lane while idle and cancels immediately on assistant activity', () => {
+  it('runs one bounded idle behavior and cancels immediately on assistant activity', () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     mount('idle');
     const lane = host?.querySelector('.workspace-pix-play');
     expect(lane?.getAttribute('data-playing')).toBe('false');
     act(() => vi.advanceTimersByTime(24_000));
-    expect(lane?.getAttribute('data-playing')).toBe('true');
+    expect(lane?.getAttribute('data-activity')).toBe('looking');
+    act(() => document.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(lane?.getAttribute('data-activity')).toBe('idle');
     expect(lane?.querySelector('.workspace-pix-ball')).not.toBeNull();
     act(() => root?.render(createElement(WorkspacePixPlay, { state: 'listening', reducedMotion: false })));
     expect(lane?.getAttribute('data-playing')).toBe('false');
-    expect(vi.getTimerCount()).toBe(0);
+    expect(lane?.getAttribute('data-activity')).toBe('idle');
+  });
+
+  it('selects sleep only after prolonged inactivity and avoids repeating the same activity', () => {
+    expect(choosePixPetActivity(180_000, () => 0, 'looking')).toBe('sleeping');
+    expect(choosePixPetActivity(0, () => 0, 'looking')).not.toBe('looking');
+    expect(choosePixPetActivity(180_000, () => 0, 'sleeping')).not.toBe('sleeping');
+    expect(choosePixPetActivity(60_000, () => 0, 'sitting')).toBe('lying');
+  });
+
+  it('sleeps after real inactivity and wakes on the next interaction', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    mount('idle');
+    act(() => vi.advanceTimersByTime(220_000));
+    const lane = host?.querySelector('.workspace-pix-play');
+    expect(lane?.getAttribute('data-activity')).toBe('sleeping');
+    act(() => document.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(lane?.getAttribute('data-activity')).toBe('waking');
+    act(() => vi.advanceTimersByTime(900));
+    expect(lane?.getAttribute('data-activity')).toBe('idle');
   });
 
   it('does not schedule play when reduced motion is enabled', () => {

@@ -26,7 +26,7 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'file_list',
     description: 'Lists one directory (not recursively) in the current user home folder. Use only folders the user named. Requires approval for this exact path.',
-    category: 'code',
+    category: 'files',
     risk: 'high',
     requiresApproval: true,
     changesState: false,
@@ -43,7 +43,7 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'file_read',
     description: 'Reads a bounded UTF-8 text excerpt from one file in the current user home folder. Use only files needed for the user’s request; credential and key files are blocked. Requires approval for this exact path.',
-    category: 'code',
+    category: 'files',
     risk: 'high',
     requiresApproval: true,
     changesState: false,
@@ -60,7 +60,7 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'file_search',
     description: 'Searches a bounded directory tree under the current user home folder by file name and optional extension. It skips hidden items, symlinks, and sensitive credential-like names. Requires approval for the exact search root and filters.',
-    category: 'code', risk: 'high', requiresApproval: true, changesState: false,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: false,
     parameters: {
       type: 'object',
       properties: {
@@ -75,13 +75,13 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'file_metadata',
     description: 'Reads size, type and last-modified time for one regular file under the current user home folder. Does not read its contents. Requires approval for this exact path.',
-    category: 'code', risk: 'high', requiresApproval: true, changesState: false,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: false,
     parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute file path under the user home folder.' } }, required: ['path'], additionalProperties: false },
   },
   {
     name: 'file_write',
     description: 'Writes UTF-8 text to one file in the current user home folder. Never creates directories. Existing files are refused unless overwrite is explicitly true. Requires approval for this exact write.',
-    category: 'code',
+    category: 'files',
     risk: 'high',
     requiresApproval: true,
     changesState: true,
@@ -99,13 +99,13 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'directory_create',
     description: 'Creates one new directory under the current user home folder. Its parent must already exist and the destination must not exist. Requires fresh approval and verifies the directory afterward.',
-    category: 'code', risk: 'high', requiresApproval: true, changesState: true,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
     parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute new directory path under the user home folder.' } }, required: ['path'], additionalProperties: false },
   },
   {
     name: 'file_copy',
     description: 'Copies one regular file under the current user home folder to a new destination. It never overwrites, follows symlinks, or copies credential-like files, and caps file size. Requires fresh approval and verifies SHA-256 after copying.',
-    category: 'code', risk: 'high', requiresApproval: true, changesState: true,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
     parameters: {
       type: 'object', properties: {
         source: { type: 'string', description: 'Absolute source file path under the user home folder.' },
@@ -116,7 +116,7 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'file_rename',
     description: 'Moves or renames one regular file to a new path under the current user home folder. The destination must not exist. It will not delete data or overwrite files. Requires fresh approval and verifies the source is gone and destination content matches.',
-    category: 'code', risk: 'high', requiresApproval: true, changesState: true,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
     parameters: {
       type: 'object', properties: {
         source: { type: 'string', description: 'Absolute source file path under the user home folder.' },

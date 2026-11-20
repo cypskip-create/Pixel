@@ -1475,14 +1475,34 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.auditList, (_event, limit?: number): AuditEntry[] =>
     audit.list(typeof limit === 'number' ? limit : 100),
   );
-  registerHandler(CHANNELS.toolsList, (): ToolCatalogEntry[] => toolRegistry.list().map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    category: tool.category,
-    risk: tool.risk,
-    requiresApproval: tool.requiresApproval,
-    changesState: tool.changesState,
-  })));
+  registerHandler(CHANNELS.toolsList, (): ToolCatalogEntry[] => {
+    const native = context.nativeHelper.available();
+    const python = pythonWorker.availability();
+    return toolRegistry.list().map((tool) => {
+      const entry: ToolCatalogEntry = {
+        name: tool.name,
+        description: tool.description,
+        category: tool.category,
+        risk: tool.risk,
+        requiresApproval: tool.requiresApproval,
+        changesState: tool.changesState,
+        availability: 'ready',
+      };
+      if (tool.category === 'screen' || tool.category === 'input') {
+        entry.availability = native.available ? 'conditional' : 'unavailable';
+        entry.dependency = 'PixelNative executable (health checked when used)';
+        if (!native.available) entry.availabilityReason = native.reason;
+      } else if (tool.name.startsWith('browser_')) {
+        entry.availability = 'not_checked';
+        entry.dependency = 'Playwright Chromium (checked when first used)';
+      } else if (tool.name === 'documents_index') {
+        entry.availability = python.available ? 'conditional' : 'unavailable';
+        entry.dependency = 'Python executable and document worker (checked when used)';
+        if (!python.available) entry.availabilityReason = python.reason;
+      }
+      return entry;
+    });
+  });
 
   /* -------------------------------- app ------------------------------ */
 

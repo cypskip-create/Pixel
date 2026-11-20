@@ -1,5 +1,37 @@
 # Pixel implementation handoff
 
+## Current Core Tools 6.0 audit and repairs
+
+Reviewed local `main` base: `d538c1044c9f6c4a0e7edc8073877436cae8dc4f`.
+Changes are uncommitted; no push or workflow run was made.
+
+- Pix now appears in Workspace only beside the composer; Dynamic Island Pix is
+  retained. Added a cancellable, reduced-motion/hidden-aware idle activity
+  scheduler and corrected live expression priority. Focused Pix/state tests
+  cover interruption, sleep, wake, and state conflicts.
+- Tools now have distinct Files/Documents categories. The Tools page groups
+  registered functions and shows relevant dependency checks, approval behavior,
+  and an explicit partial/unavailable list. See
+  [`docs/validation/PIXEL_CORE_TOOLS_6_AUDIT.md`](docs/validation/PIXEL_CORE_TOOLS_6_AUDIT.md)
+  for the complete capability matrix and gaps.
+- Windows CI has bounded Chocolatey retries and a pinned-hash official NSIS
+  fallback for the observed HTTP 503 failure. YAML/PowerShell parsing passed;
+  hosted CI has not rerun, so recovery is not verified.
+- Validation: typecheck and production build passed; Vitest **862 passed, 27
+  skipped, 0 failed**; Python worker **12/12**; native helper compiled and its
+  protocol smoke passed. Browser/NSIS tests skipped because Chromium/`makensis`
+  are absent. Sandboxed Electron smoke still exits `0x80000003` before its
+  report; development launch still cannot bind port 5199. No real Windows UI,
+  installer, screenshot, or live agent acceptance is claimed.
+- Remaining scope is substantial: no clipboard agent tools, freehand desktop
+  annotation/editor, screen-to-Board asset flow, full document authoring,
+  semantic workflow recorder, connected specialist delegation, broad system
+  diagnostics, or generalized critical-risk policy. Existing Board, file,
+  screen, browser, voice, memory, permission, and task code is documented by
+  verified and unverified status in the capability matrix.
+
+---
+
 ## Current follow-up — voice development runtime, composer Pix and navigation
 
 Reviewed base: `8ed850fbb3b2f1d550e7f246d916a99491da3fc9` on `main`.

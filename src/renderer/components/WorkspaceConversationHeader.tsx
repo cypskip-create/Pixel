@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, MoreHorizontal, Search, X } from 'lucide-react';
-import type { AssistantState, Mode } from '@shared/types';
+import type { Mode } from '@shared/types';
 import { CompactModeSelector } from '@/components/CompactModeSelector';
-import { WorkspaceCharacter } from '@/components/WorkspaceCharacter';
 
 interface WorkspaceConversationHeaderProps {
   title: string;
@@ -13,15 +12,11 @@ interface WorkspaceConversationHeaderProps {
   canSearch: boolean;
   hasTaskDetails: boolean;
   onOpenTaskDetails: () => void;
-  assistantState: AssistantState;
-  reducedMotion?: boolean;
 }
 
 export function WorkspaceConversationHeader({
   title, projectName, currentMode, onRequestMode, onSearchWeb, canSearch,
   hasTaskDetails, onOpenTaskDetails,
-  assistantState,
-  reducedMotion = false,
 }: WorkspaceConversationHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -86,7 +81,6 @@ export function WorkspaceConversationHeader({
   return (
     <header className="workspace-chat-heading" data-conversation-header>
       <div className="workspace-conversation-title">
-        <WorkspaceCharacter state={assistantState} reducedMotion={reducedMotion} />
         <h1 title={title}>{title}</h1>
         {projectName ? <span>{projectName}</span> : null}
       </div>

@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Brain, ChevronRight, Square, X } from 'lucide-react';
-import type { AssistantState, ChatMessage } from '@shared/types';
-import { PixMascot } from '@/components/PixMascot';
+import type { ChatMessage } from '@shared/types';
 
 interface ConversationTranscriptProps {
   messages: ChatMessage[];
   content: string;
   reasoning: string;
   streaming: boolean;
-  assistantState: AssistantState;
-  reducedMotion?: boolean;
   error: string | null;
   persistence: 'persistent' | 'session';
   onStop: () => void;
@@ -21,8 +18,6 @@ export function ConversationTranscript({
   content,
   reasoning,
   streaming,
-  assistantState,
-  reducedMotion = false,
   error,
   persistence,
   onStop,
@@ -48,7 +43,7 @@ export function ConversationTranscript({
       <div ref={scrollRef} onScroll={handleScroll} className="selectable min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
         {messages.map((message) => (
           <article key={message.id} className={message.role === 'user' ? 'ml-7 rounded-xl bg-neutral-300/10 px-2.5 py-2' : 'mr-3 rounded-xl bg-white/5 px-2.5 py-2'}>
-            <div className="mb-1 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]">{message.role === 'assistant' ? <PixMascot size={16} state="idle" animate={false} reducedMotion decorative /> : null}<span>{message.role === 'user' ? 'You' : 'Pixel'}{message.aborted ? ' · Stopped' : ''}</span></div>
+            <div className="mb-1 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]"><span>{message.role === 'user' ? 'You' : 'Pixel'}{message.aborted ? ' · Stopped' : ''}</span></div>
             {message.error && !message.content ? <p role="alert" className="text-[11px] text-neutral-200">{message.error}</p> : null}
             <p className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-[var(--color-ink)]">{message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')}</p>
             {message.error && message.content ? <p role="alert" className="mt-1 text-[10px] text-neutral-200">{message.error}</p> : null}
@@ -56,7 +51,7 @@ export function ConversationTranscript({
         ))}
         {streaming ? (
           <article className="mr-3 rounded-xl bg-white/5 px-2.5 py-2">
-            <div className="mb-1 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]"><PixMascot size={18} state={assistantState} reducedMotion={reducedMotion} decorative /><span>Pixel · Responding</span></div>
+            <div className="mb-1 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]"><span>Pixel · Responding</span></div>
             {reasoning.trim() ? (
               <details open={reasoningOpen} onToggle={(event) => setReasoningOpen(event.currentTarget.open)} className="mb-1.5 border-b border-white/8 pb-1.5">
                 <summary className="flex cursor-pointer list-none items-center gap-1 text-[10px] text-neutral-200">

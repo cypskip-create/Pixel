@@ -19,7 +19,6 @@ function mount(content: string): HTMLDivElement {
       content={content}
       reasoning=""
       streaming
-      assistantState="thinking"
       error={null}
       persistence="persistent"
       onStop={vi.fn()}
@@ -45,7 +44,7 @@ describe('transcript streaming scroll', () => {
     Object.defineProperty(scroll, 'scrollHeight', { configurable: true, value: 500 });
     Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 200 });
     act(() => root?.render(
-      <ConversationTranscript messages={[]} content="more tokens" reasoning="" streaming assistantState="thinking" error={null}
+      <ConversationTranscript messages={[]} content="more tokens" reasoning="" streaming error={null}
         persistence="persistent" onStop={vi.fn()} onDismiss={vi.fn()} />,
     ));
     expect(scroll.scrollTop).toBe(500);
@@ -55,7 +54,7 @@ describe('transcript streaming scroll', () => {
       scroll.dispatchEvent(new Event('scroll'));
     });
     act(() => root?.render(
-      <ConversationTranscript messages={[]} content="even more tokens" reasoning="" streaming assistantState="thinking" error={null}
+      <ConversationTranscript messages={[]} content="even more tokens" reasoning="" streaming error={null}
         persistence="persistent" onStop={vi.fn()} onDismiss={vi.fn()} />,
     ));
     expect(scroll.scrollTop).toBe(100);

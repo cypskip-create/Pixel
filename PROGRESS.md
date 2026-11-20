@@ -1,6 +1,57 @@
 # Pixel progress
 
-Updated: 2026-11-19. Version: 0.2.1.
+Updated: 2026-11-20. Version: 0.2.1.
+
+## Core Tools 6.0 regression audit and focused repairs
+
+Reviewed latest local `main` base: `d538c1044c9f6c4a0e7edc8073877436cae8dc4f`.
+All work in this section is local and uncommitted; no commit, push, or CI run
+was created.
+
+- **Pix placement:** removed Pix from the Workspace conversation header, empty
+  state, historical assistant messages, streaming messages, and response and
+  transcript surfaces. Exactly the composer pet remains in Workspace; the
+  Dynamic Island retains its separately state-driven Pix.
+- **Pix activity and state priority:** replaced the one-off play boolean with
+  a bounded idle behavior scheduler for looking, sitting, lying, sleeping,
+  waking, stretching, walking, exploring, ball play, jumping, waving, thinking,
+  and resting. It cancels for live assistant work, reduced motion, hidden
+  documents and unmount; input wakes sleeping Pix. Shared assistant-state
+  priority now puts stop/error/approval/listening/speaking/working ahead of
+  idle activity and honors errors before pending approval.
+- **Tool catalog:** file and document tools now use distinct categories. The
+  Tools page groups registered capabilities, shows approval/state-change
+  behavior, reports the Windows UIA helper and Python document runtime when
+  checked, marks Playwright as checked on first use, and lists known partial
+  and unavailable capability families without presenting them as ready.
+- **Windows CI recovery:** the failed run
+  [`44603748589`](https://github.com/cypskip-create/Pixel/actions/runs/44603748589)
+  failed after Chocolatey’s NSIS feed returned HTTP 503 and `makensis` was
+  absent. Windows CI now checks standard runner locations, retries Chocolatey
+  three times with bounded backoff, then verifies the official NSIS 3.11
+  installer against a pinned SHA-256 before fallback installation. The YAML
+  and PowerShell step parse locally; the fallback and a new hosted workflow
+  have not run.
+- **Capability audit:**
+  [`PIXEL_CORE_TOOLS_6_AUDIT.md`](docs/validation/PIXEL_CORE_TOOLS_6_AUDIT.md)
+  records code-tested, partial, missing, and Windows-unverified capabilities.
+  Board tools are in the model schema and dispatcher and have service/agent
+  tests; no live DeepSeek diagram run was available. Desktop drawing remains
+  passive verified-control guidance, not a freehand editor. Clipboard tools,
+  live workflow recording, broad diagnostics, and live specialist delegation
+  remain missing or partial as detailed in that matrix.
+- **Validation:** `npm run typecheck` passed; `npm run build` passed; full
+  Vitest **862 passed, 0 failed, 27 skipped (889 total; 61 test files passed,
+  1 skipped)**; Python worker tests **12/12 passed**; `npm run build:native`
+  compiled PixelNative and completed its protocol smoke. `git diff --check`,
+  workflow YAML parsing, and PowerShell AST parsing passed. Browser tests
+  skipped because Playwright Chromium is absent; NSIS tests skipped because
+  `makensis` is absent. The sandboxed Electron preload smoke exited with
+  `2147483651` (`0x80000003`) before writing its report. `npm run dev` could
+  not bind the fixed Vite port 5199. Therefore no Windows GUI, packaged app,
+  installer, visual screenshot, live UIA, TTS/STT, or end-to-end agent acceptance
+  is claimed. Latest supplied Windows Actions evidence remains the failed
+  NSIS-provisioning run; these local changes are not CI-verified.
 
 ## Follow-up — voice setup, composer Pix and navigation consolidation
 

@@ -14,7 +14,7 @@ export const DOCUMENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     name: 'documents_index',
     description:
       'Indexes a folder so its documents can be searched. Only folders the user names may be indexed.',
-    category: 'memory',
+    category: 'documents',
     risk: 'medium',
     requiresApproval: true,
     changesState: true,
@@ -31,7 +31,7 @@ export const DOCUMENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     name: 'documents_search',
     description:
       'Searches the indexed documents of this project and returns matching passages with their file paths.',
-    category: 'memory',
+    category: 'documents',
     risk: 'safe',
     requiresApproval: false,
     changesState: false,
@@ -48,7 +48,7 @@ export const DOCUMENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'documents_list',
     description: 'Lists the documents currently indexed for this project.',
-    category: 'memory',
+    category: 'documents',
     risk: 'safe',
     requiresApproval: false,
     changesState: false,

@@ -823,6 +823,8 @@ export type ToolCategory =
   | 'browser'
   | 'memory'
   | 'board'
+  | 'files'
+  | 'documents'
   | 'code';
 
 export interface ToolDefinition {
@@ -845,6 +847,10 @@ export interface ToolCatalogEntry {
   risk: RiskLevel;
   requiresApproval: boolean;
   changesState: boolean;
+  /** Live dependency state when it can be checked without starting a service. */
+  availability?: 'ready' | 'conditional' | 'unavailable' | 'not_checked';
+  dependency?: string;
+  availabilityReason?: string;
 }
 
 /* ------------------------------------------------------------------ *

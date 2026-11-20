@@ -39,12 +39,20 @@ describe('companion state', () => {
     expect(deriveAssistantState({ ...base, error: true, streaming: true })).toBe('error');
   });
 
-  it('shows only verified task outcomes as success while preserving stop and approval priority', () => {
+  it('shows only verified task outcomes as success while preserving stop, error, and approval priority', () => {
     expect(deriveAssistantState({ ...base, taskOutcome: 'success' })).toBe('success');
     expect(deriveAssistantState({ ...base, taskOutcome: 'error' })).toBe('error');
     expect(deriveAssistantState({ ...base, taskOutcome: 'success', permission: true })).toBe('waiting_for_approval');
+    expect(deriveAssistantState({ ...base, permission: true, error: true })).toBe('error');
+    expect(deriveAssistantState({ ...base, permission: true, taskOutcome: 'error' })).toBe('error');
     expect(deriveAssistantState({ ...base, taskOutcome: 'success', stopped: true })).toBe('stopped');
     expect(deriveAssistantState({ ...base, taskOutcome: 'success', streaming: true })).toBe('thinking');
+  });
+
+  it('prioritizes live listening and speech over lower-priority task activity', () => {
+    expect(deriveAssistantState({ ...base, listening: true, executing: true })).toBe('listening');
+    expect(deriveAssistantState({ ...base, speaking: true, executing: true })).toBe('speaking');
+    expect(deriveAssistantState({ ...base, transcribing: true, taskOutcome: 'success' })).toBe('transcribing');
   });
 
   it('returns to idle when no active signal remains', () => {

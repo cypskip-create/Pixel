@@ -752,6 +752,10 @@ export function toolCategoryLabel(category: ToolCategory): string {
       return 'Memory';
     case 'board':
       return 'Pixel Board';
+    case 'files':
+      return 'Files';
+    case 'documents':
+      return 'Documents';
     case 'code':
       return 'Code';
   }

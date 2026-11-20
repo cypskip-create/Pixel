@@ -1095,8 +1095,6 @@ function Companion(): React.JSX.Element {
               content={chat.content}
               reasoning={chat.reasoning}
               streaming={chat.streaming}
-              assistantState={assistantState}
-              reducedMotion={reducedMotion}
               error={chat.error}
               persistence={chat.persistence}
               onStop={chat.stop}
@@ -1109,8 +1107,6 @@ function Companion(): React.JSX.Element {
               streaming={chat.streaming}
               error={chat.error}
               spoken={speechConfirmed && !chat.streaming}
-              assistantState={compactAssistantState}
-              reducedMotion={reducedMotion}
               onCollapse={collapse}
               onStop={chat.stop}
               onDismiss={collapse}

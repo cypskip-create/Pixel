@@ -8,6 +8,10 @@ import {
   riskWeight,
 } from '../src/main/agent/tools';
 import type { PermissionGrant, ToolDefinition } from '../src/shared/types';
+import { BOARD_TOOL_DEFINITIONS } from '../src/main/board/tools';
+import { DOCUMENT_TOOL_DEFINITIONS } from '../src/main/documents/toolset';
+import { FILE_TOOL_DEFINITIONS } from '../src/main/files/toolset';
+import { MEMORY_TOOL_DEFINITIONS } from '../src/main/memory/toolset';
 
 function context(overrides: Partial<Parameters<typeof evaluateInvocation>[1]> = {}) {
   return {
@@ -146,6 +150,25 @@ describe('applyDecision', () => {
 });
 
 describe('ToolRegistry', () => {
+  it('keeps the model-facing tool catalog unique and validates every family schema', () => {
+    const definitions = [
+      ...BUILTIN_TOOLS,
+      ...BOARD_TOOL_DEFINITIONS,
+      ...MEMORY_TOOL_DEFINITIONS.filter((tool) => tool.name !== 'memory_save'),
+      ...DOCUMENT_TOOL_DEFINITIONS,
+      ...FILE_TOOL_DEFINITIONS,
+    ];
+    const names = definitions.map((tool) => tool.name);
+    expect(new Set(names).size).toBe(names.length);
+    const registry = new ToolRegistry(definitions);
+    for (const tool of definitions) {
+      expect(registry.validateArgs(tool.name, {})).not.toMatchObject({ message: expect.stringMatching(/no supported argument contract/i) });
+      expect(registry.schemasFor('agent').some((candidate) => candidate.name === tool.name)).toBe(true);
+    }
+    expect(FILE_TOOL_DEFINITIONS.every((tool) => tool.category === 'files')).toBe(true);
+    expect(DOCUMENT_TOOL_DEFINITIONS.every((tool) => tool.category === 'documents')).toBe(true);
+  });
+
   it('validates required arguments and rejects undeclared properties', () => {
     const registry = new ToolRegistry();
     expect(registry.validateArgs('open_application', { name: 'notepad' })).toEqual({ ok: true });
