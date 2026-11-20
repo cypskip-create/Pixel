@@ -33,6 +33,8 @@ export function Workspace(): React.JSX.Element {
   const { settings, hasApiKey, error: settingsError, saving, patch, setMode, saveApiKey, removeApiKey, testApiKeyConnection } = useSettings();
   const chat = useChat(settings.privacy.persistHistory);
   const [view, setView] = useState<WorkspaceView>('chat');
+  const settingsReturnView = useRef<WorkspaceView>('chat');
+  const chatScrollTop = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [windowState, setWindowState] = useState<WorkspaceWindowState>({ maximized: true, fullscreen: false });
@@ -61,6 +63,19 @@ export function Workspace(): React.JSX.Element {
   const voiceCapture = useRef<MicrophoneCapture | null>(null);
   const voiceStartup = useRef(false);
   const activeMode = settings.companion.mode;
+  const openSettings = useCallback(() => {
+    if (view !== 'settings') settingsReturnView.current = view;
+    if (view === 'chat') chatScrollTop.current = scrollRef.current?.scrollTop ?? chatScrollTop.current;
+    setView('settings');
+  }, [view]);
+  const returnFromSettings = useCallback(() => {
+    const previous = settingsReturnView.current;
+    settingsReturnView.current = 'chat';
+    setView(previous === 'settings' ? 'chat' : previous);
+  }, []);
+  useLayoutEffect(() => {
+    if (view === 'chat' && scrollRef.current) scrollRef.current.scrollTop = chatScrollTop.current;
+  }, [view]);
   const activeTask = useMemo(() => selectActiveTask(tasks), [tasks]);
   const title = chat.historyLoading ? 'Restoring conversation…' : history.find((item) => item.id === chat.conversationId)?.title ?? 'New conversation';
   const recentTaskDisplay = recentOutcome ? taskDisplayState(recentOutcome) : null;
@@ -415,7 +430,7 @@ export function Workspace(): React.JSX.Element {
       <div className="workspace-body">
         {view !== 'settings' ? <WorkspaceSidebar
           view={view}
-          onViewChange={setView}
+          onViewChange={(nextView) => nextView === 'settings' ? openSettings() : setView(nextView)}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
           history={history}
@@ -462,6 +477,7 @@ export function Workspace(): React.JSX.Element {
               ref={scrollRef}
               onScroll={(event) => {
                 const node = event.currentTarget;
+                chatScrollTop.current = node.scrollTop;
                 shouldStickToBottom.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 96;
               }}
               aria-label="Conversation"
@@ -497,7 +513,7 @@ export function Workspace(): React.JSX.Element {
           {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'tools' ? <ToolsView tools={tools} /> : null}
           {view === 'board' ? <PixelBoard emergencyStopped={stopped} /> : null}
-          {view === 'settings' ? <div className="workspace-settings"><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={() => setView('chat')} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></div> : null}
+          {view === 'settings' ? <div className="workspace-settings"><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></div> : null}
         </main>
 
         {contextOpen ? <WorkspaceTaskDetails

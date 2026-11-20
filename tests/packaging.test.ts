@@ -115,6 +115,24 @@ describe('packaging identity', () => {
   });
 });
 
+describe('Windows NSIS provisioning', () => {
+  const workflow = readFileSync(join(root, '.github', 'workflows', 'windows-ci.yml'), 'utf8');
+
+  it('rediscovers makensis after Chocolatey reports success before attempting fallback', () => {
+    const rediscovery = workflow.indexOf('# Chocolatey can exit successfully after installing NSIS');
+    const fallback = workflow.indexOf("$fallbackVersion = '3.11'", rediscovery);
+    expect(rediscovery).toBeGreaterThanOrEqual(0);
+    expect(fallback).toBeGreaterThan(rediscovery);
+    expect(workflow.slice(rediscovery, fallback)).toContain("Join-Path $candidate 'makensis.exe'");
+    expect(workflow.slice(rediscovery, fallback)).toContain('Test-Path -LiteralPath $exe');
+  });
+
+  it('keeps SHA-256 validation on the official fallback installer', () => {
+    expect(workflow).toContain("$actualHash = (Get-FileHash -LiteralPath $fallbackPath -Algorithm SHA256).Hash.ToLowerInvariant()");
+    expect(workflow).toContain('if ($actualHash -ne $expectedHash)');
+  });
+});
+
 describe('package.json', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
     name: string;

@@ -9,6 +9,7 @@ export interface StandingGrantEligibility {
 
 const ALWAYS_LAUNCHABLE_APPS = new Set(['notepad', 'calculator', 'mspaint']);
 export const SCREEN_SESSION_GRANT_TOOL = 'screen_observation_session';
+export const SCREEN_STANDING_GRANT_TOOL = 'screen_observation_app';
 const SCREEN_SESSION_TOOLS = new Set(['analyze_screen', 'find_ui_elements', 'verify_ui_state', 'screen_highlight_control', 'screen_draw_arrow']);
 
 export function isScreenSessionTool(toolName: string): boolean {
@@ -17,6 +18,24 @@ export function isScreenSessionTool(toolName: string): boolean {
 
 /** Explicit allow-list for repeatable operations that are safe to remember. */
 export function standingGrantEligibility(toolName: string, args: Record<string, unknown>): StandingGrantEligibility {
+  if (isScreenSessionTool(toolName)) {
+    if (toolName === 'analyze_screen' && args.target !== 'selected_window') {
+      return { allowed: false, target: {}, reason: 'Always Allow requires one explicitly selected application window.' };
+    }
+    const selected = selectedWindowScope(args);
+    if (!selected?.processName || !selected.windowTitle) {
+      return { allowed: false, target: {}, reason: 'Always Allow requires a selected window with a verified process name and exact title.' };
+    }
+    // HWND and PID are deliberately omitted: they change across restarts.
+    // This grant can cover only this exact process name + exact window title.
+    const target = { processName: selected.processName, windowTitle: selected.windowTitle };
+    return {
+      allowed: true,
+      target,
+      reason: `Future screen inspection and passive guidance are limited to ${selected.processName} windows titled “${selected.windowTitle}”. Clicks and typing are not included.`,
+    };
+  }
+
   if (toolName === 'open_application') {
     const app = normaliseApp(args.name);
     if (!app) return { allowed: false, target: {}, reason: 'Pixel cannot identify one exact application.' };
@@ -62,6 +81,11 @@ export const PERMISSION_POLICY_VERSION = 1;
 
 export function validateStandingGrant(toolName: string, target: GrantScope | undefined): boolean {
   if (!target) return false;
+  if (toolName === SCREEN_STANDING_GRANT_TOOL) {
+    return Object.keys(target).length === 2 &&
+      typeof target.processName === 'string' && /^[a-zA-Z0-9._ -]{1,260}$/.test(target.processName) &&
+      typeof target.windowTitle === 'string' && target.windowTitle.trim().length > 0 && target.windowTitle.length <= 500;
+  }
   if (toolName === 'open_application') {
     return Object.keys(target).length === 1 && typeof target.app === 'string' && ALWAYS_LAUNCHABLE_APPS.has(target.app);
   }
@@ -153,6 +177,7 @@ function canonicalDirectory(value: unknown): string | null {
 
 /** Human description of a scope for the approval card. */
 export function describeScope(scope: GrantScope): string {
+  if (scope.processName && scope.windowTitle && !scope.windowId) return `only ${scope.processName} windows titled “${scope.windowTitle}” (inspection and passive guidance)`;
   if (scope.windowId && scope.processName && scope.windowTitle) return `${scope.processName} window “${scope.windowTitle}” (${scope.windowId}, PID ${scope.processId ?? '?'})`;
   if (scope.origin) return `only ${scope.origin}`;
   if (scope.app) return `only ${scope.app}`;

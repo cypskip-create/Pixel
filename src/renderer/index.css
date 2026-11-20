@@ -492,6 +492,9 @@
 .workspace-settings > section { min-height: 0; border: 0; border-radius: 0; background: var(--workspace-surface); }
 .workspace-settings-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; padding: 18px 24px 20px; }
 .workspace-settings-nav { display: flex; min-width: 0; flex-direction: column; gap: 4px; border-right: 1px solid var(--color-border); padding: 0 16px 0 0; }
+.workspace-settings-nav .workspace-settings-back { min-height: 36px; margin: 0 0 14px; padding: 0 9px; color: var(--color-ink-soft); font-weight: 550; }
+.workspace-settings-nav .workspace-settings-back:hover { background: var(--color-hover); color: var(--color-ink); }
+.workspace-settings-nav .workspace-settings-back svg { color: var(--color-accent); }
 .workspace-settings-nav h3 { margin: 2px 8px 12px; color: var(--color-ink); font-size: 20px; font-weight: 650; }
 .workspace-settings-nav button { display: flex; min-height: 36px; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: 8px; padding: 0 9px; color: var(--color-ink-soft); text-align: left; font-size: 13px; transition: background 120ms, color 120ms; }
 .workspace-settings-nav button:hover { background: var(--color-hover); color: var(--color-ink); }

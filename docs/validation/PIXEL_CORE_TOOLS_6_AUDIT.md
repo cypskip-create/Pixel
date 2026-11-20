@@ -1,5 +1,14 @@
 # Pixel Core Tools 6.0 capability audit
 
+> **Snapshot note (2026-11-20):** this matrix records the Core Tools 6.0
+> implementation snapshot, not the current 6.1 review. For the latest main
+> SHA, Windows Actions failure analysis, Settings navigation repair, local
+> validation totals, voice-runtime boundary and open-source/license research,
+> see [PROGRESS.md](../../PROGRESS.md), [WAVE_HANDOFF.md](../../WAVE_HANDOFF.md)
+> and [Core Tools 6.1 research](../research/PIXEL_CORE_TOOLS_6_1_RESEARCH.md).
+> The 6.1 repair is still local and has not been exercised by hosted CI or real
+> Pixel GUI acceptance.
+
 Audit date: 2026-11-20. Source base reviewed: `d538c1044c9f6c4a0e7edc8073877436cae8dc4f`.
 Local changes are uncommitted. This audit distinguishes code coverage from real Windows acceptance.
 

@@ -15,7 +15,20 @@ $worker = Join-Path $root 'python\pixel_worker\worker.py'
 if (-not $Python) {
   $launcher = Get-Command py -ErrorAction SilentlyContinue
   if (-not $launcher) { throw 'Python 3.12 x64 is required. Install it, then rerun npm run setup:voice-dev.' }
-  $Python = (& py -3.12 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1).Trim()
+  try {
+    $resolvedPython = @(& $launcher.Source -3.12 -c 'import sys; print(sys.executable)' 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $resolvedPython.Count -gt 0) { $Python = $resolvedPython[0].Trim() }
+  } catch {
+    # PowerShell 7 can promote stderr from a missing `py -3.12` runtime to a
+    # terminating error when PSNativeCommandUseErrorActionPreference is set.
+    # Fall through to an explicit installed-runtime diagnostic below.
+  }
+  if (-not $Python) {
+    $installed = @()
+    try { $installed = @(& $launcher.Source -0p 2>$null) } catch { }
+    $runtimeList = if ($installed.Count -gt 0) { $installed -join '; ' } else { 'no Python launcher runtimes detected' }
+    throw "Python 3.12 x64 is required for Pixel's pinned speech dependencies; $runtimeList. Install Python 3.12 x64, then rerun npm run setup:voice-dev."
+  }
 }
 if (-not $Python -or -not (Test-Path -LiteralPath $Python)) { throw 'Could not locate Python 3.12. Set PIXEL_VOICE_DEV_PYTHON or pass -Python <python.exe>.' }
 

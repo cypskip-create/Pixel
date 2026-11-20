@@ -94,10 +94,12 @@ memory and matches opaque window reference, PID, process name and title on
 every observation/passive-guidance operation. It expires after eight hours or
 revocation and is not restored on restart. It covers `analyze_screen`,
 `find_ui_elements`, `verify_ui_state`, `screen_highlight_control` and
-`screen_draw_arrow` on that window only. It never grants UI invocation,
-typing, pointer input or application switching. Persistent Always Allow remains
-restricted to the existing allow-listed application launches and exact HTTPS
-origin navigation.
+`screen_draw_arrow` on that window only. If the user selects Always Allow, a
+durable grant is scoped to the exact process name and exact window title; each
+call still requires a freshly validated HWND/PID/title identity. This grant
+covers observation and passive guidance only, never UI invocation, typing,
+pointer input or application switching. The volatile session option remains
+confined to the exact live window and current Pixel run.
 
 The broad, general-purpose four-tier risk matrix is not implemented. Current
 behavior is controlled by the registered per-tool risk, mode and approval

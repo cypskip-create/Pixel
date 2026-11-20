@@ -34,6 +34,33 @@ describe('persistent permission grants', () => {
     expect(restarted.evaluate('open_application', 'agent', { name: 'powershell' })).toMatchObject({ allowed: false, needsApproval: true });
   });
 
+  it('persists selected-window observation by exact process and title without granting UI actions', async () => {
+    const first = setup();
+    const args = {
+      target: 'selected_window',
+      targetWindowId: 'hwnd-before-restart',
+      expectedWindowTitle: 'Settings',
+      expectedProcessId: 4200,
+      expectedProcessName: 'SystemSettings',
+    };
+    const pending = first.broker.ask(request('analyze_screen', args, 'medium'));
+    first.broker.respond({ requestId: 'request-analyze_screen', approved: true, duration: 'always' });
+    await expect(pending).resolves.toMatchObject({ approved: true, duration: 'always' });
+
+    const restarted = new ToolRegistry();
+    new PermissionBroker(restarted, new AuditLog(), () => undefined, () => undefined, first.store);
+    expect(restarted.evaluate('analyze_screen', 'agent', {
+      ...args,
+      targetWindowId: 'new-hwnd',
+      expectedProcessId: 8800,
+    }).allowed).toBe(true);
+    expect(restarted.evaluate('analyze_screen', 'agent', {
+      ...args,
+      expectedWindowTitle: 'Passwords',
+    }).allowed).toBe(false);
+    expect(restarted.evaluate('invoke_ui_element', 'agent', args).allowed).toBe(false);
+  });
+
   it('revokes one grant and does not restore it after restart', async () => {
     const first = setup();
     const pending = first.broker.ask(request('open_application', { name: 'notepad' }));

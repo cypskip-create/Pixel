@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowLeft, Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
 import type { AppSettings, AssistantState, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
@@ -98,6 +98,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const voiceTestCapture = useRef<MicrophoneCapture | null>(null);
   const voiceTestSession = useRef(0);
   const voiceTestTranscribing = useRef(false);
+  const voiceTestSpeaking = useRef(false);
   const microphoneTestTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -127,7 +128,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
     voiceTestCapture.current?.cancel();
     voiceTestCapture.current = null;
     voiceTestSession.current += 1;
-    if (voiceTestTranscribing.current) void window.cypsShell?.voiceCancel?.();
+    if (voiceTestTranscribing.current || voiceTestSpeaking.current) void window.cypsShell?.voiceCancel?.();
+    voiceTestTranscribing.current = false;
+    voiceTestSpeaking.current = false;
     void window.cypsShell?.voiceCaptureRelease?.();
   }, []);
 
@@ -271,24 +274,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
   const closeSettings = useCallback(() => {
     setKeyEditorReset((value) => value + 1);
-    voiceTestSession.current += 1;
-    if (voiceTestTranscribing.current) {
-      void window.cypsShell?.voiceCancel?.();
-      voiceTestTranscribing.current = false;
-    }
-    if (microphoneTestTimer.current !== null) window.clearTimeout(microphoneTestTimer.current);
-    microphoneTestTimer.current = null;
-    microphoneCapture.current?.cancel();
-    microphoneCapture.current = null;
-    voiceTestCapture.current?.cancel();
-    voiceTestCapture.current = null;
-    setMicrophoneTest(false);
-    setVoiceTestRecording(false);
-    setVoiceTestBusy(false);
-    setMicrophoneLevel(0);
-    setDiagnosticAudio(null);
-    setVoiceTestResult(null);
-    void window.cypsShell?.voiceCaptureRelease?.();
     onClose();
   }, [onClose]);
 
@@ -356,6 +341,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     const speak = window.cypsShell?.voiceSpeak;
     if (!speak) { setVoiceError('Voice output is unavailable in this Pixel build.'); return; }
     setVoiceAction('test-voice');
+    voiceTestSpeaking.current = true;
     setVoiceError(null);
     setVoiceNotice(null);
     try {
@@ -367,7 +353,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       else setVoiceError(result.error ?? 'Pixel could not play the voice test.');
     } catch (error) {
       setVoiceError(error instanceof Error ? error.message : 'Pixel could not play the voice test.');
-    } finally { setVoiceAction(null); }
+    } finally { voiceTestSpeaking.current = false; setVoiceAction(null); }
   };
 
   return (
@@ -392,6 +378,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
       <div className={workspaceLayout ? 'workspace-settings-layout' : 'flex-1 overflow-y-auto px-3 py-2.5'} data-settings-page={workspaceLayout ? settingsPage : undefined}>
         {workspaceLayout ? (
           <nav className="workspace-settings-nav" aria-label="Settings categories">
+            <button type="button" className="workspace-settings-back" onClick={closeSettings}>
+              <ArrowLeft size={16} aria-hidden="true" /> <span>Back to Workspace</span>
+            </button>
             <h3>Settings</h3>
             {([
               ['general', 'General', Gauge],

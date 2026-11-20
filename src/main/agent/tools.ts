@@ -16,7 +16,7 @@ import { getModeDescriptor } from '../../shared/types';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 
-import { deriveGrantScope, scopeCovers, standingGrantEligibility, sessionGrantEligibility, validateSessionGrant, validateStandingGrant, PERMISSION_POLICY_VERSION, SCREEN_SESSION_GRANT_TOOL, isScreenSessionTool } from './scope';
+import { deriveGrantScope, scopeCovers, standingGrantEligibility, sessionGrantEligibility, validateSessionGrant, validateStandingGrant, PERMISSION_POLICY_VERSION, SCREEN_SESSION_GRANT_TOOL, SCREEN_STANDING_GRANT_TOOL, isScreenSessionTool } from './scope';
 
 export interface ToolContext {
   /** User's current mode. */
@@ -91,7 +91,10 @@ export function evaluateInvocation(
 export function hasValidGrant(toolName: string, context: ToolContext): boolean {
   const wanted = deriveGrantScope(toolName, context.args ?? {});
   for (const [key, grant] of context.grants) {
-    if (grant.toolName !== toolName && !(grant.toolName === SCREEN_SESSION_GRANT_TOOL && isScreenSessionTool(toolName))) continue;
+    if (grant.toolName !== toolName && !(
+      (grant.toolName === SCREEN_SESSION_GRANT_TOOL || grant.toolName === SCREEN_STANDING_GRANT_TOOL) &&
+      isScreenSessionTool(toolName)
+    )) continue;
     if (grant.scope !== 'always' && grant.expiresAt !== undefined && Date.now() > grant.expiresAt) {
       context.grants.delete(key);
       continue;
@@ -115,13 +118,17 @@ export function applyDecision(
 ): PermissionGrant | null {
   if (!decision.approved) return null;
   const now = Date.now();
-  const target = deriveGrantScope(request.toolName, request.args ?? {});
+  const target = decision.duration === 'always' && isScreenSessionTool(request.toolName)
+    ? standingGrantEligibility(request.toolName, request.args ?? {}).target
+    : deriveGrantScope(request.toolName, request.args ?? {});
   return {
     ...(Object.keys(target).length > 0 ? { target } : {}),
     id: `grant_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    toolName: decision.duration === 'session' && isScreenSessionTool(request.toolName)
+    toolName: isScreenSessionTool(request.toolName) && decision.duration === 'session'
       ? SCREEN_SESSION_GRANT_TOOL
-      : request.toolName,
+      : isScreenSessionTool(request.toolName) && decision.duration === 'always'
+        ? SCREEN_STANDING_GRANT_TOOL
+        : request.toolName,
     scope: decision.duration,
     grantedAt: now,
     risk: request.risk,
@@ -182,9 +189,9 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'analyze_screen',
     description:
-      'Captures a screen or exact selected window and asks a vision model to describe what is visible. For selected_window, pass the exact window ID, title, and process identity from a recent window observation. The user may authorize a volatile session limited to that exact window for screen observation and passive guidance; this never grants clicks or typing.',
+      'Captures a screen or exact selected window and asks a vision model to describe what is visible. For selected_window, pass the exact window ID, title, and process identity from a recent window observation. The user may authorize this exact live window for this Pixel run, or explicitly save a standing screen-observation grant limited to the exact process name and exact window title. These grants cover observation and passive guidance only; they never grant clicks or typing.',
     category: 'screen',
-    risk: 'high',
+    risk: 'medium',
     requiresApproval: true,
     changesState: false,
     parameters: {
@@ -237,7 +244,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'find_ui_elements',
     description: 'Searches a foreground Windows application, or a recently observed explicitly selected window, for accessible UI elements matching a name or AutomationId. Reading a selected background window does not activate or switch to it.',
     category: 'screen',
-    risk: 'high',
+    risk: 'medium',
     requiresApproval: true,
     changesState: false,
     parameters: {
@@ -259,7 +266,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'screen_highlight_control',
     description: 'Finds one exact accessible control in a recently observed window and draws temporary, passive visual guidance around it. Requires the exact opaque window reference, title and process identity from a recent observation. It never clicks, types, activates or switches applications.',
     category: 'screen',
-    risk: 'high',
+    risk: 'medium',
     requiresApproval: true,
     changesState: false,
     parameters: {
@@ -320,7 +327,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     name: 'verify_ui_state',
     description: 'Checks whether one exact visible accessible control is present or absent in the explicitly selected window. Revalidates its opaque window ID, process ID and exact title. This is a bounded read-only UI Automation postcondition check.',
     category: 'screen',
-    risk: 'high',
+    risk: 'medium',
     requiresApproval: true,
     changesState: false,
     parameters: {

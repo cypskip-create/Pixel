@@ -82,6 +82,15 @@ jobs:
                 Start-Sleep -Seconds $delay
               }
             }
+            # Chocolatey can exit successfully after installing NSIS without
+            # refreshing this process's PATH. Probe known install locations
+            # before attempting the checksum-pinned fallback installer.
+            if (-not $makensis) {
+              foreach ($candidate in $knownNsisPaths) {
+                $exe = Join-Path $candidate 'makensis.exe'
+                if (Test-Path -LiteralPath $exe) { $makensis = Get-Item -LiteralPath $exe; break }
+              }
+            }
             if (-not $makensis) {
               $fallbackVersion = '3.11'
               $fallbackUrl = 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'

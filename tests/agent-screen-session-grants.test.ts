@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ToolExecutors } from '../src/main/agent/executors';
 import { buildPermissionRequest } from '../src/main/agent/executor';
-import { sessionGrantEligibility } from '../src/main/agent/scope';
+import { sessionGrantEligibility, standingGrantEligibility } from '../src/main/agent/scope';
 import { AuditLog, PermissionBroker } from '../src/main/agent/runtime';
-import { BUILTIN_TOOLS, ToolRegistry } from '../src/main/agent/tools';
+import { applyDecision, BUILTIN_TOOLS, ToolRegistry } from '../src/main/agent/tools';
 import type { PermissionGrant } from '../src/shared/types';
 
 const windowIdentity = {
@@ -15,6 +15,32 @@ const windowIdentity = {
 const selectedWindow = { ...windowIdentity, target: 'selected_window' };
 
 describe('exact-window screen session grants', () => {
+  it('offers a durable grant only for selected-window inspection and scopes it to exact process and title', () => {
+    const registry = new ToolRegistry(BUILTIN_TOOLS);
+    const tool = registry.get('analyze_screen');
+    expect(tool?.risk).toBe('medium');
+    const request = buildPermissionRequest(tool!, { ...selectedWindow, question: 'Read the page' });
+    expect(request.alwaysAllowed).toBe(true);
+    expect(request.scopeLabel).toContain('SystemSettings');
+    expect(standingGrantEligibility('analyze_screen', { ...selectedWindow, target: 'active_window' }).allowed).toBe(false);
+    expect(standingGrantEligibility('analyze_screen', { ...selectedWindow, expectedProcessName: '' }).allowed).toBe(false);
+
+    const grant = applyDecision({ requestId: request.id, approved: true, duration: 'always' }, {
+      toolName: request.toolName,
+      args: request.args,
+      risk: request.risk,
+    });
+    expect(grant).not.toBeNull();
+    expect(registry.grant(grant!)).toBe(true);
+    expect(grant?.toolName).toBe('screen_observation_app');
+    expect(grant?.target).toEqual({ processName: 'SystemSettings', windowTitle: 'Settings' });
+    const anotherHwnd = { ...windowIdentity, targetWindowId: 'new-hwnd', expectedProcessId: 5200 };
+    expect(registry.evaluate('analyze_screen', 'agent', { ...anotherHwnd, target: 'selected_window' }).allowed).toBe(true);
+    expect(registry.evaluate('screen_draw_arrow', 'agent', { ...anotherHwnd, selector: 'Display' }).allowed).toBe(true);
+    expect(registry.evaluate('analyze_screen', 'agent', { ...anotherHwnd, expectedWindowTitle: 'Passwords', target: 'selected_window' }).allowed).toBe(false);
+    expect(registry.evaluate('invoke_ui_element', 'agent', anotherHwnd).allowed).toBe(false);
+  });
+
   it('offers session authorization only for an explicitly selected, identified window', () => {
     const registry = new ToolRegistry(BUILTIN_TOOLS);
     const tool = registry.get('analyze_screen');

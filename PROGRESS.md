@@ -2,6 +2,82 @@
 
 Updated: 2026-11-20. Version: 0.2.1.
 
+## Core Tools 6.1 reliability audit and fixes
+
+Reviewed latest GitHub `main` and local `HEAD`: `69106e8d9a40cacd49d2f2b2d228b06ca80585d3`.
+The worktree was clean before this task. Changes are local and uncommitted;
+there was no push, commit, or release. The latest Windows Actions run at review
+was [run 44765517201](https://github.com/cypskip-create/Pixel/actions/runs/44765517201)
+on this exact SHA and failed during NSIS setup before validation steps ran.
+
+- **Settings return navigation:** Settings now remembers which Workspace view
+  opened it. A visible, keyboard-operable “Back to Workspace” button returns to
+  Chats, Projects, Tasks, Skills, Memory, Tools, or Pixel Board as applicable.
+  Existing chat/project state stays mounted in Workspace; the chat transcript
+  scroll offset is restored when returning. Settings microphone/voice-test
+  resources are cancelled/released on unmount. Focused UI tests cover the
+  return action and resource cleanup.
+- **Windows CI root cause and source repair:** the failed run installed NSIS
+  3.13 to `C:\Program Files (x86)\NSIS`, but the workflow broke out of its
+  Chocolatey loop on exit code 0 without re-probing the standard install path.
+  It therefore unnecessarily downloaded NSIS 3.11 and failed its pinned hash
+  check (`a82799f1…` vs the expected digest). CI now searches known locations
+  after Chocolatey completes, before the checksum-verified fallback. The
+  fallback hash verification remains enabled. A regression test checks this
+  order. This fix is not yet exercised by a hosted Actions run because the user
+  commits and pushes changes themselves.
+- **Voice setup diagnostic:** this machine has Python 3.15 x64, while the
+  existing pinned voice runtime requires Python 3.12 x64; `.venv-voice-dev`
+  and the frozen worker are absent. `npm run setup:voice-dev` was run and
+  correctly refused to create an environment. Its launcher failure now
+  identifies detected Python runtimes instead of surfacing an opaque `py`
+  invocation exception. No model data was touched. No offline inference,
+  benchmark, Kokoro playback, or voice-cloning acceptance is claimed.
+- **Scoped persistent screen observation:** explicitly approving “Always
+  Allow” for a selected window now persists a grant scoped to the exact process
+  name and exact window title. The HWND and PID remain required and validated
+  for each actual operation, but are omitted from the persisted identity so
+  harmless process/window restarts do not force a repeat prompt. The grant
+  applies only to screen reading, UIA discovery/verification, and passive
+  annotations; UI invocation and typing are excluded. Screen observations and
+  passive guidance are classified medium risk and still require an initial
+  user decision. Grants without a verified process name/title are ineligible.
+  Tests cover reuse after restart, changed HWND/PID, title mismatch, and the
+  fact that the grant does not authorize UI actions.
+- **Follow-up validation after permission-policy change:** full Vitest suite
+  **868 passed, 0 failed, 27 skipped (895 total; 61 files passed, 1 skipped)**;
+  skips remain 17 missing-Chromium browser cases, 7 missing-NSIS cases, and 3
+  opt-in Windows foreground integration cases. Production build passed.
+- **Open-source research:** added
+  [`PIXEL_CORE_TOOLS_6_1_RESEARCH.md`](docs/research/PIXEL_CORE_TOOLS_6_1_RESEARCH.md)
+  with upstream source revisions, code-license findings and model/voice license
+  boundaries for the requested speech and AppFlowy projects. Source clones
+  could not be fetched because outbound DNS/network access is blocked. No
+  third-party code, engine, model, or external account plugin was added.
+- **Automated validation:** `npm run typecheck` passed; `npm run build` passed;
+  Vitest passed **866, failed 0, skipped 27 (893 total; 61 files passed, 1
+  skipped)**; Python worker tests passed **12/12**; native UIA helper compiled
+  and its ping protocol smoke completed. The existing sandboxed Electron
+  preload test still exits `2147483651` (`0x80000003`) before writing a result.
+  The NSIS integration group skips 7 cases because `makensis` is absent; 17
+  browser cases skip because Chromium download failed with `ENOTFOUND
+  cdn.playwright.dev`; 3 foreground integration cases are skipped unless the
+  native Windows fixture is enabled.
+- **Windows GUI boundary:** `npm run dev` reports Vite port 5199 already in
+  use, though no listening process was returned by `netstat`/`Get-NetTCPConnection`.
+  Vite ran on alternate port 5299, but the Electron process exited with code 1
+  before a Pixel window appeared. The packaged Electron launch also exited 1
+  without a window. Therefore Settings visual navigation, startup, speech,
+  Board workflows, installer, UIA and laptop acceptance remain unverified.
+
+The pre-existing capability status matrix remains in
+[`PIXEL_CORE_TOOLS_6_AUDIT.md`](docs/validation/PIXEL_CORE_TOOLS_6_AUDIT.md).
+Core gaps are still real: clipboard agent tools, editable desktop drawing,
+complete document authoring, live semantic workflow recording/replay, live
+specialist delegation, broad system diagnostics, general critical-risk policy,
+and verified model-backed Windows acceptance are not complete. These are not
+reported as implemented by this checkpoint.
+
 ## Core Tools 6.0 regression audit and focused repairs
 
 Reviewed latest local `main` base: `d538c1044c9f6c4a0e7edc8073877436cae8dc4f`.

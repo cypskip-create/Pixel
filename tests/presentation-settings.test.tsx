@@ -21,6 +21,63 @@ afterEach(() => {
 });
 
 describe('pinned and cursor companion preferences', () => {
+  it('shows a keyboard-accessible Back to Workspace action in the full Settings layout', () => {
+    const onClose = vi.fn();
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => {
+      root?.render(createElement(SettingsPanel, {
+        settings: structuredClone(DEFAULT_SETTINGS),
+        displays: [],
+        onPatch: vi.fn(),
+        onRequestMode: vi.fn(),
+        onClose,
+        hasApiKey: false,
+        onSaveApiKey: async () => ({ ok: true }),
+        onRemoveApiKey: async () => ({ ok: true }),
+        onTestConnection: async () => ({ ok: true }),
+        error: null,
+        saving: false,
+        workspaceLayout: true,
+      }));
+    });
+
+    const back = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Back to Workspace');
+    expect(back).toBeDefined();
+    expect(back?.getAttribute('type')).toBe('button');
+    act(() => back?.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases temporary Settings voice resources when Settings unmounts', () => {
+    const release = vi.fn(async () => undefined);
+    window.cypsShell = { voiceCaptureRelease: release } as unknown as typeof window.cypsShell;
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => {
+      root?.render(createElement(SettingsPanel, {
+        settings: structuredClone(DEFAULT_SETTINGS),
+        displays: [],
+        onPatch: vi.fn(),
+        onRequestMode: vi.fn(),
+        onClose: vi.fn(),
+        hasApiKey: false,
+        onSaveApiKey: async () => ({ ok: true }),
+        onRemoveApiKey: async () => ({ ok: true }),
+        onTestConnection: async () => ({ ok: true }),
+        error: null,
+        saving: false,
+        workspaceLayout: true,
+      }));
+    });
+
+    act(() => root?.unmount());
+    root = null;
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it('exposes accessible switch states and separate cursor/Pix previews', () => {
     const settings = structuredClone(DEFAULT_SETTINGS);
     settings.companion.cursorCompanionEnabled = true;

@@ -427,7 +427,7 @@ describe('Windows UI Automation tools', () => {
     const registry = new ToolRegistry(BUILTIN_TOOLS);
     const highlight = registry.get('screen_highlight_control');
     const clear = registry.get('screen_clear_annotations');
-    expect(highlight).toMatchObject({ requiresApproval: true, changesState: false, risk: 'high' });
+    expect(highlight).toMatchObject({ requiresApproval: true, changesState: false, risk: 'medium' });
     expect(registry.availableFor('guide')).toContainEqual(highlight);
     expect(registry.validateArgs('screen_highlight_control', {
       selector: 'NetworkCategory',

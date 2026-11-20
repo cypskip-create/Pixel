@@ -1091,9 +1091,10 @@ export interface GrantScope {
   directory?: string;
   /** Exact normalized query approved for a browser search. */
   query?: string;
-  /** Volatile exact window identity. Session grants only; never stored in the durable grant DB. */
+  /** Volatile exact window identity. Used for grants confined to this Pixel run. */
   windowId?: string;
   processId?: number;
+  /** Exact process and title can scope a durable screen-observation grant. */
   processName?: string;
   windowTitle?: string;
 }

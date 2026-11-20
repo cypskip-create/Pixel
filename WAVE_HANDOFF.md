@@ -1,5 +1,54 @@
 # Pixel implementation handoff
 
+## Core Tools 6.1 local reliability checkpoint
+
+Latest GitHub `main`/local base reviewed: `69106e8d9a40cacd49d2f2b2d228b06ca80585d3`.
+The worktree was clean before edits. No commit, push, or release was created.
+Latest Actions evidence is failing run
+[`44765517201`](https://github.com/cypskip-create/Pixel/actions/runs/44765517201).
+
+Follow-up after the initial handoff review:
+
+- Selected-window screen observation can now be explicitly saved as a durable
+  grant bounded by the exact verified process name and exact window title. It
+  can be reused across HWND/PID changes and app restarts; it excludes click,
+  invoke, typing, and all state-changing actions. Missing process/title identity
+  cannot be made persistent. Exact-window session grants remain available.
+- Follow-up targeted authorization, permission-store, tool, and hardening tests:
+  **68/68 passed**. Latest full suite after this policy change: **868 passed,
+  0 failed, 27 skipped (895 total)**; the 27 skipped tests need Chromium, NSIS,
+  or an interactive Windows foreground fixture. `npm run build` passed.
+- No new Windows GUI or hosted Actions evidence is available. The CI fix and
+  all other changes remain uncommitted for the user to push and verify.
+
+- Workspace Settings now has a visible Back to Workspace button and remembers
+  the preceding page. Chat draft/history remain owned by Workspace, chat scroll
+  is restored, and Settings voice resources are released on unmount.
+- CI NSIS setup now rechecks the standard install directories after Chocolatey
+  success before attempting the pinned-hash fallback. The failed run installed
+  NSIS 3.13 at `C:\Program Files (x86)\NSIS` but then used an invalid/mismatched
+  3.11 fallback hash because it skipped that recheck.
+- Voice setup now identifies that this machine has Python 3.15 x64 and lacks
+  the pinned Python 3.12 x64 worker environment. No user model files were
+  removed. There is no live transcription/TTS evidence for this machine.
+- Added upstream revision/license comparison in
+  [`PIXEL_CORE_TOOLS_6_1_RESEARCH.md`](docs/research/PIXEL_CORE_TOOLS_6_1_RESEARCH.md).
+  Outbound DNS blocked cloning packages; none was copied into production.
+- TypeScript, production build, Vitest (**866 passed, 27 skipped, 0 failed**),
+  Python worker tests (**12/12**) and native helper build/smoke passed. Skips:
+  17 Chromium-dependent browser tests, 7 NSIS tests, 3 foreground integration
+  tests. Chromium install failed with DNS `ENOTFOUND`; NSIS is not installed.
+  The sandboxed preload smoke exits `0x80000003` before its report.
+- Real Windows GUI was attempted with isolated app-data. Vite’s default 5199
+  port reports occupied with no listener visible; alternate Vite 5299 starts,
+  but Electron exits 1 without creating a visible window. No GUI or installer
+  acceptance is claimed. The current CI fix still needs the user’s next push to
+  produce a hosted Windows Actions result.
+- Still missing/partial per the 6.0 capability audit: editable desktop overlay,
+  clipboard tools, complete document authoring, semantic workflow recording,
+  live specialist execution, broad diagnostics and generalized critical-risk
+  policy. Plugin account integrations remain deferred.
+
 ## Current Core Tools 6.0 audit and repairs
 
 Reviewed local `main` base: `d538c1044c9f6c4a0e7edc8073877436cae8dc4f`.
