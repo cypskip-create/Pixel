@@ -61,16 +61,15 @@ sidebar, secondary areas live under Library, and execution details appear only
 when requested. Approval cards remain visible with the conversation; the mode
 selector and message composer stay compact until needed.
 
-Pixel uses a shared black-and-charcoal surface system across the Workspace and
-floating Island, with blue interactive controls and separate silver/mint Pix
-artwork. Visible surfaces are opaque; Windows Acrylic, Mica and CSS backdrop
-blur are not used. The approved P geometry is rendered in grayscale within the
-app. `npm run dev:gpu` is available for separate GPU
-diagnostics; regular `npm run dev` continues to pass `--disable-gpu`. See the
-[design token reference](docs/architecture/PIXEL_DESIGN_TOKENS.md) and the
-[current validation report](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
-for verified and unverified behavior. Pix's silver and mint are character-only
-artwork accents; the Workspace/Island surfaces remain charcoal.
+Pixel uses a warm, matte near-black Workspace palette with restrained orange
+interaction cues and separate silver/mint Pix artwork. Visible surfaces are
+opaque; Windows Acrylic, Mica and CSS backdrop blur are not used. The approved
+P geometry is rendered in grayscale within the app. `npm run dev:gpu` is
+available for separate GPU diagnostics; regular `npm run dev` continues to
+pass `--disable-gpu`. See the [design token reference](docs/architecture/PIXEL_DESIGN_TOKENS.md),
+[reference research](docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md), and current
+validation reports for verified and unverified behavior. Pix's silver and mint
+remain character-only artwork accents.
 
 Type checks, automated tests and production builds do not prove the restored UI
 over real desktop content. The Windows visual comparison and packaged startup
@@ -321,9 +320,12 @@ is the current ordered acceptance checklist.
 - `open_application` only launches an allowlist of applications by design.
 - Browser automation and the full app UI require a normal desktop runtime;
   unit tests and production builds do not verify native window behavior.
-- Skills are model-mediated and have no interaction recorder or deterministic
-  live replay runner. Specialist roles are not backed by an independent model
-  delegation loop.
+- Completed verified tasks can be recorded as reviewed skill drafts. Active
+  tool-only skills support one-time declared inputs; daily routines execute
+  ordered tool plans directly with current permissions, fresh observations and
+  limited result predicates. Input-bearing daily schedules, non-tool steps and
+  broader predicates remain unsupported. Specialists run as bounded
+  model-backed subtasks through the normal permission gateway.
 - There is no general credential broker. Passwords, MFA, passkeys and payment
   confirmation remain human-controlled.
 - Pixel Code is out of scope. Only the integration seam is reserved.

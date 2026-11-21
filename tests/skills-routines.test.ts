@@ -31,7 +31,7 @@ function definition(overrides: Partial<SkillDraftInput> = {}): SkillDraftInput {
     requiredTools: ['browser_navigate', 'browser_inspect'],
     steps: [
       { ordinal: 0, kind: 'tool', locator: 'browser_navigate', action: 'browser_navigate', params: { url: 'https://status.example.com' }, expectation: { urlPrefix: 'https://status.example.com' }, approvalRequired: true },
-      { ordinal: 1, kind: 'tool', locator: 'browser_inspect', action: 'browser_inspect', params: {}, expectation: { statusVisible: true }, approvalRequired: false },
+      { ordinal: 1, kind: 'tool', locator: 'browser_inspect', action: 'browser_inspect', params: {}, expectation: { resultContains: 'status' }, approvalRequired: false },
     ],
     decisionBranches: ['If the service is degraded, include the affected service names.'],
     verificationRules: ['Read the status from the page after navigation.'],
@@ -107,7 +107,7 @@ describe('reviewed skills', () => {
     }))).toThrow(/Credential data/);
     expect(() => store.createDraft(definition({
       inputs: [{ name: 'username', description: 'password:topSecret123', required: true }],
-    }))).toThrow(/Credential data/);
+    }))).toThrow(/Credential/);
   });
 
   it('refuses modified stored definitions and enforces each step’s approval declaration', async () => {
@@ -264,6 +264,13 @@ describe('durable local routines', () => {
       requiredTools: ['browser_inspect'],
     })).id);
     expect(() => store.create({ projectId: 'project_a', skillId: needsInput.id, name: 'No input source', localTime: '10:00', timezone: 'UTC' })).toThrow(/interactive inputs/);
+
+    const unknownPredicate = skills.activate(skills.createDraft(definition({
+      name: 'Unknown result check',
+      steps: [{ ordinal: 0, kind: 'tool', locator: 'browser_inspect', action: 'browser_inspect', params: {}, expectation: { statusVisible: true }, approvalRequired: false }],
+      requiredTools: ['browser_inspect'],
+    })).id);
+    expect(() => store.create({ projectId: 'project_a', skillId: unknownPredicate.id, name: 'Unsupported predicate', localTime: '10:00', timezone: 'UTC' })).toThrow(/unsupported expected-result/);
   });
 });
 

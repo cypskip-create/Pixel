@@ -17,39 +17,46 @@
   --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
     "Inter", "Helvetica Neue", Arial, sans-serif;
 
-  /* Charcoal foundation; blue is reserved for interactive controls. */
-  --color-app-bg: #181818;
-  --color-sidebar: #1B1B1B;
-  --color-surface: #343434;
-  --color-surface-raised: #232323;
-  --color-hover: #303030;
-  --color-selected: #494949;
-  --color-border: #353535;
-  --color-border-strong: #505050;
-  --color-popover: #252525;
-  --color-ink: #F3F3F3;
-  --color-ink-soft: #D3D3D3;
-  --color-ink-dim: #ABABAB;
+  /* Warm matte system: orange marks action; surfaces stay near-black. */
+  --color-app-bg: #0C0B0A;
+  --color-sidebar: #11100F;
+  --color-surface: #1B1816;
+  --color-surface-raised: #211D1A;
+  --color-hover: #28221E;
+  --color-selected: #30231B;
+  --color-border: #332B26;
+  --color-border-strong: #51443B;
+  --color-popover: #191613;
+  --color-ink: #E9E4DD;
+  --color-ink-soft: #C9C1B8;
+  --color-ink-dim: #96908A;
   --color-icon: #D8D8D8;
-  --color-accent: #4299F5;
-  --color-accent-hover: #60A9FA;
-  --color-accent-foreground: #FFFFFF;
-  --color-warning: #D5AB72;
-  --color-destructive: #D88B83;
+  --color-accent: #F28A43;
+  --color-accent-hover: #FFA262;
+  --color-accent-foreground: #1A100A;
+  --color-warning: #D96A2B;
+  --color-destructive: #D56D61;
   --color-brand-foreground: var(--color-icon);
   --color-focus: var(--color-accent);
   --color-disabled: #777E82;
   --color-approval: var(--color-warning);
   --color-error: var(--color-destructive);
-  --color-success: #8CB8A5;
+  --color-success: #79B58A;
   --color-recording: var(--color-destructive);
-  --color-working: #8CB8A5;
+  --color-working: #79B58A;
+  --color-user-message: #211913;
+  --color-user-message-ink: var(--color-ink);
+  --color-folder-fill: #3A291F;
+  --color-folder-border: #604735;
+  --color-folder-shadow: #2B201A;
+  --color-folder-ink: #E7A16D;
+  --color-pix-ambient: #C88E68;
   --color-state-idle: #B8BEC2;
-  --color-state-listening: #8CB8A5;
-  --color-state-thinking: #8CB8A5;
-  --color-state-speaking: #8CB8A5;
-  --color-state-working: #8CB8A5;
-  --color-state-success: #8CB8A5;
+  --color-state-listening: #79B58A;
+  --color-state-thinking: #79B58A;
+  --color-state-speaking: #79B58A;
+  --color-state-working: #79B58A;
+  --color-state-success: #79B58A;
   --color-state-error: var(--color-destructive);
   --color-state-paused: var(--color-warning);
   --pix-shell-highlight: #F3F4F5;
@@ -64,29 +71,36 @@
 
 /* Light theme overrides, applied when the app (or the OS) asks for light. */
 .theme-light {
-  --color-app-bg: #F1F3F3;
-  --color-sidebar: #E7EAEA;
+  --color-app-bg: #F6F2ED;
+  --color-sidebar: #EFE8E0;
   --color-surface: #FFFFFF;
-  --color-surface-raised: #F7F9F9;
-  --color-hover: #E3E7E7;
-  --color-selected: #D7DEDD;
-  --color-border: #C8D0CE;
-  --color-border-strong: #9AA6A2;
+  --color-surface-raised: #FBF8F4;
+  --color-hover: #EEE5DC;
+  --color-selected: #F6DCC7;
+  --color-border: #D8CBBF;
+  --color-border-strong: #B7A494;
   --color-popover: #FFFFFF;
   --color-ink: #161B1A;
   --color-ink-soft: #414947;
   --color-ink-dim: #68716E;
   --color-icon: #303030;
-  --color-accent: #1D70C9;
-  --color-accent-hover: #185EA9;
+  --color-accent: #B85B20;
+  --color-accent-hover: #964414;
   --color-accent-foreground: #FFFFFF;
   --color-brand-foreground: var(--color-icon);
   --color-focus: var(--color-accent);
   --color-disabled: #888888;
-  --color-approval: #8C6330;
-  --color-error: #A85049;
-  --color-success: var(--color-accent);
-  --color-recording: #A85049;
+  --color-approval: #9A4E24;
+  --color-error: #A3443A;
+  --color-success: #39794C;
+  --color-user-message: #F6E4D6;
+  --color-user-message-ink: #29211C;
+  --color-folder-fill: #F3D5BD;
+  --color-folder-border: #BD825B;
+  --color-folder-shadow: #D8A47E;
+  --color-folder-ink: #8C4D25;
+  --color-pix-ambient: #8C4D25;
+  --color-recording: #A3443A;
   --color-working: #404040;
   --color-state-idle: #666666;
   --color-state-listening: var(--color-accent);
@@ -487,6 +501,18 @@
 .productivity-editor > header > div:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .productivity-editor > input,.productivity-editor textarea { width: 100%; padding: 9px 10px; font-size: 12px; }
 .productivity-editor textarea { resize: vertical; line-height: 1.55; }
+.productivity-linked-documents { min-width: 0; border-top: 1px solid var(--color-border); padding-top: 10px; }
+.productivity-linked-documents > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.productivity-linked-documents h3 { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 620; }
+.productivity-linked-documents h3 span { color: var(--color-ink-dim); font-size: 10px; }
+.productivity-linked-documents > p { margin-top: 8px; color: var(--color-ink-dim); font-size: 10px; }
+.productivity-linked-documents ul { display: grid; gap: 4px; margin-top: 8px; padding: 0; list-style: none; }
+.productivity-linked-documents li { display: flex; align-items: center; gap: 5px; min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 6px 8px; background: var(--workspace-surface); }
+.productivity-linked-documents li > span { display: flex; flex: 1; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.productivity-linked-documents li strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.productivity-linked-documents li small { flex: 0 0 auto; color: var(--color-ink-dim); font-size: 9px; }
+.productivity-linked-documents li button { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; border-radius: 6px; color: var(--color-ink-dim); }
+.productivity-linked-documents li button:hover { background: var(--workspace-hover); color: var(--color-ink); }
 @media (max-width: 760px) { .productivity-columns { grid-template-columns: 1fr; } }
 .workspace-project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 11px; max-width: 920px; }
 .workspace-project-card { display: flex; min-height: 78px; align-items: center; gap: 12px; border: 1px solid var(--color-border); border-radius: 13px; padding: 12px; background: var(--workspace-panel); text-align: left; }

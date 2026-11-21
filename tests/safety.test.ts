@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuditEntry } from '../src/shared/types';
+import type { AuditEntry, DiagnosticsSnapshot } from '../src/shared/types';
 import { ToolExecutors } from '../src/main/agent/executors';
 import type { ToolResult } from '../src/main/agent/executors';
 import { DesktopInputLease } from '../src/main/agent/inputLease';
@@ -302,6 +302,50 @@ describe('ToolExecutors cancellation', () => {
     expect(result.detail).toHaveProperty('networkInterfaces');
     expect(result.content).toContain('Network adapters:');
     expect(JSON.stringify(result.detail)).not.toMatch(/\b(?:\d{1,3}\.){3}\d{1,3}\b|[0-9a-f]{2}(?::[0-9a-f]{2}){5}/i);
+  });
+
+  it('includes verified uptime, disk, battery, and display facts without device labels or bounds', async () => {
+    const snapshot: DiagnosticsSnapshot = {
+      capturedAt: 1,
+      platform: 'win32',
+      release: 'test-release',
+      arch: 'x64',
+      cpuModel: 'Test CPU',
+      cpuCount: 8,
+      loadAverage1m: 0,
+      totalMemoryBytes: 16 * 1024 ** 3,
+      freeMemoryBytes: 8 * 1024 ** 3,
+      uptimeSeconds: 7200,
+      disks: [{ mount: 'C:', totalBytes: 1000, freeBytes: 500 }],
+      battery: { present: true, percent: 64, charging: false },
+      primaryDisplay: { id: '1', width: 1920, height: 1080, scaleFactor: 1.25, label: 'Private Monitor Model' },
+      displays: [{ id: '1', width: 1920, height: 1080, scaleFactor: 1.25, label: 'Private Monitor Model', bounds: { x: 0, y: 0, width: 1920, height: 1080 } }],
+      warnings: [],
+    };
+    const result = await new ToolExecutors({ systemDiagnostics: async () => snapshot }).run('get_system_info', {});
+    expect(result.ok).toBe(true);
+    expect(result.detail).toMatchObject({
+      uptimeSeconds: 7200,
+      disks: [{ mount: 'C:', freeBytes: 500 }],
+      battery: { present: true, percent: 64, charging: false },
+      displays: { count: 1, primaryResolution: '1920x1080', scaleFactor: 1.25 },
+    });
+    expect(JSON.stringify(result)).not.toContain('Private Monitor Model');
+    expect(JSON.stringify(result)).not.toContain('"bounds"');
+  });
+
+  it('does not infer a missing battery when the Windows API reports unknown state', async () => {
+    const result = await new ToolExecutors({
+      systemDiagnostics: async () => ({
+        capturedAt: 1, platform: 'win32', release: 'test', arch: 'x64', cpuModel: 'CPU', cpuCount: 1,
+        loadAverage1m: 0, totalMemoryBytes: 1, freeMemoryBytes: 1, uptimeSeconds: 1,
+        disks: null, battery: { present: null, percent: null, charging: null },
+        primaryDisplay: null, displays: [], warnings: [],
+      }),
+    }).run('get_system_info', {});
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain('Battery: status unavailable');
+    expect(result.content).not.toContain('Battery: none detected');
   });
 
   it('refuses to start a call whose signal is already aborted', async () => {
@@ -615,6 +659,20 @@ describe('NativeHelper', () => {
     expect(await helper.call('ping', {})).toEqual({ version: '1.0' });
     expect(await helper.call('ping', {})).toEqual({ version: '1.0' });
     expect(started).toBe(1);
+    helper.dispose();
+  });
+
+  it('reads a typed, read-only power status response through the helper protocol', async () => {
+    const commands: string[] = [];
+    const helper = new NativeHelper({
+      ...base,
+      spawnFn: () => fakeProcess((req, reply) => {
+        commands.push(req.cmd);
+        reply({ id: req.id, ok: true, result: { present: true, percent: 21, charging: false } });
+      }),
+    });
+    await expect(helper.call('system_power_status', {})).resolves.toEqual({ present: true, percent: 21, charging: false });
+    expect(commands).toEqual(['system_power_status']);
     helper.dispose();
   });
 

@@ -866,6 +866,9 @@ export interface PluginView {
   enabled: boolean;
   connection: 'not_required' | 'disconnected' | 'connected';
   health: 'ready' | 'disabled' | 'unavailable' | 'error';
+  /** Compatibility is computed against the bundled manifest, never a remote package. */
+  compatibility?: 'not_installed' | 'compatible' | 'update_available' | 'unsupported_api';
+  installedVersion?: string;
   updatedAt?: number;
   error?: string;
 }
@@ -887,7 +890,7 @@ export interface DiagnosticsSnapshot {
   uptimeSeconds: number;
   /** Null when the source is unavailable in the current security context. */
   disks: Array<{ mount: string; totalBytes: number | null; freeBytes: number | null }> | null;
-  battery: { present: boolean; percent: number | null; charging: boolean | null } | null;
+  battery: { present: boolean | null; percent: number | null; charging: boolean | null } | null;
   primaryDisplay: {
     id: string;
     width: number;
@@ -1032,7 +1035,9 @@ export interface CypsBridge {
   };
   skills: {
     list(): Promise<SkillRecord[]>;
+    run(skillId: string, inputs: Record<string, string>): Promise<TaskRecord>;
     createDraft(draft: SkillDraftRequest): Promise<SkillRecord>;
+    recordTask(taskId: string): Promise<SkillRecord>;
     activate(skillId: string): Promise<SkillRecord>;
     delete(skillId: string): Promise<boolean>;
   };
@@ -1062,6 +1067,10 @@ export interface CypsBridge {
     deleteNote(id: string): Promise<boolean>;
     importMarkdown(): Promise<ProductivityNoteView | null>;
     exportMarkdown(id: string): Promise<{ ok: boolean; cancelled?: boolean; verified?: boolean }>;
+    listNoteDocuments(noteId: string): Promise<ProductivityDocumentLinkView[]>;
+    linkNoteDocument(noteId: string): Promise<ProductivityDocumentLinkView | null>;
+    openNoteDocument(noteId: string, linkId: string): Promise<{ ok: boolean }>;
+    unlinkNoteDocument(noteId: string, linkId: string): Promise<boolean>;
     listChecklists(): Promise<ProductivityChecklistView[]>;
     createChecklist(title: string): Promise<ProductivityChecklistView>;
     listTasks(): Promise<ProductivityTaskView[]>;
@@ -1077,6 +1086,7 @@ export interface CypsBridge {
   plugins: {
     list(): Promise<PluginView[]>;
     install(pluginId: string): Promise<PluginView[]>;
+    update(pluginId: string): Promise<PluginView[]>;
     uninstall(pluginId: string): Promise<PluginView[]>;
     setEnabled(pluginId: string, enabled: boolean): Promise<PluginView[]>;
   };
@@ -1192,6 +1202,7 @@ export interface ProjectView {
 }
 
 export interface ProductivityNoteView { id: string; projectId: string; title: string; body: string; createdAt: number; updatedAt: number }
+export interface ProductivityDocumentLinkView { id: string; noteId: string; displayName: string; byteSize: number; createdAt: number }
 export interface ProductivityChecklistView { id: string; projectId: string; title: string; createdAt: number; updatedAt: number }
 export interface ProductivityTaskView { id: string; projectId: string; title: string; description: string; status: 'open' | 'in_progress' | 'completed'; dueAt: number | null; checklistId: string | null; createdAt: number; updatedAt: number }
 

@@ -6,8 +6,12 @@ export const SkillInputSchema = z.object({
   description: z.string().min(1).max(500),
   required: z.boolean(),
 }).strict().superRefine((input, context) => {
-  if (/(password|passwd|secret|token|credential|api[_-]?key|cookie|cvv|otp)/i.test(input.name)) {
+  const credentialTerms = /(password|passwd|passphrase|secret|token|credential|api[ _-]?key|authorization|cookie|cvv|otp)/i;
+  if (credentialTerms.test(input.name)) {
     context.addIssue({ code: 'custom', path: ['name'], message: 'Credential inputs are not supported in stored skills.' });
+  }
+  if (credentialTerms.test(input.description)) {
+    context.addIssue({ code: 'custom', path: ['description'], message: 'Skill input descriptions cannot request credential material.' });
   }
 });
 

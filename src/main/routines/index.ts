@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../data/database';
 import type { SkillDefinition } from '../skills/schema';
+import { routineIncompatibility } from '../skills/plan';
 import { SkillStore } from '../skills/store';
 import { redactTaskText } from '../tasks/schema';
 
@@ -45,9 +46,8 @@ export class RoutineStore {
     if (!skill || skill.projectId !== input.projectId) {
       throw new Error('A routine must reference an active skill in the same project.');
     }
-    if (skill.inputs.some((value) => value.required)) {
-      throw new Error('Routines cannot run skills that need interactive inputs; use a skill with no required inputs.');
-    }
+    const incompatibility = routineIncompatibility(skill);
+    if (incompatibility) throw new Error(incompatibility);
     validateSchedule(input.localTime, input.timezone);
     const now = Date.now();
     const routine: LocalRoutine = {
@@ -368,6 +368,7 @@ function fromRunRow(row: RoutineRunRow): RoutineRun {
 function clip(value: string | undefined): string | null {
   return value ? redactTaskText(value.replace(/\s+/g, ' ')).slice(0, 1_000) : null;
 }
+
 
 interface RoutineRow {
   id: string; project_id: string; skill_id: string; name: string; local_time: string;

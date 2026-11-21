@@ -31,7 +31,7 @@ const EMPTY_SKILL: SkillDraftRequest = {
       locator: 'browser_inspect',
       action: 'browser_inspect',
       params: {},
-      expectation: { statusTextVisible: true },
+      expectation: { resultContains: 'status' },
       approvalRequired: false,
     },
   ],
@@ -53,8 +53,11 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
   const [selectedSkillId, setSelectedSkillId] = useState('');
   const [history, setHistory] = useState<Record<string, RoutineRunRecord[]>>({});
   const [retryConfirmation, setRetryConfirmation] = useState<string | null>(null);
+  const [runSkillId, setRunSkillId] = useState<string | null>(null);
+  const [runInputs, setRunInputs] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (bridge.kind !== 'ready') return;
@@ -64,7 +67,7 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
     ]);
     setSkills(nextSkills);
     setRoutines(nextRoutines);
-    setSelectedSkillId((current) => current || nextSkills.find((skill) => skill.status === 'active' && !skill.inputs.some((input) => input.required))?.id || '');
+    setSelectedSkillId((current) => current || nextSkills.find((skill) => skill.status === 'active' && skill.inputs.length === 0)?.id || '');
   }, [bridge]);
 
   useEffect(() => {
@@ -72,7 +75,7 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
   }, [refresh]);
 
   const schedulableSkills = useMemo(
-    () => skills.filter((skill) => skill.status === 'active' && !skill.inputs.some((input) => input.required)),
+    () => skills.filter((skill) => skill.status === 'active' && skill.inputs.length === 0),
     [skills],
   );
 
@@ -80,6 +83,7 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
     if (bridge.kind !== 'ready') return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const parsed: unknown = JSON.parse(draftJson);
       const created = await bridge.bridge.skills.createDraft(parsed as SkillDraftRequest);
@@ -91,6 +95,29 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
       setBusy(false);
     }
   }, [bridge, draftJson]);
+
+  const openDraftReview = useCallback((skill: SkillRecord) => {
+    setReviewing(skill);
+    setDraftJson(JSON.stringify(toDraftRequest(skill), null, 2));
+    setError(null);
+  }, []);
+
+  const saveRevisedDraft = useCallback(async () => {
+    if (bridge.kind !== 'ready' || !reviewing || reviewing.status !== 'draft') return;
+    setBusy(true);
+    setError(null);
+    try {
+      const parsed: unknown = JSON.parse(draftJson);
+      const revised = await bridge.bridge.skills.createDraft(parsed as SkillDraftRequest);
+      setSkills((current) => [revised, ...current]);
+      setReviewing(revised);
+      setDraftJson(JSON.stringify(toDraftRequest(revised), null, 2));
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [bridge, draftJson, reviewing]);
 
   const activate = useCallback(async (skillId: string) => {
     if (bridge.kind !== 'ready') return;
@@ -120,6 +147,26 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
       setError(messageOf(cause));
     }
   }, [bridge]);
+
+  const runSkillOnce = useCallback(async (skill: SkillRecord) => {
+    if (bridge.kind !== 'ready') return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const task = await bridge.bridge.skills.run(skill.id, runInputs[skill.id] ?? {});
+      setRunSkillId(null);
+      setRunInputs((current) => { const next = { ...current }; delete next[skill.id]; return next; });
+      await refresh();
+      setNotice(task.status === 'completed'
+        ? 'Skill run completed. See Tasks & Activity for the verified steps.'
+        : `Skill run ${task.status}. See Tasks & Activity for execution details.`);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [bridge, refresh, runInputs]);
 
   const createRoutine = useCallback(async () => {
     if (bridge.kind !== 'ready' || !selectedSkillId) return;
@@ -199,14 +246,17 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
         Skills stay in this project and run only after review. Routines run while Pixel is open; missed times are skipped, and a failed run pauses that routine.
       </p>
       {error ? <p role="alert" className="mb-2 rounded-lg border border-neutral-400/35 bg-neutral-500/12 px-2 py-1.5 text-[10.5px] text-neutral-100">{error}</p> : null}
+      {notice ? <p role="status" aria-live="polite" className="mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 py-1.5 text-[10.5px] text-[var(--color-ink-soft)]">{notice}</p> : null}
 
       {reviewing ? (
         <section className="mb-2 rounded-xl border border-neutral-300/35 bg-neutral-300/8 p-2">
           <h3 className="text-[11px] font-semibold text-neutral-100">Review draft: {reviewing.name}</h3>
           <p className="mt-1 text-[10px] text-[var(--color-ink-soft)]">{reviewing.purpose}</p>
-          <pre className="selectable mt-1 max-h-32 overflow-auto rounded-lg bg-black/20 p-1.5 font-mono text-[9px] leading-relaxed text-[var(--color-ink-dim)]">{JSON.stringify(reviewing, null, 2)}</pre>
+          <p className="mt-1 text-[9.5px] text-[var(--color-ink-dim)]">Review every tool, parameter, input and expected result. Saving edits creates a new draft version; activation stays separate.</p>
+          <textarea aria-label="Review skill definition JSON" value={draftJson} onChange={(event) => setDraftJson(event.target.value)} spellCheck={false} className="no-drag selectable mt-1 h-40 w-full resize-y rounded-lg border border-white/10 bg-black/20 p-1.5 font-mono text-[9px] leading-relaxed text-[var(--color-ink-soft)] outline-none focus:border-neutral-300/50" />
           <div className="mt-1.5 flex gap-1.5">
-            <button disabled={busy} type="button" onClick={() => void activate(reviewing.id)} className="rounded-lg bg-neutral-500/25 px-2 py-1 text-[10px] font-semibold text-neutral-100 disabled:opacity-50">Approve and activate</button>
+            {reviewing.status === 'draft' ? <button disabled={busy} type="button" onClick={() => void saveRevisedDraft()} className="rounded-lg border border-neutral-300/25 px-2 py-1 text-[10px] text-neutral-100 disabled:opacity-50">Save revised version</button> : null}
+            <button disabled={busy || reviewing.status !== 'draft'} type="button" onClick={() => void activate(reviewing.id)} className="rounded-lg bg-neutral-500/25 px-2 py-1 text-[10px] font-semibold text-neutral-100 disabled:opacity-50">Approve and activate</button>
             <button type="button" onClick={() => void deleteSkill(reviewing.id)} className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-[var(--color-ink-soft)]">Discard</button>
           </div>
         </section>
@@ -225,13 +275,22 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
           <button type="button" onClick={() => void refresh().catch((cause: unknown) => setError(messageOf(cause)))} aria-label="Refresh skills and routines" className="rounded-md p-1 text-[var(--color-ink-dim)] hover:bg-white/10"><RefreshCw size={11} /></button>
         </div>
         {skills.length === 0 ? <p className="px-1 py-1 text-[10px] text-[var(--color-ink-dim)]">No saved skills yet.</p> : skills.map((skill) => (
-          <div key={skill.id} className="flex items-center gap-1 border-t border-white/6 py-1">
-            <button type="button" onClick={() => setReviewing(skill)} className="min-w-0 flex-1 text-left">
+          <div key={skill.id} className="flex flex-wrap items-center gap-1 border-t border-white/6 py-1">
+              <button type="button" onClick={() => openDraftReview(skill)} className="min-w-0 flex-1 text-left">
               <span className="block truncate text-[10.5px] text-[var(--color-ink-soft)]">{skill.name} · v{skill.version}</span>
               <span className="text-[9px] uppercase tracking-wide text-[var(--color-ink-dim)]">{skill.status}</span>
             </button>
-            {skill.status === 'draft' ? <button type="button" onClick={() => setReviewing(skill)} className="rounded-md px-1.5 py-1 text-[9.5px] text-neutral-100 hover:bg-white/8">Review</button> : null}
+            {skill.status === 'draft' ? <button type="button" onClick={() => openDraftReview(skill)} className="rounded-md px-1.5 py-1 text-[9.5px] text-neutral-100 hover:bg-white/8">Review</button> : null}
+            {skill.status === 'active' ? <button type="button" disabled={busy} onClick={() => setRunSkillId((current) => current === skill.id ? null : skill.id)} className="rounded-md px-1.5 py-1 text-[9.5px] text-neutral-100 hover:bg-white/8 disabled:opacity-50">Run once</button> : null}
             <button type="button" onClick={() => void deleteSkill(skill.id)} aria-label={`Delete ${skill.name}`} className="rounded-md p-1 text-[var(--color-ink-dim)] hover:bg-neutral-500/15 hover:text-neutral-100"><Trash2 size={11} /></button>
+            {runSkillId === skill.id ? (
+              <form onSubmit={(event) => { event.preventDefault(); void runSkillOnce(skill); }} aria-label={`Run ${skill.name} once`} className="w-full rounded-lg border border-[var(--color-border)] bg-black/15 p-1.5">
+                <p className="mb-1 text-[9px] text-[var(--color-ink-dim)]">Input values are used for this run and redacted from task history. Each tool still follows current permissions and checks.</p>
+                {skill.inputs.map((input) => <label key={input.name} className="mb-1 block text-[9px] text-[var(--color-ink-soft)]">{input.description} · {input.name}{input.required ? ' · required' : ' · optional'}<input required={input.required} maxLength={2_000} value={runInputs[skill.id]?.[input.name] ?? ''} onChange={(event) => setRunInputs((current) => ({ ...current, [skill.id]: { ...current[skill.id], [input.name]: event.target.value } }))} className="no-drag mt-0.5 w-full rounded-md border border-white/10 bg-black/25 px-1.5 py-1 text-[10px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]" /></label>)}
+                {skill.inputs.length === 0 ? <p className="mb-1 text-[9px] text-[var(--color-ink-dim)]">This skill has no inputs.</p> : null}
+                <div className="flex gap-1.5"><button type="submit" disabled={busy} className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-[9px] font-semibold text-black disabled:opacity-50">Run reviewed steps</button><button type="button" onClick={() => { setRunSkillId(null); setRunInputs((current) => { const next = { ...current }; delete next[skill.id]; return next; }); }} className="rounded-md border border-white/10 px-2 py-1 text-[9px] text-[var(--color-ink-soft)]">Cancel</button></div>
+              </form>
+            ) : null}
           </div>
         ))}
       </section>
@@ -285,4 +344,9 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toDraftRequest(skill: SkillRecord): SkillDraftRequest {
+  const { id: _id, projectId: _projectId, status: _status, version: _version, createdAt: _createdAt, updatedAt: _updatedAt, ...draft } = skill;
+  return draft;
 }

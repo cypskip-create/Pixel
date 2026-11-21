@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Check, FolderKanban, Maximize2, Minimize2, Plus, ShieldAlert, Wrench, X,
+  Maximize2, Minimize2, ShieldAlert, Wrench, X,
 } from 'lucide-react';
 import type {
   AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, ImageAttachment, Mode, PermissionDecision,
@@ -18,9 +18,12 @@ import { PermissionCard } from '@/components/PermissionCard';
 import { PixelBoard } from '@/components/PixelBoard';
 import { PixelMark } from '@/components/PixelMark';
 import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
+import { WorkspaceProjects } from '@/components/WorkspaceProjects';
+import { WorkspacePluginManager } from '@/components/WorkspacePluginManager';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
+import { WorkspaceTasks } from '@/components/WorkspaceTasks';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
@@ -518,16 +521,17 @@ export function Workspace(): React.JSX.Element {
             />
           </section> : null}
 
-          {view === 'projects' ? <ProjectsView projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /> : null}
-          {view === 'tasks' ? <TasksView tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} /> : null}
+          {view === 'projects' ? <WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /> : null}
+          {view === 'tasks' ? <WorkspaceTasks tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setView('skills'); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /> : null}
           {view === 'notes' ? <ProductivityPanel /> : null}
           {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'tools' ? <ToolsView tools={tools} /> : null}
-          {view === 'plugins' ? <PluginsView plugins={plugins} onChange={async (action, pluginId, enabled) => {
+          {view === 'plugins' ? <WorkspacePluginManager plugins={plugins} onChange={async (action, pluginId, enabled) => {
             if (bridge.kind !== 'ready') return;
             try {
               const next = action === 'install' ? await bridge.bridge.plugins.install(pluginId)
+                : action === 'update' ? await bridge.bridge.plugins.update(pluginId)
                 : action === 'uninstall' ? await bridge.bridge.plugins.uninstall(pluginId)
                   : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
               setPlugins(next);
@@ -553,16 +557,6 @@ export function Workspace(): React.JSX.Element {
     </div>
   );
 }
-function ProjectsView({ projects, draft, setDraft, onSelect }: { projects: ProjectView[]; draft: string; setDraft: (value: string) => void; onSelect: (name: string) => void }): React.JSX.Element {
-  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Projects</h1><p>Each project has its own conversations and memory scope.</p></div><form className="workspace-create-project" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) onSelect(draft.trim()); }}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Create or open a project" aria-label="Project name" maxLength={80} /><button type="submit" disabled={!draft.trim()}><Plus size={15} /> Open project</button></form><div className="workspace-project-grid">{projects.map((project) => <button type="button" key={project.id} onClick={() => onSelect(project.name)} className={`workspace-project-card ${project.active ? 'is-active' : ''}`}><span className="workspace-project-icon"><FolderKanban size={18} /></span><span className="min-w-0 flex-1 text-left"><strong>{project.name}</strong><small>{project.description || (project.active ? 'Current project' : 'Project scope')}</small></span>{project.active ? <Check size={16} className="text-neutral-200" /> : null}</button>)}</div><p className="mt-4 text-[11px] text-[var(--color-ink-dim)]">Pixel stores project names and memory in its local SQLite database. Project deletion is not available in this build.</p></section>;
-}
-
-function TasksView({ tasks, audit, onAction, onContinue }: { tasks: TaskRecord[]; audit: AuditEntry[]; onAction: (action: 'pause'|'resume'|'cancel', id: string) => void; onContinue: (id: string) => void }): React.JSX.Element {
-  const active = tasks.filter((task) => !['completed','failed','cancelled'].includes(task.status));
-  const finished = tasks.filter((task) => ['completed','failed','cancelled'].includes(task.status));
-  return <section className="workspace-page"><div className="workspace-page-heading"><h1>Tasks & Activity</h1><p>Task outcomes and audit activity.</p></div>{active.length ? <><h2 className="workspace-section-title">Active and waiting</h2><div className="workspace-task-grid">{active.map((task) => { const display = taskDisplayState(task); return <article className="workspace-task-card" key={task.id}><header><span className={`workspace-task-status status-${display.tone}`}>{display.verificationPending ? display.label : task.status.replaceAll('_',' ')}</span><time>{new Date(task.updatedAt ?? task.createdAt).toLocaleString()}</time></header><h3>{task.title}</h3>{task.request ? <p className="workspace-task-request">{task.request}</p> : null}<div className="workspace-task-steps">{task.steps.map((step) => <div key={step.id}><span className={`workspace-step-dot step-${step.status}`} /><span>{step.title}</span>{step.detail ? <small>{step.detail}</small> : null}</div>)}</div>{task.result ? <p className="workspace-task-result">{task.result}</p> : null}<footer>{task.status === 'running' || task.status === 'planning' ? <button type="button" onClick={() => onAction('pause',task.id)}>Pause</button> : null}{task.status === 'paused' ? <button type="button" onClick={() => onAction('resume',task.id)}>Resume</button> : null}{task.reobserveRequired ? <button type="button" onClick={() => onContinue(task.id)}>Continue after review</button> : null}{!['completed','failed','cancelled'].includes(task.status) ? <button className="danger" type="button" onClick={() => onAction('cancel',task.id)}>Cancel</button> : null}</footer></article>; })}</div></> : <div className="workspace-empty-card">No active tasks.</div>}{finished.length ? <><h2 className="workspace-section-title mt-6">Recent outcomes</h2><div className="workspace-task-grid">{finished.slice(0,12).map((task) => { const display = taskDisplayState(task); return <article className="workspace-task-card" key={task.id}><header><span className={`workspace-task-status status-${display.tone}`}>{display.verificationPending ? display.label : task.status}</span><time>{new Date(task.updatedAt ?? task.createdAt).toLocaleString()}</time></header><h3>{task.title}</h3>{display.verificationPending ? <p className="workspace-task-result">The action finished, but its postcondition still needs verification.</p> : task.result ? <p className="workspace-task-result">{task.result}</p> : <p className="text-[12px] text-[var(--color-ink-dim)]">No saved result.</p>}</article>; })}</div></> : null}<h2 className="workspace-section-title mt-6">Audit activity</h2><div className="workspace-audit-list">{audit.slice(0,30).map((entry) => <article key={entry.id}><span className={`audit-outcome outcome-${entry.outcome}`} /><div><p>{entry.summary}</p>{entry.detail ? <small>{entry.detail}</small> : null}</div><time>{new Date(entry.at).toLocaleTimeString()}</time></article>)}</div></section>;
-}
-
 function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element {
   const categories: Array<{ id: ToolCatalogEntry['category']; title: string }> = [
     { id: 'screen', title: 'Screen' },
@@ -579,11 +573,11 @@ function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element 
   const capabilityNotes = [
     { title: 'Desktop drawing editor', status: 'Partial', detail: 'Pixel can show passive highlights and arrows on verified accessible controls. Freehand desktop editing and saved overlay sessions are not available.' },
     { title: 'File organization', status: 'Partial', detail: 'Scoped list, filtered search, metadata, read, write, create, copy, rename/move, bounded batch operations, duplicate detection, approved open and Recycle Bin send are available. Visible application launch and restore-from-Recycle-Bin verification remain outstanding.' },
-    { title: 'Document creation', status: 'Partial', detail: 'Documents can be indexed and searched. Direct authored document round-trip remains unavailable.' },
-    { title: 'Workflow recording', status: 'Partial', detail: 'Saved workflow and local routine infrastructure exists. A live semantic recorder integrated with normal tasks is not available.' },
-    { title: 'Specialist delegation', status: 'Partial', detail: 'The bounded coordinator exists but is not connected to live conversation execution. Infrastructure and Pixel Code specialists are unavailable.' },
+    { title: 'Document creation', status: 'Partial', detail: 'Supported UTF-8 text files can be created or edited with approval and read-back verification. PDF and Office authoring/export are not supported.' },
+    { title: 'Workflow recording', status: 'Partial', detail: 'Completed verified tasks can be saved as project-scoped drafts and edited into a new version. Active tool-only skills can run once with declared inputs; scheduled routines use the stored tool order. Fresh observations, current approvals, supported result checks and postconditions are enforced. Non-tool steps and broader predicate types remain unsupported.' },
+    { title: 'Specialist delegation', status: 'Partial', detail: 'Research, browser, systems, and knowledge specialists can run bounded subtasks through the live model pipeline and normal tool approval gateway. Infra and Pixel Code are unavailable; Windows acceptance and durable task recovery remain unverified.' },
     { title: 'Clipboard access', status: 'Partial', detail: 'Approval-gated one-shot text read/copy/conditional restore and verified field set are available. Real Windows acceptance remains outstanding.' },
-    { title: 'Notes and planning tasks', status: 'Partial', detail: 'Project-scoped notes and tasks are persisted, agent-editable, and user-browsable/editable in Notes & Planning. Checklist grouping, richer due-date editing, Markdown import/export, and Windows acceptance remain outstanding.' },
+    { title: 'Notes and planning tasks', status: 'Partial', detail: 'Project-scoped notes, linked local documents, checklists, and tasks persist and are user/agent editable. Markdown import/export and storage/UI bridge tests exist; actual Windows dialog and document-open acceptance remain outstanding.' },
     { title: 'Expanded system diagnostics', status: 'Partial', detail: 'CPU, memory, disk, uptime and display facts are available. Network adapter, running-app, selected-process and audio-device diagnostics are not available.' },
   ];
   return <section className="workspace-page">
@@ -611,36 +605,6 @@ function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element 
         <p>{item.detail}</p>
       </article>)}</div>
     </section>
-  </section>;
-}
-
-function PluginsView({ plugins, onChange }: {
-  plugins: PluginView[];
-  onChange: (action: 'install' | 'uninstall' | 'enable', pluginId: string, enabled?: boolean) => Promise<void>;
-}): React.JSX.Element {
-  const available = plugins.filter((plugin) => !plugin.installed);
-  const installed = plugins.filter((plugin) => plugin.installed);
-  const renderPlugin = (plugin: PluginView): React.JSX.Element => <article className="workspace-plugin-card" key={plugin.id}>
-    <header><div><h2>{plugin.name}</h2><p>by {plugin.publisher} · v{plugin.version}</p></div><span className={`workspace-plugin-status plugin-${plugin.health}`}>{plugin.health}</span></header>
-    <p className="workspace-plugin-description">{plugin.description}</p>
-    <section><h3>Capabilities</h3><ul>{plugin.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul></section>
-    <section><h3>Permissions</h3><ul>{plugin.permissions.map((permission) => <li key={permission}>{permission}</li>)}</ul></section>
-    <p className="workspace-plugin-connection">{plugin.connection === 'not_required' ? 'No account connection required' : plugin.connection === 'connected' ? 'Account connected' : 'Account not connected'}</p>
-    {plugin.error ? <p className="workspace-plugin-error" role="status">{plugin.error}</p> : null}
-    <footer>
-      {!plugin.installed ? <button type="button" onClick={() => void onChange('install', plugin.id)}>Install</button> : null}
-      {plugin.installed ? <button type="button" aria-pressed={plugin.enabled} onClick={() => void onChange('enable', plugin.id, !plugin.enabled)}>{plugin.enabled ? 'Disable' : 'Enable'}</button> : null}
-      {plugin.installed ? <button type="button" className="workspace-plugin-remove" onClick={() => void onChange('uninstall', plugin.id)}>Uninstall</button> : null}
-    </footer>
-  </article>;
-
-  return <section className="workspace-page workspace-plugins-page">
-    <div className="workspace-page-heading"><h1>Plugins</h1><p>Connect Pixel to reviewed capabilities. Installing a plugin is separate from connecting an external account.</p></div>
-    <div className="workspace-plugin-notice"><strong>Plugin safety</strong><span>Pixel’s first plugin uses a bundled, declarative tool adapter. Third-party code does not run inside Electron or receive direct filesystem, credential, or native access.</span></div>
-    <h2 className="workspace-section-title">Browse Plugins</h2>
-    {available.length ? <div className="workspace-plugin-grid">{available.map(renderPlugin)}</div> : <div className="workspace-empty-card">All plugins in the current catalog are installed.</div>}
-    <h2 className="workspace-section-title mt-6">Installed Plugins</h2>
-    {installed.length ? <div className="workspace-plugin-grid">{installed.map(renderPlugin)}</div> : <div className="workspace-empty-card">No plugins installed. Pixel’s built-in tools remain available.</div>}
   </section>;
 }
 

@@ -24,6 +24,12 @@ export const MAX_COPY_FILE_BYTES = 50_000_000;
 export const MAX_BATCH_FILES = 20;
 export const MAX_DUPLICATE_SCAN_BYTES = 500_000_000;
 const OPENABLE_DOCUMENT_EXTENSIONS = new Set(['.csv', '.docx', '.jpeg', '.jpg', '.md', '.pdf', '.png', '.pptx', '.rtf', '.txt', '.webp', '.xlsx']);
+const UNSUPPORTED_TEXT_WRITE_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xlsm', '.ppt', '.pptx', '.odt', '.ods', '.odp',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tif', '.tiff',
+  '.zip', '.7z', '.rar', '.tar', '.gz', '.exe', '.dll', '.msi', '.com', '.bin',
+  '.sqlite', '.sqlite3', '.db', '.mp3', '.wav', '.mp4', '.mkv', '.avi', '.woff', '.woff2', '.ttf', '.otf', '.wasm',
+]);
 
 export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
@@ -99,7 +105,7 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   },
   {
     name: 'file_write',
-    description: 'Writes UTF-8 text to one file in the current user home folder. Never creates directories. Existing files are refused unless overwrite is explicitly true. Requires approval for this exact write.',
+    description: 'Creates or edits a UTF-8 text file such as Markdown, plain text, CSV, JSON, HTML or code under the current user home folder. It does not generate binary PDF or Office documents. Never creates directories; existing files require overwrite: true. Requires approval for this exact write and verifies by reading the result back.',
     category: 'files',
     risk: 'high',
     requiresApproval: true,
@@ -588,6 +594,9 @@ export class FileTools {
     const parent = realpathSync(resolve(requested, '..'));
     assertWithinHome(parent);
     const path = join(parent, basename(requested));
+    if (UNSUPPORTED_TEXT_WRITE_EXTENSIONS.has(extname(path).toLowerCase())) {
+      return { ok: false, content: 'This destination uses a binary document or media format. Pixel’s file_write tool creates UTF-8 text formats such as .md, .txt, .csv, .json and .html; it cannot generate PDF or Office binaries.', errorCode: 'FAILED' };
+    }
     const overwrite = args.overwrite === true;
     let existing = false;
     try {

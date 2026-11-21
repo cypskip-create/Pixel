@@ -107,6 +107,26 @@ describe('local file tools', () => {
     expect(readFileSync(path, 'utf8')).toBe('two');
   });
 
+  it('authors supported UTF-8 documents with read-back and refuses binary document exports', () => {
+    const root = tempHome();
+    const tools = new FileTools();
+    for (const [name, content] of [['brief.md', '# Brief\n\nDraft'], ['data.csv', 'name,value\nPix,1'], ['record.json', '{"ok":true}']]) {
+      const path = join(root, name);
+      const result = tools.run('file_write', { path, content });
+      expect(result.ok, name).toBe(true);
+      expect(result.verification?.summary).toContain('confirmed');
+      expect(readFileSync(path, 'utf8')).toBe(content);
+    }
+
+    const pdf = join(root, 'report.pdf');
+    const originalPdf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00]);
+    writeFileSync(pdf, originalPdf);
+    const denied = tools.run('file_write', { path: pdf, content: 'not a PDF', overwrite: true });
+    expect(denied).toMatchObject({ ok: false, errorCode: 'FAILED' });
+    expect(denied.content).toContain('cannot generate PDF');
+    expect(readFileSync(pdf)).toEqual(originalPdf);
+  });
+
   it('does not create missing parent directories or follow symlinks', () => {
     const root = tempHome();
     const absent = join(root, 'missing', 'new.txt');

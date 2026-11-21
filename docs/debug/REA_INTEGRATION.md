@@ -16,10 +16,14 @@ not install a provider or modify the Pixel package.
 Verification recorded so far:
 
 - `codex mcp list` shows `rea` enabled with the pinned executable and script.
-- Direct `rea doctor --client codex --skill --json` reports Node, Codex
-  registration and skill identity healthy; `environment_healthy` is false only
-  because optional analysis engines (Hopper, Ghidra, IDA, JADX and Kuna) are
-  not installed/configured. Those are unnecessary for static JS analysis.
+- Direct `rea doctor --client codex --skill --json` reports the Codex
+  registration and installed skill identity aligned (`rea` 6.10.1, skill 63).
+  Its overall `environment_healthy` value is false. Optional analysis engines
+  (Hopper, Ghidra, IDA, JADX and Kuna) are not configured, and the diagnostic
+  also reports registrations for unrelated Codex clients as missing/stale.
+  The requested Codex registration/skill checks are healthy; no other client
+  configuration was changed. These optional tools are unnecessary for static
+  JavaScript analysis.
 - A `rea doctor` attempt via `npx` was blocked because this sandbox's npm
   registry DNS returned `ENOTFOUND`; direct invocation of the pinned installed
   entry succeeds without contacting the registry.
@@ -32,10 +36,48 @@ Verification recorded so far:
   was written outside the repository. REA parsed JavaScript and package
   metadata without executing the fixture. The analysis reported static unknowns
   and limitations; it is not a runtime safety verdict.
-- REA MCP tools are not present in the current agent tool list. Restart Codex
-  to reload the new registration and then verify an actual tool call. The
-  independent stdio handshake proves the server starts, not current-session
-  connectivity.
+- `codex mcp list` reports `rea` enabled, but the current session's tool catalog
+  does not expose REA. `list_mcp_resources({server:"rea"})` reports `unknown
+  MCP server`, and doctor reports `live_server: unknown`. Restart/reconnect
+  Codex and verify a real tool call before claiming current-session
+  connectivity. An independent stdio handshake proves server startup only.
+- Rechecked through Codex CLI on 2026-11-21: `codex mcp list` continues to label
+  `rea` as **enabled / Unsupported**. `rea doctor --client codex --skill --json`
+  reports the Codex registration and skill identity healthy, despite unrelated
+  missing provider/client diagnostics.
+- CLI fallback protocol test: a standalone stdio MCP client negotiated
+  `2024-11-05`, listed 263 tools, then called
+  `analyze_javascript_application` on a temporary Electron fixture. REA returned
+  Evidence `ev_8dab99644a9753790a6514321e92cb0d50d076cc4439cc51005c98dbc163759f`
+  and parent analysis `ev_b3a355351bb565e3642c5153f41a00f7a748379891fa199030f4b093923c83f7`.
+  The fixture was removed after analysis. This proves a direct MCP stdio tool
+  call works, but does not make REA tools available inside this Codex session.
+- An additional bounded `analyze_javascript_application` call against the
+  existing packaged Pixel `app.asar` did not return before the client timeout;
+  it produced no usable Evidence. Do not treat that as analysis of the current
+  source tree or as success.
+- A read-only `capture_browser_scenario` attempt for the public Inspora Folders
+  page used the installed Chrome executable and a temporary profile. Chrome
+  exited during startup (`crashpad ... TransactNamedPipe ... pipe has been
+  ended`); REA returned `execution_failure` and `cleanup_incomplete` with no
+  retained resources. The reported Chrome PID was absent on a follow-up process
+  check. A CIM check was denied by the host. The suggested no-sandbox override
+  was not applied. No page Evidence was produced.
+- 2026-11-21 follow-up: direct invocation of the pinned CLI again returned
+  version `6.10.1`; doctor confirmed the Codex registration is aligned. This
+  session still could not call REA. A local REA download/analysis attempt for
+  the public ASCII Sharks source failed because DNS could not resolve
+  `codeload.github.com`. The public raw `engine.ts` and `renderer.ts` were
+  inspected with the browser reader instead; see
+  `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`.
+- 2026-11-21 current-session recheck: `codex mcp list` still reports `rea`
+  **enabled / Unsupported**. The live tool catalog contains no REA namespace,
+  and `list_mcp_resources({server:"rea"})` returns `unknown MCP server`. This
+  confirms that Codex restart/reconnect is still required before an in-session
+  REA call can be tested; no such call is claimed for this session. The
+  approved Electron permission prompt was accepted by the user, but Windows
+  app inventory still exposed no Pixel window, so no live Workspace screenshot
+  was available either.
 
 The earlier DeepSeek client configuration and REA 6.8.0 history below remain
 as historical records. That registration was not changed by the Codex setup.

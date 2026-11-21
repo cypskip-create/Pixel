@@ -24,6 +24,7 @@ const packageJson = JSON.parse(read('package.json')) as {
 };
 const bootSource = read('src/main/startup/boot.ts');
 const selfCheckSource = read('src/main/startup/selfcheck.ts');
+const devLauncher = read('scripts/dev.mjs');
 
 describe('entry point ordering', () => {
   it('imports the boot logger before anything else', () => {
@@ -60,7 +61,15 @@ describe('entry point ordering', () => {
     expect(appSource).toContain('export async function start()');
   });
 
-  it('uses the Vite dev server and keeps GPU disablement diagnostic-only', () => {
+  it('selects a free loopback port and passes the same URL to Electron', () => {
+    expect(packageJson.scripts.dev).toBe('node scripts/dev.mjs');
+    expect(packageJson.scripts['dev:gpu']).toBe('node scripts/dev.mjs --gpu');
+    expect(devLauncher).toContain('startRendererServer(root)');
+    expect(devLauncher).toContain('CYPS_DEV_SERVER_URL: rendererUrl');
+    expect(devLauncher).toContain("'--disable-gpu'");
+  });
+
+  it('keeps the standalone fixed-port Electron helpers and GPU diagnostics', () => {
     expect(packageJson.scripts['dev:electron']).toContain(
       'CYPS_DEV_SERVER_URL=http://localhost:5199',
     );
@@ -70,7 +79,6 @@ describe('entry point ordering', () => {
     expect(appSource).not.toContain("appendSwitch('disable-software-rasterizer')");
     expect(packageJson.scripts['dev:electron:gpu']).toContain('electron .');
     expect(packageJson.scripts['dev:electron:gpu']).not.toContain('--disable-gpu');
-    expect(packageJson.scripts['dev:gpu']).toContain('npm:dev:electron:gpu');
   });
 
   it('runs the single-instance lock only after logging exists', () => {

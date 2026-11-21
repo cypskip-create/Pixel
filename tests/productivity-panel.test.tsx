@@ -24,6 +24,7 @@ describe('project productivity UI', () => {
         deleteNote: async (id: string) => { notes = notes.filter((note) => note.id !== id); return true; },
         importMarkdown: async () => { const note = { id: 'note_imported', projectId: 'project-a', title: 'Imported', body: 'Imported body', createdAt: 2, updatedAt: 2 }; notes = [note, ...notes]; return note; },
         exportMarkdown: async () => ({ ok: true, verified: true }),
+        listNoteDocuments: async () => [], linkNoteDocument: async () => null, openNoteDocument: async () => ({ ok: false }), unlinkNoteDocument: async () => false,
         listTasks: async () => tasks,
         listChecklists: async () => [],
         createTask: async (title: string, description = '') => ({ id: 'ptask_12345678', projectId: 'project-a', title, description, status: 'open' as const, dueAt: null, createdAt: 1, updatedAt: 1 }),
@@ -46,7 +47,7 @@ describe('project productivity UI', () => {
       listNotes: async () => imported ? [{ id: 'note_imported', projectId: 'project-a', title: 'Imported', body: 'Imported body', createdAt: 2, updatedAt: 2 }] : [],
       createNote: async () => { throw new Error('unused'); }, updateNote: async () => null, deleteNote: async () => false,
       importMarkdown: async () => { imported++; return { id: 'note_imported', projectId: 'project-a', title: 'Imported', body: 'Imported body', createdAt: 2, updatedAt: 2 }; },
-      exportMarkdown: async () => ({ ok: true, verified: true }), listTasks: async () => [], listChecklists: async () => [], createTask: async () => { throw new Error('unused'); }, updateTask: async () => null,
+      exportMarkdown: async () => ({ ok: true, verified: true }), listNoteDocuments: async () => [], linkNoteDocument: async () => null, openNoteDocument: async () => ({ ok: false }), unlinkNoteDocument: async () => false, listTasks: async () => [], listChecklists: async () => [], createTask: async () => { throw new Error('unused'); }, updateTask: async () => null,
     } } as unknown as CypsBridge;
     const rendered = mount({ kind: 'ready', bridge: api });
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
@@ -56,11 +57,35 @@ describe('project productivity UI', () => {
     expect(rendered.querySelector<HTMLInputElement>('[aria-label="Note title"]')?.value).toBe('Imported');
   });
 
+  it('shows linked documents and routes open/unlink controls through the typed bridge', async () => {
+    const note = { id: 'note_localdoc', projectId: 'project-a', title: 'Sources', body: '', createdAt: 1, updatedAt: 1 };
+    const link = { id: 'ndoc_123456', noteId: note.id, displayName: 'brief.pdf', byteSize: 2048, createdAt: 2 };
+    let links = [link]; let opened = '';
+    const api = { productivity: {
+      listNotes: async () => [note], listTasks: async () => [], listChecklists: async () => [],
+      createNote: async () => note, updateNote: async () => note, deleteNote: async () => true,
+      importMarkdown: async () => null, exportMarkdown: async () => ({ ok: true }),
+      listNoteDocuments: async () => links, linkNoteDocument: async () => link,
+      openNoteDocument: async (_noteId: string, linkId: string) => { opened = linkId; return { ok: true }; },
+      unlinkNoteDocument: async (_noteId: string, linkId: string) => { links = links.filter((item) => item.id !== linkId); return true; },
+      createTask: async () => { throw new Error('unused'); }, updateTask: async () => null,
+    } } as unknown as CypsBridge;
+    const rendered = mount({ kind: 'ready', bridge: api });
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    const noteRow = [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Sources'));
+    await act(async () => { noteRow?.click(); await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    expect(rendered.textContent).toContain('brief.pdf');
+    await act(async () => { rendered.querySelector<HTMLButtonElement>('[aria-label="Open brief.pdf"]')?.click(); await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    expect(opened).toBe(link.id);
+    await act(async () => { rendered.querySelector<HTMLButtonElement>('[aria-label="Unlink brief.pdf"]')?.click(); await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    expect(rendered.textContent).toContain('No local documents linked to this note.');
+  });
+
   it('creates tasks with descriptions and due dates through the typed bridge', async () => {
     let received: { title: string; description: string; dueAt?: string } | null = null;
     const api = { productivity: {
       listNotes: async () => [], createNote: async () => { throw new Error('unused'); }, updateNote: async () => null, deleteNote: async () => false,
-      importMarkdown: async () => null, exportMarkdown: async () => ({ ok: true }), listTasks: async () => [], listChecklists: async () => [],
+      importMarkdown: async () => null, exportMarkdown: async () => ({ ok: true }), listNoteDocuments: async () => [], linkNoteDocument: async () => null, openNoteDocument: async () => ({ ok: false }), unlinkNoteDocument: async () => false, listTasks: async () => [], listChecklists: async () => [],
       createTask: async (title: string, description = '', dueAt?: string) => { received = { title, description, dueAt }; return { id: 'ptask_12345678', projectId: 'project-a', title, description, status: 'open' as const, dueAt: dueAt ? Date.parse(dueAt) : null, createdAt: 1, updatedAt: 1 }; },
       updateTask: async () => null,
     } } as unknown as CypsBridge;

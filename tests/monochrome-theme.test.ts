@@ -31,28 +31,28 @@ function expandHex(hex: string): string[] {
   return [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)];
 }
 
-describe('charcoal Pixel design system', () => {
+describe('Pixel warm matte design system', () => {
   const files = sourceFiles(rendererRoot);
   const allRendererSource = files.map((file) => readFileSync(file, 'utf8')).join('\n');
   const css = readFileSync(join(rendererRoot, 'index.css'), 'utf8');
 
-  it('defines charcoal surfaces, blue interactive accents, and independent Pix/status colors', () => {
+  it('defines warm matte surfaces, orange interactive accents, and independent Pix/status colors', () => {
     for (const [token, value] of [
-      ['--color-app-bg', '#181818'],
-      ['--color-sidebar', '#1B1B1B'],
-      ['--color-surface', '#343434'],
-      ['--color-surface-raised', '#232323'],
-      ['--color-hover', '#303030'],
-      ['--color-selected', '#494949'],
-      ['--color-border', '#353535'],
-      ['--color-border-strong', '#505050'],
-      ['--color-ink', '#F3F3F3'],
-      ['--color-ink-soft', '#D3D3D3'],
-      ['--color-ink-dim', '#ABABAB'],
-      ['--color-accent', '#4299F5'],
-      ['--color-accent-hover', '#60A9FA'],
-      ['--color-warning', '#D5AB72'],
-      ['--color-destructive', '#D88B83'],
+      ['--color-app-bg', '#0C0B0A'],
+      ['--color-sidebar', '#11100F'],
+      ['--color-surface', '#1B1816'],
+      ['--color-surface-raised', '#211D1A'],
+      ['--color-hover', '#28221E'],
+      ['--color-selected', '#30231B'],
+      ['--color-border', '#332B26'],
+      ['--color-border-strong', '#51443B'],
+      ['--color-ink', '#E9E4DD'],
+      ['--color-ink-soft', '#C9C1B8'],
+      ['--color-ink-dim', '#96908A'],
+      ['--color-accent', '#F28A43'],
+      ['--color-accent-hover', '#FFA262'],
+      ['--color-warning', '#D96A2B'],
+      ['--color-destructive', '#D56D61'],
       ['--pix-face', '#0E1013'],
       ['--pix-fold', '#A7D7C2'],
       ['--pix-eye', '#9BE5C7'],
@@ -69,6 +69,8 @@ describe('charcoal Pixel design system', () => {
       '0e1013', '101113', '1a1e23', '20252a', '2a3138', '333a40', '394147', '3a4147', '515a61',
       'e6e9ed', 'c6cacd', '9aa1a6', 'd2d7db', 'a7d7c2', 'd6ede3', 'd5ab72', 'd88b83',
       '4299f5', '60a9fa', '1d70c9', '185ea9', '214d90', '181818', '1b1b1b', '232323', '303030', '353535', '505050', '171717', '252525', '343434', '202020', '414141', '494949', '444444', '595959', 'f3f3f3', 'd3d3d3', 'ababab', 'd8d8d8',
+      '0c0b0a', '11100f', '1b1816', '211d1a', '28221e', '30231b', '332b26', '51443b', '191613', 'e9e4dd', 'c9c1b8', '96908a', 'f28a43', 'ffa262', '1a100a', 'd96a2b', 'd56d61', '79b58a', '0f0e0d', '211913', '211e1b', 'c88e68', 'e0a16f', '604735', '3a291f', '2b201a', 'e7a16d', 'bd825b', 'f3d5bd', '8c4d25', 'd8a47e', 'f6e4d6', '29211c',
+      'f6f2ed', 'efe8e0', 'fbf8f4', 'eee5dc', 'f6dcc7', 'd8cbbf', 'b7a494', 'b85b20', '964414', '9a4e24', 'a3443a', '39794c',
       '090909', '050505', '2b2b2b', 'e4e4e4', '111111', '555555', 'f0f0f0', 'bfbfbf',
       '9be5c7', '8cb8a5', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',
       'f1f3f3', 'e7eaea', 'f7f9f9', 'e3e7e7', 'd7dedd', 'c8d0ce', '9aa6a2', 'f5f7f6',

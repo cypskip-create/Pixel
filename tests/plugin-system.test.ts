@@ -45,6 +45,15 @@ describe('Pixel plugin foundation', () => {
     expect(() => store.setEnabled(GITHUB_PUBLIC_PLUGIN.id, true)).not.toThrow();
   });
 
+  it('fails closed for a plugin targeting an unsupported Pixel API version', () => {
+    const incompatible = { ...GITHUB_PUBLIC_PLUGIN, pixelApiVersion: 2 };
+    const store = new PluginStore(database(), [incompatible]);
+    store.install(incompatible.id);
+    expect(store.list()[0]).toMatchObject({ installed: true, enabled: false, compatibility: 'unsupported_api', health: 'error' });
+    expect(() => store.setEnabled(incompatible.id, true)).toThrow(/compatible version/i);
+    expect(store.installedTools()).toEqual([]);
+  });
+
   it('requires an explicit re-enable after an installed manifest version changes', () => {
     const db = database();
     const oldStore = new PluginStore(db, [{ ...GITHUB_PUBLIC_PLUGIN, version: '0.9.0' }]);
@@ -52,9 +61,12 @@ describe('Pixel plugin foundation', () => {
     oldStore.setEnabled(GITHUB_PUBLIC_PLUGIN.id, true);
 
     const currentStore = new PluginStore(db);
-    expect(currentStore.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'error' });
-    currentStore.install(GITHUB_PUBLIC_PLUGIN.id);
-    expect(currentStore.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'disabled' });
+    expect(currentStore.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'error', compatibility: 'update_available', installedVersion: '0.9.0' });
+    expect(() => currentStore.install(GITHUB_PUBLIC_PLUGIN.id)).toThrow(/reviewed plugin update/i);
+    expect(currentStore.list()[0]).toMatchObject({ compatibility: 'update_available', installedVersion: '0.9.0' });
+    currentStore.update(GITHUB_PUBLIC_PLUGIN.id);
+    expect(currentStore.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'disabled', compatibility: 'compatible', installedVersion: '1.0.0' });
+    expect(() => currentStore.update(GITHUB_PUBLIC_PLUGIN.id)).toThrow(/already has the current bundled version/i);
   });
 
   it('only exposes plugin tools while the stored installation is enabled', () => {
@@ -74,6 +86,25 @@ describe('Pixel plugin foundation', () => {
   it('rejects malformed GitHub path components before performing network access', async () => {
     await expect(readPublicGitHubRepository('../private', 'repo')).rejects.toThrow(/valid public GitHub/i);
     await expect(readPublicGitHubRepository('owner', 'repo/../../admin')).rejects.toThrow(/valid public GitHub/i);
+  });
+
+  it('stops before opening a socket when cancellation occurs during DNS resolution', async () => {
+    const controller = new AbortController();
+    const resolveHost = vi.fn(async (hostname: string) => {
+      expect(hostname).toBe('api.github.com');
+      controller.abort();
+      return [{ address: '8.8.8.8', family: 4 as const }];
+    });
+    await expect(readPublicGitHubRepository('octocat', 'Hello-World', controller.signal, resolveHost))
+      .rejects.toThrow('Request cancelled.');
+    expect(resolveHost).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects private addresses from the resolved provider host', async () => {
+    const resolveHost = vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }]);
+    await expect(readPublicGitHubRepository('octocat', 'Hello-World', undefined, resolveHost))
+      .rejects.toThrow(/unsafe address/i);
+    expect(resolveHost).toHaveBeenCalledTimes(1);
   });
 
   it('routes a fixture-backed GitHub plugin call through schema, approval, and executor', async () => {

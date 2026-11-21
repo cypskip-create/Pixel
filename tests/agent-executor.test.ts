@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatRequest, PermissionRequest, TaskRecord, ToolCall } from '../src/shared/types';
 import { AgentExecutor, MAX_STEPS, parseArgs } from '../src/main/agent/executor';
+import { BUILTIN_TOOLS } from '../src/main/agent/tools';
 import type { TurnRunner } from '../src/main/agent/executor';
 import type { ToolRunner } from '../src/main/agent/executor';
 import type { ToolResult } from '../src/main/agent/executors';
@@ -147,6 +148,183 @@ describe('agent loop - direct answer', () => {
   });
 });
 
+describe('agent loop - verified action sequencing', () => {
+  it('replays a reviewed ordered tool plan directly without model step selection', async () => {
+    const observedArgs: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const tools: ToolRunner = {
+      async run(name, args) {
+        observedArgs.push({ name, args });
+        return name === 'browser_navigate'
+          ? { ok: true, content: 'Opened https://example.test/work', detail: { url: 'https://example.test/work' }, verification: { summary: 'Destination URL read back', source: 'browser session' } }
+          : { ok: true, content: 'Current page observed.' };
+      },
+      killAll: () => 0,
+    };
+    const h = harness({ outcomes: [], tools, approve: true });
+    for (const tool of BUILTIN_TOOLS) h.registry.register(tool);
+
+    const result = await h.agent.run({
+      requestId: 'reviewed-tool-plan',
+      request: { text: 'Run reviewed skill "Open authorized page".', mode: 'agent' },
+      model: 'deepseek-flash',
+      allowedTools: ['browser_inspect', 'browser_navigate'],
+      requireInitialObservation: true,
+      toolPlan: [
+        { id: 'plan_observe', name: 'browser_inspect', argumentsJson: '{}', approvalRequired: true },
+        { id: 'plan_open', name: 'browser_navigate', argumentsJson: '{"url":"https://example.test/work"}', expectation: { resultContains: 'Opened https://example.test/work', urlPrefix: 'https://example.test/', verifyCurrentPostcondition: true } },
+        { id: 'plan_verify_current', name: 'browser_inspect', argumentsJson: '{}' },
+      ],
+    });
+
+    expect(result.task.status).toBe('completed');
+    expect(result.task.steps.map((step) => step.toolName)).toEqual(['browser_inspect', 'browser_navigate', 'browser_inspect']);
+    expect(result.executed.map((step) => step.name)).toEqual(['browser_inspect', 'browser_navigate', 'browser_inspect']);
+    expect(observedArgs[1]?.args).toEqual({ url: 'https://example.test/work' });
+    expect(h.prompts.map((prompt) => prompt.toolName)).toEqual(['browser_inspect', 'browser_navigate']);
+    expect((h.agent as unknown as { deps: { engine: { seen: RunTurnOptions[] } } }).deps.engine.seen).toHaveLength(0);
+  });
+
+  it('stops a reviewed tool plan at a mutation that lacks a fresh observation', async () => {
+    const tools = fakeTools({ browser_navigate: { ok: true, content: 'Opened.' } });
+    const h = harness({ outcomes: [], tools, approve: true });
+    for (const tool of BUILTIN_TOOLS) h.registry.register(tool);
+    const result = await h.agent.run({
+      requestId: 'reviewed-plan-without-observation',
+      request: { text: 'Run reviewed skill.', mode: 'agent' },
+      model: 'deepseek-flash',
+      allowedTools: ['browser_inspect', 'browser_navigate'],
+      requireInitialObservation: true,
+      toolPlan: [
+        { id: 'plan_open_first', name: 'browser_navigate', argumentsJson: '{"url":"https://example.test/work"}' },
+        { id: 'plan_should_not_run', name: 'browser_inspect', argumentsJson: '{}' },
+      ],
+    });
+
+    expect(result.task.status).toBe('blocked');
+    expect(result.executed.map((step) => step.name)).toEqual(['browser_navigate']);
+    expect(tools.calls).toEqual([]);
+    expect(result.task.steps[0]?.status).toBe('failed');
+  });
+
+  it('stops after an actual tool result fails a reviewed predicate', async () => {
+    const tools = fakeTools({
+      browser_inspect: { ok: true, content: 'URL: https://example.test/home' },
+      browser_navigate: { ok: true, content: 'Opened https://example.test/other', detail: { url: 'https://example.test/other' }, verification: { summary: 'A page loaded', source: 'browser session' } },
+    });
+    const h = harness({ outcomes: [], tools, approve: true });
+    for (const tool of BUILTIN_TOOLS) h.registry.register(tool);
+    const result = await h.agent.run({
+      requestId: 'reviewed-plan-predicate-failed',
+      request: { text: 'Run reviewed skill.', mode: 'agent' },
+      model: 'deepseek-flash',
+      allowedTools: ['browser_inspect', 'browser_navigate'],
+      requireInitialObservation: true,
+      toolPlan: [
+        { id: 'plan_observe', name: 'browser_inspect', argumentsJson: '{}' },
+        { id: 'plan_navigate', name: 'browser_navigate', argumentsJson: '{"url":"https://example.test/work"}', expectation: { urlPrefix: 'https://example.test/work' } },
+        { id: 'plan_must_not_run', name: 'browser_inspect', argumentsJson: '{}' },
+      ],
+    });
+
+    expect(result.task.status).toBe('blocked');
+    expect(tools.calls).toEqual(['browser_inspect', 'browser_navigate']);
+    expect(result.finalContent).toContain('actual URL did not match');
+  });
+
+  it('uses one-shot skill input values while redacting them from stored task and audit records', async () => {
+    const privateValue = 'one-time-search-term';
+    const targetUrl = `https://example.test/search?q=${privateValue}`;
+    const seenArgs: Array<Record<string, unknown>> = [];
+    const tools: ToolRunner = {
+      async run(name, args) {
+        seenArgs.push(args);
+        return name === 'browser_navigate'
+          ? { ok: true, content: `Opened ${targetUrl.toUpperCase()}`, detail: { url: targetUrl }, verification: { summary: `Loaded ${targetUrl.toUpperCase()}`, source: 'browser session' } }
+          : { ok: true, content: 'Observed the current page.' };
+      },
+      killAll: () => 0,
+    };
+    const h = harness({ outcomes: [], tools, approve: true });
+    for (const tool of BUILTIN_TOOLS) h.registry.register(tool);
+    const result = await h.agent.run({
+      requestId: 'reviewed-plan-private-input',
+      request: { text: 'Run a reviewed skill using the one-time input.', mode: 'agent' },
+      model: 'deepseek-flash',
+      allowedTools: ['browser_inspect', 'browser_navigate'],
+      requireInitialObservation: true,
+      redactValues: [privateValue],
+      toolPlan: [
+        { id: 'observe_before', name: 'browser_inspect', argumentsJson: '{}' },
+        { id: 'navigate_with_input', name: 'browser_navigate', argumentsJson: JSON.stringify({ url: targetUrl }), expectation: { urlPrefix: 'https://example.test/search' } },
+        { id: 'observe_after', name: 'browser_inspect', argumentsJson: '{}' },
+      ],
+    });
+
+    const stored = JSON.stringify({ request: result.task.request, result: result.task.result, steps: result.task.steps, audit: h.audit.list(50) });
+    expect(result.task.status).toBe('completed');
+    expect(seenArgs[1]?.url).toBe(targetUrl);
+    expect(stored).not.toContain(privateValue);
+    expect(stored).toContain('[user input]');
+  });
+
+  it('requires fresh observation before the first action and between skill mutations', async () => {
+    const tools = fakeTools({
+      browser_inspect: { ok: true, content: 'The page is currently on the dashboard.' },
+      browser_navigate: { ok: true, content: 'Navigation completed.', verification: { summary: 'Destination loaded', source: 'browser URL read-back' } },
+    });
+    const h = harness({
+      outcomes: [
+        toolStep('browser_navigate', { url: 'https://example.test' }),
+        toolStep('browser_inspect', {}),
+        toolStep('browser_navigate', { url: 'https://example.test' }),
+        toolStep('browser_navigate', { url: 'https://example.test/next' }),
+        toolStep('browser_inspect', {}),
+        toolStep('browser_navigate', { url: 'https://example.test/next' }),
+        plainAnswer('The destination loaded.'),
+      ],
+      tools,
+      approve: true,
+    });
+
+    const result = await h.agent.run({
+      requestId: 'skill-fresh-observation',
+      request: { text: 'Run a reviewed browser skill.', mode: 'agent' },
+      model: 'deepseek-flash',
+      requireInitialObservation: true,
+    });
+
+    expect(tools.calls).toEqual(['browser_inspect', 'browser_navigate', 'browser_inspect', 'browser_navigate']);
+    expect(h.prompts.map((prompt) => prompt.toolName)).toEqual(['browser_navigate', 'browser_navigate']);
+    expect(result.task.steps.map((step) => step.status)).toEqual(['failed', 'done', 'verified', 'failed', 'done', 'verified']);
+    expect(result.task.status).toBe('completed');
+  });
+
+  it('blocks another mutation until a prior browser action has a verified postcondition', async () => {
+    const tools = fakeTools({
+      browser_click: { ok: true, content: 'Click action was sent.' },
+      browser_verify: { ok: true, content: 'The expected state is visible.', verification: { summary: 'The dialog appeared.', source: 'browser DOM read-back' } },
+    });
+    const h = harness({
+      outcomes: [
+        toolStep('browser_click', { selector: '#open' }),
+        toolStep('browser_click', { selector: '#confirm' }),
+        toolStep('browser_verify', { expected: 'Dialog title' }),
+        plainAnswer('The dialog is open.'),
+      ],
+      tools,
+      approve: true,
+    });
+
+    const result = await run(h.agent, 'verify-before-next-mutation');
+
+    expect(tools.calls).toEqual(['browser_click', 'browser_verify']);
+    expect(h.prompts.map((prompt) => prompt.toolName)).toEqual(['browser_click']);
+    expect(result.task.steps.map((step) => step.status)).toEqual(['verified', 'failed', 'verified']);
+    expect(result.task.pendingVerifications).toEqual([]);
+    expect(result.task.status).toBe('completed');
+  });
+});
+
 describe('clipboard privacy in durable task records', () => {
   it('does not persist clipboard text or the model response derived from it', async () => {
     const privateClipboardValue = 'copied private note 7654321';
@@ -212,6 +390,99 @@ describe('agent loop - tool execution', () => {
     const summaries = h.audit.list(50).map((entry) => entry.summary);
     expect(summaries.some((s) => /agent run started/i.test(s))).toBe(true);
     expect(summaries.some((s) => /ran: get_current_time/i.test(s))).toBe(true);
+  });
+
+  it('routes a bounded specialist through the live model and normal tool gateway', async () => {
+    const seen: RunTurnOptions[] = [];
+    const engine: TurnRunner = {
+      async runTurn(options) {
+        seen.push(options);
+        if (!options.suppressEvents) {
+          return options.messages?.some((message) => message.role === 'tool')
+            ? plainAnswer('The systems specialist reported 09:41.')
+            : toolStep('delegate_to_specialist', { specialist: 'systems', objective: 'Read the local clock' });
+        }
+        return options.messages?.some((message) => message.role === 'tool')
+          ? plainAnswer('The local time tool returned 09:41.')
+          : toolStep('get_current_time', {});
+      },
+    };
+    const tools = fakeTools({ get_current_time: { ok: true, content: '09:41' } });
+    const h = harness({ outcomes: [], engine, tools });
+
+    const result = await run(h.agent);
+
+    expect(result.task.status).toBe('completed');
+    expect(result.finalContent).toContain('systems specialist reported 09:41');
+    expect(tools.calls).toEqual(['get_current_time']);
+    expect(seen[1]?.suppressEvents).toBe(true);
+    const specialistTools = seen[1]?.tools?.map((tool) => tool.name) ?? [];
+    expect(specialistTools).toContain('get_current_time');
+    expect(specialistTools).not.toContain('delegate_to_specialist');
+    expect(specialistTools).not.toContain('clipboard_read');
+    expect(result.task.steps.map((step) => step.toolName)).toEqual(['delegate_to_specialist', 'get_current_time']);
+    expect(result.task.steps.map((step) => step.status)).toEqual(['done', 'done']);
+    expect(result.executed.map((entry) => entry.name)).toEqual(['get_current_time', 'delegate_to_specialist']);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it('refuses a specialist tool call outside its declared capability set', async () => {
+    const seen: RunTurnOptions[] = [];
+    const engine: TurnRunner = {
+      async runTurn(options) {
+        seen.push(options);
+        if (!options.suppressEvents) {
+          return options.messages?.some((message) => message.role === 'tool')
+            ? plainAnswer('The delegated request was refused.')
+            : toolStep('delegate_to_specialist', { specialist: 'systems', objective: 'Inspect the clipboard contents' });
+        }
+        return toolStep('clipboard_read', {});
+      },
+    };
+    const tools = fakeTools();
+    const h = harness({ outcomes: [], engine, tools });
+    const result = await run(h.agent);
+
+    expect(result.task.status).toBe('completed');
+    expect(tools.calls).toEqual([]);
+    expect(seen[1]?.tools?.map((tool) => tool.name)).not.toContain('clipboard_read');
+    expect(result.task.steps.map((step) => step.toolName)).toEqual(['delegate_to_specialist']);
+    expect(result.task.steps[0]?.status).toBe('failed');
+  });
+
+  it('asks the user before a specialist runs an approval-gated action', async () => {
+    const seen: RunTurnOptions[] = [];
+    const engine: TurnRunner = {
+      async runTurn(options) {
+        seen.push(options);
+        if (!options.suppressEvents) {
+          return options.messages?.some((message) => message.role === 'tool')
+            ? plainAnswer('The browser action was approved and completed.')
+            : toolStep('delegate_to_specialist', { specialist: 'browser', objective: 'Open the selected page control' });
+        }
+        const usedTools = options.messages?.flatMap((message) => message.toolCalls ?? []).map((call) => call.name) ?? [];
+        if (!usedTools.includes('browser_click')) return toolStep('browser_click', { selector: '#open' });
+        if (!usedTools.includes('browser_verify')) return toolStep('browser_verify', { expected: 'Control opened' });
+        return plainAnswer('The click was verified after approval.');
+      },
+    };
+    const tools = fakeTools({
+      browser_click: { ok: true, content: 'Clicked the selected control.' },
+      browser_verify: { ok: true, content: 'The expected page state is visible.', verification: { summary: 'Control opened', source: 'browser DOM' } },
+    });
+    const h = harness({ outcomes: [], engine, tools, approve: true });
+
+    const result = await h.agent.run({
+      requestId: 'specialist-approval',
+      request: { text: 'Use a browser specialist to open the selected control.', mode: 'agent' },
+      model: 'deepseek-flash',
+    });
+
+    expect(result.task.status).toBe('completed');
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0]?.toolName).toBe('browser_click');
+    expect(tools.calls).toEqual(['browser_click', 'browser_verify']);
+    expect(seen[1]?.tools?.map((tool) => tool.name)).toContain('browser_click');
   });
 });
 

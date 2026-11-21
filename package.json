@@ -8,8 +8,8 @@
   "type": "module",
   "main": "dist/main/main/main.js",
   "scripts": {
-    "dev": "concurrently -k -n vite,electron -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
-    "dev:gpu": "concurrently -k -n vite,electron -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron:gpu\"",
+    "dev": "node scripts/dev.mjs",
+    "dev:gpu": "node scripts/dev.mjs --gpu",
     "dev:renderer": "vite",
     "dev:electron": "npm run build:main && npm run build:native && cross-env CYPS_DEV=1 CYPS_DEV_SERVER_URL=http://localhost:5199 electron --disable-gpu .",
     "dev:electron:gpu": "npm run build:main && npm run build:native && cross-env CYPS_DEV=1 CYPS_DEV_SERVER_URL=http://localhost:5199 electron .",

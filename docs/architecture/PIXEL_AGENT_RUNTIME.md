@@ -143,5 +143,5 @@ The executor caps a request at eight model/tool turns, a five-minute wall clock 
 - No uniform observation/postcondition contract for every tool. UIA postconditions cover only exact visible accessible control presence or absence in the same foreground window; they cannot verify text values, file contents, or a newly titled window.
 - Task retention/pruning is not implemented; the renderer currently asks for recent task records.
 - Specialist definitions/coordinator are still not model-backed or invoked from the live task flow. Skills/routines start a normal task with a restricted tool allowlist; no independent specialist loop exists.
-- Skills are reviewed and versioned, but there is no demonstration recorder or deterministic live semantic replay engine. Routine runs remain model-mediated.
+- Skills are reviewed, versioned and can be recorded from completed verified task history. Scheduled routines now run ordered, reviewed tool plans directly through the central executor, with approval floors, fresh-observation gates and supported result predicates. Input-bearing skills still lack an interactive one-shot runner, and Windows acceptance remains unverified.
 - Full IPC and UI behavior needs a normal Windows GUI test. This Codex environment cannot initialize Electron's Chromium GUI.

@@ -99,7 +99,7 @@ export function evaluateInvocation(
     return {
       allowed: false,
       reason: risk === 'critical'
-        ? `"${tool.name}" submits information and needs your approval for this exact action.`
+        ? `"${tool.name}" performs a high-consequence action and needs your approval for this exact action.`
         : `"${tool.name}" needs your approval before it can run.`,
       needsApproval: true,
     };
@@ -111,6 +111,16 @@ export function evaluateInvocation(
 /** Invocation policy can raise a tool's declared baseline risk based on intent. */
 export function classifyInvocationRisk(tool: ToolDefinition, args: Record<string, unknown>): RiskLevel {
   if (tool.name === 'browser_type' && args.submit === true) return 'critical';
+  if (tool.name === 'browser_upload') return 'critical';
+  if (tool.name === 'browser_click') {
+    const target = typeof args.target === 'object' && args.target !== null && !Array.isArray(args.target)
+      ? args.target as Record<string, unknown>
+      : null;
+    // CSS selectors and unspecified targets do not reveal what action the
+    // element performs. Keep them at the critical approval floor.
+    if (!target || typeof target.value !== 'string' || typeof target.kind !== 'string') return 'critical';
+    if (/\b(submit|send|pay|purchase|order|delete|remove|publish|post|book|confirm|transfer|withdraw|subscribe|invite|share)\b/i.test(target.value)) return 'critical';
+  }
   return tool.risk;
 }
 
@@ -183,7 +193,7 @@ export function applyDecision(
 export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'get_system_info',
-    description: 'Reads CPU, memory and local network-adapter status from this computer. Adapter IP and hardware addresses are not returned.',
+    description: 'Reads CPU, memory, uptime, load, system-volume free space, primary display dimensions and available battery status, plus local network-adapter names and protocol families. Adapter IP/hardware addresses and monitor labels/bounds are not returned; unavailable probes are reported as unavailable.',
     category: 'system',
     risk: 'safe',
     requiresApproval: false,
@@ -198,6 +208,23 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     requiresApproval: false,
     changesState: false,
     parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'delegate_to_specialist',
+    description: 'Delegate one bounded research, browser, systems or knowledge subtask to a specialist. The specialist receives only its declared tools; each tool still passes Pixel’s normal permission checks. It cannot delegate again, access Pixel Code, or broaden task permissions. Use a specific objective and report the specialist result accurately.',
+    category: 'system',
+    risk: 'medium',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        specialist: { type: 'string', enum: ['research', 'browser', 'systems', 'knowledge'] },
+        objective: { type: 'string', minLength: 8, maxLength: 2_000 },
+      },
+      required: ['specialist', 'objective'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'clipboard_read',
@@ -564,7 +591,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
   },
   {
     name: 'browser_click',
-    description: 'Clicks an element on the current page, identified by a CSS selector.',
+    description: 'Clicks one unique visible, enabled browser element. Prefer an exact accessible target such as {kind:"role",role:"button",value:"Save"} or {kind:"text",value:"Open project"}; a CSS selector is supported for pages without accessible names.',
     category: 'browser',
     risk: 'high',
     requiresApproval: true,
@@ -572,15 +599,25 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        selector: { type: 'string', description: 'CSS selector, e.g. "#submit" or "text=Sign in"' },
+        selector: { type: 'string', description: 'Optional CSS selector. Use instead of target, not together with it.' },
+        target: {
+          type: 'object',
+          description: 'Exact accessible locator. kind is role, label, placeholder, or text. Role targets also require role, e.g. button or link.',
+          properties: {
+            kind: { enum: ['role', 'label', 'placeholder', 'text'] },
+            role: { type: 'string', maxLength: 80 },
+            value: { type: 'string', minLength: 1, maxLength: 300 },
+          },
+          required: ['kind', 'value'],
+          additionalProperties: false,
+        },
       },
-      required: ['selector'],
       additionalProperties: false,
     },
   },
   {
     name: 'browser_type',
-    description: 'Types text into a field on the current page, identified by a CSS selector.',
+    description: 'Fills one unique visible, enabled non-password field using an exact accessible label or placeholder (preferred), textbox role, or CSS selector. The field value is read back without returning it. Submissions require explicit user intent, each-call approval, and expectedText that Pixel verifies on the resulting page.',
     category: 'browser',
     risk: 'high',
     requiresApproval: true,
@@ -588,14 +625,77 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        selector: { type: 'string' },
-        text: { type: 'string' },
+        selector: { type: 'string', description: 'Optional CSS selector. Use instead of target, not together with it.' },
+        target: {
+          type: 'object',
+          properties: {
+            kind: { enum: ['role', 'label', 'placeholder'] },
+            role: { type: 'string', maxLength: 80 },
+            value: { type: 'string', minLength: 1, maxLength: 300 },
+          },
+          required: ['kind', 'value'],
+          additionalProperties: false,
+        },
+        text: { type: 'string', minLength: 1, maxLength: 4_000 },
         submit: {
           type: 'boolean',
-          description: 'Press Enter afterwards. Set true only when the user asked to submit.',
+          description: 'Press Enter after the field value is verified. Set true only when the user explicitly asked to submit; requires expectedText and fresh each-call approval.',
+        },
+        expectedText: { type: 'string', minLength: 1, maxLength: 500, description: 'Exact text that must appear in the page after submission or the action is reported unverified.' },
+      },
+      required: ['text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_upload',
+    description: 'Attaches one user-selected regular file to an exact browser file input. Requires fresh critical approval and a separate native confirmation naming the file and destination site. Pixel verifies input metadata only; inspect the page for upload progress and site acceptance.',
+    category: 'browser',
+    risk: 'critical',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'Optional exact CSS selector for the file input.' },
+        target: {
+          type: 'object',
+          description: 'Exact accessible file-input target, preferably a label.',
+          properties: {
+            kind: { enum: ['role', 'label', 'placeholder', 'text'] },
+            role: { type: 'string', maxLength: 80 },
+            value: { type: 'string', minLength: 1, maxLength: 300 },
+          },
+          required: ['kind', 'value'],
+          additionalProperties: false,
         },
       },
-      required: ['selector', 'text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_download',
+    description: 'Downloads from one exact browser link or button after fresh approval, asks for a native save location, refuses overwrite and files larger than 25 MB, and verifies the saved bytes by read-back and SHA-256. Pixel never opens or executes the result.',
+    category: 'browser',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'Optional CSS selector for the download link or button.' },
+        target: {
+          type: 'object',
+          description: 'Exact accessible target such as a link named “Download report”.',
+          properties: {
+            kind: { enum: ['role', 'label', 'placeholder', 'text'] },
+            role: { type: 'string', maxLength: 80 },
+            value: { type: 'string', minLength: 1, maxLength: 300 },
+          },
+          required: ['kind', 'value'],
+          additionalProperties: false,
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -709,7 +809,18 @@ export class ToolRegistry {
       }
     }
     const parsed = schema.safeParse(args);
-    if (parsed.success) return { ok: true };
+    if (parsed.success) {
+      if (name === 'browser_click' || name === 'browser_type' || name === 'browser_upload' || name === 'browser_download') {
+        const values = parsed.data as Record<string, unknown>;
+        if ((typeof values.selector === 'string') === (values.target !== undefined)) {
+          return { ok: false, message: 'Provide exactly one of selector or target.' };
+        }
+        if (name === 'browser_type' && values.submit === true && (typeof values.expectedText !== 'string' || !values.expectedText.trim())) {
+          return { ok: false, message: 'A form submission requires expectedText so Pixel can verify the result.' };
+        }
+      }
+      return { ok: true };
+    }
     const issue = parsed.error.issues[0];
     const field = issue?.path.length ? `${issue.path.map(String).join('.')}: ` : '';
     return { ok: false, message: `${field}${issue?.message ?? 'arguments did not match the tool contract'}` };

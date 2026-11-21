@@ -93,6 +93,10 @@ export interface NativeElementTarget {
 
 export interface NativeCommands {
   ping: { args: Record<string, never>; result: { version: string; trackingMode?: string } };
+  system_power_status: {
+    args: Record<string, never>;
+    result: { present: boolean | null; percent: number | null; charging: boolean | null };
+  };
   foreground_window: { args: Record<string, never>; result: WindowInfo | null };
   last_external_foreground_window: { args: Record<string, never>; result: LastExternalWindowResult };
   list_external_windows: { args: Record<string, never>; result: { windows: WindowInfo[]; truncated: boolean } };

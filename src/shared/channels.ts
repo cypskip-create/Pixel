@@ -97,7 +97,9 @@ export const CHANNELS = {
   tasksUpdate: 'tasks:update',
 
   skillsList: 'skills:list',
+  skillsRun: 'skills:run',
   skillsCreateDraft: 'skills:createDraft',
+  skillsRecordTask: 'skills:recordTask',
   skillsActivate: 'skills:activate',
   skillsDelete: 'skills:delete',
 
@@ -124,6 +126,10 @@ export const CHANNELS = {
   productivityNotesDelete: 'productivity:notes:delete',
   productivityNotesImportMarkdown: 'productivity:importMarkdown',
   productivityNotesExportMarkdown: 'productivity:exportMarkdown',
+  productivityNoteDocumentsList: 'productivity:noteDocuments:list',
+  productivityNoteDocumentsLink: 'productivity:noteDocuments:link',
+  productivityNoteDocumentsOpen: 'productivity:noteDocuments:open',
+  productivityNoteDocumentsUnlink: 'productivity:noteDocuments:unlink',
   productivityChecklistsList: 'productivity:checklistsList',
   productivityChecklistsCreate: 'productivity:checklistsCreate',
   productivityTasksList: 'productivity:tasks:list',
@@ -134,6 +140,7 @@ export const CHANNELS = {
   toolsList: 'tools:list',
   pluginsList: 'plugins:list',
   pluginsInstall: 'plugins:install',
+  pluginsUpdate: 'plugins:update',
   pluginsUninstall: 'plugins:uninstall',
   pluginsSetEnabled: 'plugins:setEnabled',
 

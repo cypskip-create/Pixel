@@ -165,6 +165,8 @@ export function summarize(snapshot: DiagnosticsSnapshot): string[] {
 
   if (snapshot.battery === null) {
     lines.push('Battery: unavailable on this system');
+  } else if (snapshot.battery.present === null) {
+    lines.push('Battery: status unavailable');
   } else if (!snapshot.battery.present) {
     lines.push('Battery: none detected');
   } else {

@@ -14,6 +14,9 @@
  */
 
 import type { ImageAttachment } from '../../shared/types';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import { NetworkGuard, isPrivateHost, type HostResolver } from './netGuard';
 
 export { isPrivateHost };
@@ -23,6 +26,7 @@ export const PAGE_TIMEOUT_MS = 15_000;
 
 /** Refuse absurdly long pages; the model cannot read them anyway. */
 export const MAX_TEXT_CHARS = 8_000;
+export const MAX_BROWSER_TRANSFER_BYTES = 25 * 1024 * 1024;
 
 export interface BrowserCapability {
   available: boolean;
@@ -43,7 +47,24 @@ export interface PageSnapshot {
   text: string;
   links: Array<{ text: string; href: string }>;
   buttons: string[];
-  inputs: Array<{ name: string; type: string; placeholder: string }>;
+  inputs: Array<{ name: string; type: string; placeholder: string; accessibleName: string }>;
+}
+
+export type BrowserSemanticTarget =
+  | { kind: 'role'; role: string; value: string }
+  | { kind: 'label' | 'placeholder' | 'text'; value: string };
+
+interface PlaywrightLocator {
+  count(): Promise<number>;
+  isVisible(): Promise<boolean>;
+  isEnabled(): Promise<boolean>;
+  click(options?: { timeout?: number }): Promise<void>;
+  fill(value: string, options?: { timeout?: number }): Promise<void>;
+  press(key: string): Promise<void>;
+  inputValue(options?: { timeout?: number }): Promise<string>;
+  getAttribute(name: string): Promise<string | null>;
+  setInputFiles(files: string | string[] | Array<{ name: string; mimeType: string; buffer: Buffer }>): Promise<void>;
+  evaluate<T>(fn: (element: Element) => T): Promise<T>;
 }
 
 interface PlaywrightPage {
@@ -55,6 +76,12 @@ interface PlaywrightPage {
   click(selector: string, options?: { timeout?: number }): Promise<void>;
   fill(selector: string, value: string, options?: { timeout?: number }): Promise<void>;
   press(selector: string, key: string): Promise<void>;
+  locator(selector: string): PlaywrightLocator;
+  getByRole(role: string, options: { name: string; exact: true }): PlaywrightLocator;
+  getByLabel(text: string, options: { exact: true }): PlaywrightLocator;
+  getByPlaceholder(text: string, options: { exact: true }): PlaywrightLocator;
+  getByText(text: string, options: { exact: true }): PlaywrightLocator;
+  waitForEvent(event: 'download', options?: { timeout?: number }): Promise<PlaywrightDownload>;
   waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>;
   screenshot(options?: { type?: 'png' | 'jpeg' }): Promise<Buffer>;
   evaluate<T, A = void>(fn: (arg: A) => T, arg?: A): Promise<T>;
@@ -62,6 +89,60 @@ interface PlaywrightPage {
   bringToFront?(): Promise<void>;
   close?(): Promise<void>;
   isClosed?(): boolean;
+}
+
+interface PlaywrightDownload {
+  suggestedFilename(): string;
+  createReadStream(): Promise<AsyncIterable<Uint8Array>>;
+  cancel(): Promise<void>;
+  failure(): Promise<string | null>;
+}
+
+export interface BrowserUploadFile {
+  path: string;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface BrowserDownloadResult {
+  path: string;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+/** Validate a user-selected upload immediately before it enters Chromium. */
+export function validateBrowserUploadFile(rawPath: string): BrowserUploadFile {
+  let requested: string;
+  try { requested = resolve(rawPath); }
+  catch { throw new Error('The selected upload path is invalid.'); }
+  let link;
+  try { link = lstatSync(requested); }
+  catch { throw new Error('The selected upload file is no longer available.'); }
+  if (link.isSymbolicLink() || !link.isFile()) throw new Error('Pixel uploads regular files only and will not follow a symbolic link.');
+  const path = realpathSync(requested);
+  const info = statSync(path);
+  if (!info.isFile() || info.size > MAX_BROWSER_TRANSFER_BYTES) throw new Error('The selected upload must be a regular file no larger than 25 MB.');
+  const fileName = basename(path);
+  if (/^(?:\.env(?:\.|$)|.*(?:password|passwd|passphrase|secret|token|credential|id_rsa|private[_-]?key|api[_-]?key|otp).*)$/i.test(fileName)) {
+    throw new Error('Pixel will not upload a file with a credential-like name.');
+  }
+  const data = readFileSync(path);
+  if (data.byteLength !== info.size) throw new Error('The selected upload changed while Pixel was checking it.');
+  return { path, fileName, sizeBytes: info.size, sha256: createHash('sha256').update(data).digest('hex') };
+}
+
+function validateBrowserDownloadPath(rawPath: string): string {
+  const path = resolve(rawPath);
+  const fileName = basename(path);
+  if (!fileName || fileName === '.' || fileName === '..') throw new Error('Choose a filename for the browser download.');
+  let parent: string;
+  try { parent = realpathSync(dirname(path)); }
+  catch { throw new Error('The selected download folder is unavailable.'); }
+  if (!statSync(parent).isDirectory()) throw new Error('The selected download parent is not a folder.');
+  if (existsSync(path)) throw new Error('Pixel will not overwrite an existing download. Choose a new filename.');
+  return resolve(parent, fileName);
 }
 
 interface PlaywrightRoute {
@@ -170,9 +251,10 @@ export class BrowserSession {
   async navigate(url: string): Promise<PageSnapshot> {
     const problem = this.validateUrl(url);
     if (problem) throw new Error(problem);
+    const allowedLocalFile = this.isAllowedLocalFile(url);
 
     // Resolve the name now so a private destination is refused before any request.
-    const upfront = await this.guard.check(url);
+    const upfront = allowedLocalFile ? null : await this.guard.check(url);
     if (upfront) throw new Error(upfront);
 
     const page = await this.ensurePage();
@@ -189,7 +271,7 @@ export class BrowserSession {
     // The request was allowed on paper; verify where it actually went. A redirect
     // may have landed somewhere private, or DNS may have answered differently to
     // Chromium than it did to us. Either way the model must not see that page.
-    const landed = await this.guard.check(page.url());
+    const landed = this.isAllowedLocalFile(page.url()) ? null : await this.guard.check(page.url());
     const connected = this.guard.checkConnectedAddress(
       (await (response as PlaywrightResponse | null)?.serverAddr?.().catch(() => null))?.ipAddress,
     );
@@ -207,7 +289,7 @@ export class BrowserSession {
   async newTab(url: string): Promise<BrowserTabInfo> {
     const problem = this.validateUrl(url);
     if (problem) throw new Error(problem);
-    const networkProblem = await this.guard.check(url);
+    const networkProblem = this.isAllowedLocalFile(url) ? null : await this.guard.check(url);
     if (networkProblem) throw new Error(networkProblem);
     await this.ensurePage();
     if (!this.context) throw new Error('The browser context is unavailable.');
@@ -301,31 +383,132 @@ export class BrowserSession {
       .$$eval('input, textarea, select', (elements) =>
         elements.slice(0, 40).map((element) => {
           const input = element as HTMLInputElement;
+          const labels = input.labels ? Array.from(input.labels).map((label) => (label.textContent ?? '').trim()).filter(Boolean) : [];
+          const labelledBy = input.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? '').filter(Boolean) ?? [];
+          const accessibleName = input.getAttribute('aria-label')?.trim() || labelledBy.join(' ') || labels.join(' ') || input.name || input.placeholder || '';
           return {
             name: input.name ?? '',
             type: input.type ?? element.tagName.toLowerCase(),
             placeholder: input.placeholder ?? '',
+            accessibleName,
           };
         }),
       )
-      .catch(() => [])) as Array<{ name: string; type: string; placeholder: string }>;
+      .catch(() => [])) as Array<{ name: string; type: string; placeholder: string; accessibleName: string }>;
 
     return { url: page.url(), title, text, links, buttons, inputs };
   }
 
-  async click(selector: string): Promise<void> {
+  async click(target: string | BrowserSemanticTarget): Promise<void> {
     const page = await this.ensurePage();
-    await page.click(selector, { timeout: PAGE_TIMEOUT_MS });
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'click');
+    await locator.click({ timeout: PAGE_TIMEOUT_MS });
   }
 
-  async fill(selector: string, value: string): Promise<void> {
+  async fill(target: string | BrowserSemanticTarget, value: string): Promise<void> {
     const page = await this.ensurePage();
-    await page.fill(selector, value, { timeout: PAGE_TIMEOUT_MS });
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'fill');
+    const [type, autocomplete, name, id] = await Promise.all([
+      locator.getAttribute('type'), locator.getAttribute('autocomplete'), locator.getAttribute('name'), locator.getAttribute('id'),
+    ]);
+    if (type?.toLowerCase() === 'password' || /(?:current|new)-password|one-time-code/i.test(autocomplete ?? '') ||
+      /(?:password|passwd|passphrase|secret|token|credential|api[_-]?key|otp)/i.test(`${name ?? ''} ${id ?? ''}`)) {
+      throw new Error('Pixel will not fill credential or one-time-code fields without a dedicated credential broker.');
+    }
+    await locator.fill(value, { timeout: PAGE_TIMEOUT_MS });
+    const actual = await locator.inputValue({ timeout: PAGE_TIMEOUT_MS });
+    if (actual !== value) throw new Error('The browser field value did not match the requested value after read-back.');
   }
 
-  async press(selector: string, key: string): Promise<void> {
+  async press(target: string | BrowserSemanticTarget, key: string): Promise<void> {
     const page = await this.ensurePage();
-    await page.press(selector, key);
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'press a key in');
+    await locator.press(key);
+  }
+
+  /** Select one explicitly approved file in a unique file input and verify its metadata. */
+  async upload(target: string | BrowserSemanticTarget, rawPath: string): Promise<BrowserUploadFile> {
+    const file = validateBrowserUploadFile(rawPath);
+    const page = await this.ensurePage();
+    const locator = this.resolveTarget(page, target);
+    const count = await locator.count();
+    if (count !== 1) throw new Error(`Pixel requires one unique file input; this target matched ${count} elements.`);
+    if (!(await locator.isEnabled())) throw new Error('Pixel will not upload to a disabled file input.');
+    const type = (await locator.getAttribute('type'))?.toLowerCase();
+    if (type !== 'file') throw new Error('The selected browser target is not a file input.');
+    const data = readFileSync(file.path);
+    const dataHash = createHash('sha256').update(data).digest('hex');
+    const latest = validateBrowserUploadFile(file.path);
+    if (data.byteLength !== file.sizeBytes || dataHash !== file.sha256 || latest.sha256 !== file.sha256) throw new Error('The selected upload changed after confirmation. Nothing was attached.');
+    await locator.setInputFiles([{ name: file.fileName, mimeType: 'application/octet-stream', buffer: data }]);
+    const selected = await locator.evaluate((element) => {
+      const input = element as HTMLInputElement;
+      const item = input.files?.item(0);
+      return { count: input.files?.length ?? 0, name: item?.name ?? '', size: item?.size ?? -1 };
+    });
+    if (selected.count !== 1 || selected.name !== file.fileName || selected.size !== file.sizeBytes) {
+      throw new Error('The browser did not report the selected file metadata after attachment.');
+    }
+    return file;
+  }
+
+  /** Download from one approved page element into a user-selected, new file. */
+  async download(
+    target: string | BrowserSemanticTarget,
+    chooseDestination: (suggestedName: string) => Promise<string | null>,
+  ): Promise<BrowserDownloadResult | null> {
+    const page = await this.ensurePage();
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'download from');
+    const downloadPromise = page.waitForEvent('download', { timeout: PAGE_TIMEOUT_MS });
+    try {
+      await locator.click({ timeout: PAGE_TIMEOUT_MS });
+    } catch (error) {
+      void downloadPromise.catch(() => undefined);
+      throw error;
+    }
+    const download = await downloadPromise;
+    const suggestedName = basename(download.suggestedFilename().replace(/[\\/]+/g, '/'))
+      .replace(/[<>:"|?*\u0000-\u001f]/g, '_').slice(0, 180) || 'download';
+    const destination = await chooseDestination(suggestedName);
+    if (!destination) {
+      await download.cancel();
+      return null;
+    }
+    const path = validateBrowserDownloadPath(destination);
+    const chunks: Uint8Array[] = [];
+    let sizeBytes = 0;
+    for await (const chunk of await download.createReadStream()) {
+      sizeBytes += chunk.byteLength;
+      if (sizeBytes > MAX_BROWSER_TRANSFER_BYTES) {
+        await download.cancel();
+        throw new Error('Pixel refused a browser download larger than 25 MB.');
+      }
+      chunks.push(chunk);
+    }
+    const failure = await download.failure();
+    if (failure) throw new Error(`The browser download failed: ${failure}`);
+    const data = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+    const hash = createHash('sha256').update(data).digest('hex');
+    let fd: number | undefined;
+    try {
+      fd = openSync(path, 'wx');
+      writeFileSync(fd, data);
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
+      const readback = readFileSync(path);
+      const readbackHash = createHash('sha256').update(readback).digest('hex');
+      if (readback.byteLength !== sizeBytes || readbackHash !== hash) {
+        throw new Error('The saved browser download failed its size or SHA-256 read-back check.');
+      }
+      return { path, fileName: basename(path), sizeBytes, sha256: hash };
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
   }
 
   /** Scroll the page by a signed pixel amount and report the new position. */
@@ -464,6 +647,33 @@ export class BrowserSession {
     this.activeTabId = fallback?.[0] ?? null;
     this.page = fallback?.[1] ?? null;
     if (fallback) void fallback[1].bringToFront?.();
+  }
+
+  private resolveTarget(page: PlaywrightPage, target: string | BrowserSemanticTarget): PlaywrightLocator {
+    if (typeof target === 'string') return page.locator(target);
+    const value = target.value.trim();
+    if (!value || value.length > 300) throw new Error('The accessible target name must contain 1–300 characters.');
+    switch (target.kind) {
+      case 'role':
+        if (!target.role.trim() || target.role.length > 80) throw new Error('Provide a valid accessible role.');
+        return page.getByRole(target.role, { name: value, exact: true });
+      case 'label': return page.getByLabel(value, { exact: true });
+      case 'placeholder': return page.getByPlaceholder(value, { exact: true });
+      case 'text': return page.getByText(value, { exact: true });
+    }
+  }
+
+  private isAllowedLocalFile(rawUrl: string): boolean {
+    if (!this.options.allowFileUrls) return false;
+    try { return new URL(rawUrl).protocol === 'file:'; }
+    catch { return false; }
+  }
+
+  private async assertUniqueActionTarget(locator: PlaywrightLocator, action: string): Promise<void> {
+    const count = await locator.count();
+    if (count !== 1) throw new Error(`Pixel requires one unique target to ${action}; this target matched ${count} elements.`);
+    if (!(await locator.isVisible())) throw new Error('Pixel will not act on a hidden browser element.');
+    if (!(await locator.isEnabled())) throw new Error('Pixel will not act on a disabled browser element.');
   }
 }
 

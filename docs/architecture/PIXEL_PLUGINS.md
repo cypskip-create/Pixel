@@ -59,8 +59,9 @@ Manifest IDs are looked up only in `BUNDLED_PLUGINS`; unknown IDs fail closed.
 Tool names must not collide with an existing registry entry. Plugin tool
 schemas are validated by the existing `ToolRegistry`. Stored installs are
 enabled only when both the plugin API version and exact bundled manifest version
-match. Updating a bundled version therefore requires a deliberate reinstall;
-there is no remote update mechanism.
+match. An installed version mismatch must go through the explicit reviewed
+bundled-update action, which disables the plugin until re-enabled; there is no
+remote package update mechanism.
 
 ## Lifecycle and UI
 
@@ -71,7 +72,15 @@ removes installation state and registration. The lifecycle records are global
 to the user profile, not project-specific. Lifecycle events go to Pixel's
 existing audit store. The Workspace Plugins view separates Browse from
 Installed, displays version, capabilities, permissions, connection state and
-last execution health, and provides Install, Enable/Disable and Uninstall.
+last execution health, and provides Install, Enable/Disable and Uninstall. If
+the installed manifest version differs from the currently bundled manifest
+while the Pixel API version is supported, the manager reports both versions
+and offers Update through the same reviewed bundled catalog. Updating replaces
+the recorded manifest version but leaves the plugin disabled; the user must
+explicitly enable it again. Install is idempotent for the current manifest and
+refuses an installed version mismatch, so it cannot bypass the distinct update
+operation or its audit record. An unsupported Pixel API version remains
+disabled and is not offered this update action. No remote package is fetched.
 
 Installed does not mean connected. The GitHub plugin reads public metadata and
 does not use a token or account. For a future account-backed provider, Pixel
@@ -93,13 +102,15 @@ vault.
 - Every provider call is represented by a declared tool. The current GitHub
   read requires per-call approval; returned repository text is marked as
   untrusted external data.
+- The adapter rechecks cancellation immediately after DNS resolution before it
+  opens a TLS socket, and refuses any non-IP-family or private address result.
 - The adapter records latest execution error/success in plugin state. This is
   operational status from the latest call, not a background availability
   probe.
 - Project availability, dependency conflict resolution across third-party
-  extensions, OAuth/account lifecycle, encrypted generic credentials, and
-  dynamic third-party MCP connections are future work. There is no marketplace
-  downloader or unreviewed package installer.
+  extensions, remote/community updates, OAuth/account lifecycle, encrypted
+  generic credentials, and dynamic third-party MCP connections are future
+  work. There is no marketplace downloader or unreviewed package installer.
 
 ## First integration: GitHub public repository reader
 

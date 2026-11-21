@@ -130,8 +130,7 @@ describe('conversation-first Workspace controls', () => {
 
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('New chat'))?.click());
     expect(onNewChat).toHaveBeenCalledOnce();
-    act(() => rendered.querySelector<HTMLButtonElement>('[title="Library"]')?.click());
-    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Tasks & Activity'))?.click());
+    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Activity'))?.click());
     expect(onViewChange).toHaveBeenCalledWith('tasks');
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Notes & Planning'))?.click());
     expect(onViewChange).toHaveBeenCalledWith('notes');

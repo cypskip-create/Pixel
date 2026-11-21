@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDatabase } from '../src/main/data/database';
 import { ProductivityStore } from '../src/main/productivity/store';
 import { PRODUCTIVITY_TOOL_DEFINITIONS, ProductivityTools } from '../src/main/productivity/toolset';
@@ -6,7 +9,8 @@ import { ToolExecutors } from '../src/main/agent/executors';
 import { ToolRegistry } from '../src/main/agent/tools';
 
 const databases: ReturnType<typeof openDatabase>[] = [];
-afterEach(() => { while (databases.length) databases.pop()?.close(); });
+const temporaryPaths: string[] = [];
+afterEach(() => { while (databases.length) databases.pop()?.close(); while (temporaryPaths.length) { const path = temporaryPaths.pop(); if (path) rmSync(path, { recursive: true, force: true }); } });
 function setup() {
   const db = openDatabase(':memory:'); databases.push(db);
   const a = 'project-a'; const b = 'project-b';
@@ -18,6 +22,33 @@ function setup() {
 }
 
 describe('project productivity tools', () => {
+  it('links local documents to notes with project scoping, deduplication and verified unlinking', () => {
+    const { store, active } = setup();
+    const note = store.createNote('project-a', 'Research note', 'Source material.');
+    const directory = mkdtempSync(join(tmpdir(), 'pixel-note-documents-')); temporaryPaths.push(directory);
+    const file = join(directory, 'source.txt'); writeFileSync(file, 'reference data', 'utf8');
+    const first = store.linkDocument('project-a', note.id, file);
+    expect(first).toMatchObject({ projectId: 'project-a', noteId: note.id, displayName: 'source.txt', byteSize: 14 });
+    expect(store.linkDocument('project-a', note.id, file).id).toBe(first.id);
+    expect(store.listDocumentLinks('project-a', note.id)).toEqual([first]);
+    expect(() => store.linkDocument('project-b', note.id, file)).toThrow(/note is not available/i);
+    active('project-b');
+    expect(store.listDocumentLinks('project-b', note.id)).toEqual([]);
+    active('project-a');
+    expect(store.unlinkDocument('project-a', note.id, first.id)).toBe(true);
+    expect(store.listDocumentLinks('project-a', note.id)).toEqual([]);
+    expect(store.unlinkDocument('project-a', note.id, first.id)).toBe(false);
+  });
+
+  it('rejects directories and executable files when linking local documents', () => {
+    const { store } = setup();
+    const note = store.createNote('project-a', 'Research note', '');
+    const directory = mkdtempSync(join(tmpdir(), 'pixel-note-documents-')); temporaryPaths.push(directory);
+    expect(() => store.linkDocument('project-a', note.id, directory)).toThrow(/regular local file/i);
+    const executable = join(directory, 'payload.exe'); writeFileSync(executable, 'not executable data', 'utf8');
+    expect(() => store.linkDocument('project-a', note.id, executable)).toThrow(/format is not supported/i);
+  });
+
   it('registers strict agent schemas and makes routine notes/tasks available in Hybrid and Agent', () => {
     const registry = new ToolRegistry(PRODUCTIVITY_TOOL_DEFINITIONS);
     for (const name of ['notes_create', 'notes_read', 'notes_search', 'notes_update', 'checklists_create', 'checklists_list', 'tasks_create', 'tasks_list', 'tasks_update', 'tasks_complete']) {

@@ -357,14 +357,17 @@ describe('subagent planning', () => {
     expect(plan.tools).toContain('browser_inspect');
     // A tool outside the specialist's allowlist is never granted.
     expect(plan.tools).not.toContain('type_text');
-    // Approval-gated tools are withheld until the user grants them.
+    // Approval-gated tools are exposed in a separate list and still pass through
+    // the central per-action approval broker at execution time.
     expect(plan.tools).not.toContain('browser_click');
+    expect(plan.approvalTools).toContain('browser_click');
     expect(plan.withheld.some((entry) => entry.tool === 'browser_click')).toBe(true);
   });
 
   it('withholds state-changing tools in guide mode and explains why', () => {
     const plan = planDelegation({ specialist: 'browser', objective: 'click', mode: 'guide', projectId: 'p' }, registry);
     expect(plan.tools).not.toContain('browser_click');
+    expect(plan.approvalTools).not.toContain('browser_click');
     expect(plan.withheld.some((entry) => /approval|guide/i.test(entry.reason))).toBe(true);
   });
 
@@ -423,6 +426,25 @@ describe('subagent execution', () => {
     const result = await coordinator().delegate(plan, () => ({ tool: 'type_text', args: { text: 'x' } }));
     expect(result.status).toBe('refused');
     expect(result.failure).toContain('not granted');
+  });
+
+  it('routes approval-eligible tools through the normal invocation gateway', async () => {
+    const calls: string[] = [];
+    let requested = false;
+    const result = await coordinator({
+      invoke: async (tool) => {
+        calls.push(tool);
+        return { ok: true, content: 'user approved the action and it completed' };
+      },
+    }).delegate(plan, () => {
+      if (requested) return null;
+      requested = true;
+      return { tool: 'browser_click', args: { selector: '#open' } };
+    });
+
+    expect(plan.approvalTools).toContain('browser_click');
+    expect(result.status).toBe('completed');
+    expect(calls).toEqual(['browser_click']);
   });
 
   it('stops on the emergency stop', async () => {

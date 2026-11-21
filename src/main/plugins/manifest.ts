@@ -5,7 +5,7 @@ export interface PixelPluginManifest {
   name: string;
   description: string;
   version: string;
-  pixelApiVersion: 1;
+  pixelApiVersion: number;
   publisher: string;
   capabilities: string[];
   permissions: string[];
@@ -46,7 +46,7 @@ export const GITHUB_PUBLIC_PLUGIN: PixelPluginManifest = {
 
 export const BUNDLED_PLUGINS: readonly PixelPluginManifest[] = [GITHUB_PUBLIC_PLUGIN];
 
-export function pluginView(manifest: PixelPluginManifest, state?: { installed: boolean; enabled: boolean; updatedAt?: number; error?: string }): PluginView {
+export function pluginView(manifest: PixelPluginManifest, state?: { installed: boolean; enabled: boolean; compatibility?: PluginView['compatibility']; installedVersion?: string; updatedAt?: number; error?: string }): PluginView {
   const installed = state?.installed ?? false;
   const enabled = state?.enabled ?? false;
   return {
@@ -61,6 +61,8 @@ export function pluginView(manifest: PixelPluginManifest, state?: { installed: b
     enabled,
     connection: manifest.connection === 'not_required' ? 'not_required' : 'disconnected',
     health: state?.error ? 'error' : !enabled ? 'disabled' : 'ready',
+    ...(state?.compatibility ? { compatibility: state.compatibility } : {}),
+    ...(state?.installedVersion ? { installedVersion: state.installedVersion } : {}),
     ...(state?.updatedAt ? { updatedAt: state.updatedAt } : {}),
     ...(state?.error ? { error: state.error } : {}),
   };

@@ -104,7 +104,10 @@ export interface DelegationRequest {
 export interface DelegationPlan {
   specialist: SpecialistId;
   objective: string;
+  /** Tools currently allowed without a new prompt. */
   tools: string[];
+  /** Tools the mode permits only after the normal per-action approval flow. */
+  approvalTools: string[];
   limits: SpecialistDefinition['limits'];
   /** Tools requested but not granted, with the reason, for an honest report. */
   withheld: Array<{ tool: string; reason: string }>;
@@ -138,6 +141,7 @@ export function planDelegation(
 ): DelegationPlan {
   const definition = SPECIALISTS[request.specialist];
   const tools: string[] = [];
+  const approvalTools: string[] = [];
   const withheld: Array<{ tool: string; reason: string }> = [];
 
   for (const toolName of definition.allowedTools) {
@@ -151,6 +155,7 @@ export function planDelegation(
       tools.push(toolName);
       continue;
     }
+    if (decision.needsApproval) approvalTools.push(toolName);
     withheld.push({
       tool: toolName,
       reason: decision.needsApproval
@@ -163,6 +168,7 @@ export function planDelegation(
     specialist: request.specialist,
     objective: request.objective,
     tools,
+    approvalTools,
     limits: definition.limits,
     withheld,
   };
@@ -192,7 +198,7 @@ export class SpecialistCoordinator {
 
   async delegate(
     plan: DelegationPlan,
-    work: (step: number) => { tool: string; args: Record<string, unknown> } | null,
+    work: (step: number) => { tool: string; args: Record<string, unknown> } | null | Promise<{ tool: string; args: Record<string, unknown> } | null>,
   ): Promise<DelegationResult> {
     const startedAt = (this.deps.now ?? Date.now)();
     const findings: string[] = [];
@@ -249,7 +255,7 @@ export class SpecialistCoordinator {
         };
       }
 
-      const next = work(step);
+      const next = await work(step);
       if (next === null) {
         return {
           specialist: plan.specialist,
@@ -263,7 +269,7 @@ export class SpecialistCoordinator {
 
       // The allowlist is enforced here, so a compromised or confused model cannot
       // reach a tool the plan did not grant.
-      if (!plan.tools.includes(next.tool)) {
+      if (!plan.tools.includes(next.tool) && !plan.approvalTools.includes(next.tool)) {
         return {
           specialist: plan.specialist,
           status: 'refused',

@@ -12,15 +12,41 @@ not been demonstrated; **Partially implemented** means a bounded subset works;
 **Missing** means no functioning implementation exists; **Blocked** means an
 external runtime, credential, desktop or network dependency prevents validation.
 
+## Continuation status — 2026-11-21
+
+The current source still leaves Core Tools 6.2 **in progress**. This continuation
+does not claim previously listed gaps are repaired merely from documentation.
+The Workspace redesign does not close the remaining 6.2 acceptance gaps. A
+separate task-to-skill recording and guarded skill-review slice is now
+implemented below. The prior
+committed-source CI run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282)
+passed; it is not Windows interactive acceptance for this local tree.
+
+The current capability gaps confirmed against the source/checklist are:
+
+| Capability | Current source-backed state | Evidence still required |
+|---|---|---|
+| Document creation/edit/export | Notes import/export Markdown, and the approved `file_write` tool creates/edits UTF-8 text documents with exact-path approval and read-back. Known binary PDF/Office/media formats are refused instead of being corrupted by text output. General rich-document authoring/export and automatic provenance linking remain incomplete. | Text round-trip tests pass; supported Windows dialogs and PDF/Office authoring are not available. |
+| Browser lifecycle/forms/transfers | Tab lifecycle, exact accessible targeting, field read-back, credential/one-time-code refusal, explicit submission postconditions, user-selected file upload with critical approval plus native file/site confirmation, and user-selected download with a 25 MB cap, no-overwrite write and SHA-256 read-back are implemented. | 30 Chromium tests pass on cached real Chromium against disposable local-file fixtures; one covers actual file input selection and one actual browser download/read-back. Upload acceptance by a remote site is deliberately not claimed. Electron native dialogs, external network/session isolation and actual app acceptance remain unverified. Host loopback access is denied, so fixture tests explicitly permit local files only. |
+| Desktop recovery/annotation/diagnostics | File trash uses the OS adapter but restore is absent; UIA annotation remains guidance-only; richer diagnostics remain partial. A disposable `SendToRecycleBin` probe made its source path disappear, but the Shell Recycle Bin namespace returned zero entries, so no restore verb was invoked and restore behavior remains unsupported/unverified on this host. | Verified Recycle Bin enumeration and exact-source restore; target-window freshness, editable annotation/export, live UIA. |
+| Notes and local document links | Project-scoped notes/tasks/checklists persist. Note-to-local-document links now have a migration-backed store, scoped IPC, renderer-safe metadata, native file selection, verified open and unlink controls in Notes. | Storage tests cover deduplication, project isolation, directory refusal and unlink. Actual Windows file-dialog/open acceptance remains unverified. |
+| Semantic workflows | The Tasks view can convert a completed, verified task into a project-scoped skill draft. Main-process checks require a completed task in the active project, known tools and at most 40 successful steps; all string arguments become required inputs, and withheld/secret/unsupported values are refused. Draft JSON is editable and saves a new immutable version before activation. Daily routines invoke the ordered reviewed tool plan directly through the central executor; the model does not select or reorder steps. A one-time form supplies declared inputs, rechecks schemas and current permission policy, refuses credential-like values, and redacts values from task/audit text. | Executor, plan-builder, input-redaction and renderer bridge tests pass. Actual Windows flow remains unverified. Daily routines still exclude input-bearing skills; non-tool semantic steps and broader expectation predicates remain unsupported. |
+| Specialist coordination | Live bounded model delegation is implemented for research/browser/systems/knowledge through the main executor; it carries permissions, cancellation and task history. | Existing integration tests cover tool allowlists, approval flow and postcondition; Windows execution and durable task recovery still require acceptance. |
+| Voice | Offline components are present, but this host reports `stt=false`, `tts=true`; actual model assets/inference/playback are not qualified. | Packaged runtime, model assets, real synthesis/transcription and playback. |
+| Windows acceptance | GitHub CI passed its source checks and package jobs on the committed baseline. Current-session Computer Use inventory (2026-11-21) exposed no Pixel window after the user accepted the Electron permission prompt, so no real Workspace capture or interactive acceptance could be performed. | Launch Pixel successfully, then verify UIA/Notepad/browser, package install and user-data preservation. The earlier Electron `0x80000003` launch failure remains the source/runtime blocker to diagnose; do not treat CI or component tests as GUI acceptance. |
+
+Core Tools 6.2 remains open; automated feature coverage does not replace the
+listed current-tree Windows acceptance and deterministic replay evidence.
+
 ## Wave 1 — Windows acceptance and environment
 
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
-| NSIS provisioning fix | Done and verified | Latest run [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339) is green and built NSIS, portable, unpacked outputs. |
+| NSIS provisioning fix | Done and verified | Baseline run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) is green and built packages. It predates this uncommitted local redesign. |
 | Hosted typecheck, tests, preload smoke, helper build and package build | Done and verified on `64e0383` | Windows CI run [44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637) passed on the committed clipboard/batch-file SHA. Its job steps include NSIS setup, typecheck, worker tests, sandboxed preload smoke, full tests, native helper compile, unpacked/portable/NSIS packaging and artifact upload. Current local file-search/open changes are not covered. |
 | Installed-app clean install, upgrade, uninstall, data preservation | Implemented, unverified | CI builds installer but does not perform interactive install lifecycle acceptance. |
 | Settings return button in actual Pixel GUI | Implemented, unverified | Renderer test exists; real desktop run still required. |
-| Local Electron GUI launch and sandbox preload | Blocked by local launch environment | Current `npm run test:preload-sandbox` rebuilt the bridge, then Electron exited `2147483651` (`0x80000003`) before its report. CUA saw windows only from a different checkout. Hosted smoke success is on the base SHA and does not verify this local launch failure. |
+| Local Electron GUI launch and sandbox preload | Blocked by local launch environment | Earlier `npm run test:preload-sandbox` exited `2147483651` (`0x80000003`) before its report. The default launcher now uses Vite's actual loopback port (with fallback if 5199 is occupied); launcher tests verify an existing listener is preserved. Both `npm run dev` and `npm run dev:gpu` rebuilt main/preload/native code, started Vite at `127.0.0.1:5199`, then exited with `2147483651` (`0x80000003`) without a targetable window. `ELECTRON_ENABLE_LOGGING=1` plus stack dumping exposed `EXCEPTION_BREAKPOINT` and an unresolved native backtrace before Pixel's boot marker. The existing startup log has no marker from this checkout; Windows denied Application event-log access. Isolated temporary APPDATA did not change the earlier result. A visible Pixel window belongs to a separate `C:\dev\Pixel` checkout. No source-tree GUI acceptance is claimed. |
 
 ## Wave 2 — Offline speech
 
@@ -38,29 +64,29 @@ external runtime, credential, desktop or network dependency prevents validation.
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
 | Clipboard read/copy/paste/restore agent tools | Partially implemented and unit-verified | Registered main-process `clipboard_read`, `clipboard_copy`, `clipboard_restore`, and `clipboard_paste`; strict schemas, explicit approvals, credential-pattern refusal, bounded text, memory-only conditional restoration limited to non-secret values up to 20,000 characters with timed expiry, verified UIA field write, and session-only chat/task retention after reads. Windows model/clipboard acceptance and IPC history integration test remain outstanding. |
-| Documents read/create/edit/export | Partially implemented | Index/search pipeline exists; direct authored document round-trip is incomplete. |
+| Documents read/create/edit/export | Partially implemented | Provenance-linked index/search is implemented. Approved `file_write` authors/edits supported UTF-8 text and verifies read-back; tests cover Markdown/CSV/JSON plus refusal to overwrite binary PDF data. General PDF/Office authoring and export remain unsupported. See `docs/architecture/PIXEL_DOCUMENT_ASSISTANCE.md`. |
 | Batch file operations, filters, duplicates, open/recycle | Partially implemented and unit-verified | Added approved `file_batch_copy`, `file_batch_rename`, `file_find_duplicates`, size/time filters for `file_search`, main-process `file_open` for home-scoped folders and supported documents/images, and approval-gated `file_trash` through Electron `shell.trashItem`. Batches cap at 20 operations, reject overwrite/credential-like names, stage and SHA-256 verify destinations before removing move sources, and report partial source-removal failures. Duplicate scans cap at 1,200 entries, 8 levels, 500 MB total and 50 MB/file. Open verifies OS acceptance and path existence, not visible-window appearance. Trash verifies the original path is absent using a deterministic unit adapter; real Windows Recycle Bin behavior, restore, and visible app confirmation remain unverified. |
-| Browser tabs/forms/uploads/downloads | Partially implemented | Added real session-local tab create/list/switch/close agent tools with URL/title verification and schema/executor tests. Real Chromium tab lifecycle remains unverified because browser binaries cannot be downloaded in this network-restricted environment; semantic form locators, upload/download workflow coverage remain incomplete. |
+| Browser tabs/forms/uploads/downloads | Partially implemented | Session-local tabs, semantic forms, explicit submission postconditions, and transfers now share the same executor and policy path. Upload requires a critical per-action agent approval and a second native confirmation after file selection; credential-like filenames, symlinks, non-regular files and files over 25 MB are refused. The page target must be a unique enabled file input; attachment metadata is read back, but this does not prove site acceptance. Download requires fresh approval and native save destination, is capped at 25 MB, refuses overwrite and verifies the new file by size and SHA-256. Cached real Chromium passes **30/30** tests including actual disposable upload/download operations. Electron dialogs, remote site acceptance, real app/network session isolation and Windows UI acceptance remain unverified; host loopback networking is denied. |
 | Screen target freshness, region/display conversion, hierarchy | Partially implemented | Native window identity and screen/display capture paths exist; freshness evidence and richer hierarchy need verification. |
 | Editable desktop annotation and export | Missing | Passive UIA rectangle/circle/arrow guidance exists; interactive freehand/editor/export is absent. |
 | Pixel Board model workflow and richer exports | Implemented, unverified | Main-process service/tools and tests exist; actual model-generated diagram and user-selected file export need Windows acceptance. |
-| System process/network/battery/audio diagnostics | Partially implemented | Added safe adapter-name/protocol-family status to model-facing system info without exposing IP/MAC addresses. Existing diagnostics panel reports CPU, memory, disk, battery and displays. Process, selected-process and audio-device diagnostics remain incomplete. |
+| System process/network/battery/audio diagnostics | Partially implemented | Agent `get_system_info` and Workspace diagnostics share one snapshot for uptime, load, system-volume capacity (`statfs`), primary display resolution/scale, adapter names/protocol families and Windows battery status from the native helper's `GetSystemPowerStatus` command. It omits IP/MAC addresses and display labels/bounds. Native helper compilation/protocol smoke returned a real typed battery response; no battery percentage is recorded. Process/audio-device diagnostics remain incomplete. |
 
 ## Wave 4 — productivity
 
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
-| Notes create/edit/search/project association | Partially implemented | Migration-backed project-scoped note CRUD is exposed to the agent; Notes & Planning supports browse/create/edit/delete plus Markdown/text import and Markdown export through main-process dialogs. Import limits type/size and rejects symlinks; export reads back saved content. Local store/UI tests pass; local document links and Windows acceptance remain open. |
+| Notes create/edit/search/project association | Partially implemented | Migration-backed project-scoped note CRUD is exposed to the agent; Notes & Planning supports browse/create/edit/delete plus Markdown/text import and Markdown export through main-process dialogs. Import limits type/size and rejects symlinks; export reads back saved content. Local document links now store canonical regular-file references, expose only display metadata to renderer, and verify the target again before opening. Store and UI tests pass; actual Windows dialog/open acceptance remains open. |
 | Checklists/tasks persistent status and agent tools | Implemented, locally unit-verified; Windows acceptance open | Migration 9 adds project-owned checklists and task grouping; model tools can create/list checklists and create/list/update tasks within the active project. Workspace creates, filters and assigns checklists and edits task title/description/due date/status. |
-| Local document linking and Markdown import/export | Partially implemented | Markdown/text import and Markdown export are implemented for notes through the main-process file-dialog IPC; linked-note relationships and Windows file-dialog acceptance remain missing/unverified. |
+| Local document linking and Markdown import/export | Partially implemented | Markdown/text import and export are implemented for notes. Migration 11 adds project-scoped links to supported regular local documents; renderer payload excludes absolute paths, and open revalidates the target. Store and UI bridge tests pass. Actual Windows file selection/open remains unverified, and general document authoring/export formats are still incomplete. |
 
 ## Wave 5 — workflows and specialists
 
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
-| User-initiated semantic workflow recording/replay | Missing | Workflow/routine persistence exists; live semantic recording/review/replay is not connected. |
+| User-initiated semantic workflow recording/replay | Partially implemented | A user can save completed verified task steps as a project-scoped draft; arguments become required inputs. Draft review supports edits saved as a new version before activation. Active tool-only skills can run once with validated declared inputs; task/audit records redact those exact values. Daily routine tool steps execute in stored order through the normal permission/executor path, gate actions on fresh observation, enforce reviewed approval flags, compare supported predicates against actual tool results, and stop on failure or unresolved postconditions. Daily schedules still exclude input-bearing skills and non-tool steps, and Windows UI acceptance remains open. |
 | Routine execution status/history | Partially implemented | Local scheduling and run persistence exist; validate UI status and restart behavior. |
-| Live specialist delegation | Missing | Bounded coordinator module exists but is not called from the live agent runtime. |
+| Live specialist delegation | Partially implemented and integration-tested | The model can request bounded research, browser, systems, and knowledge subtasks. Delegates receive only declared tool schemas; child operations use the central scope/schema/permission gateway, cannot recursively delegate, and honor emergency stop. Tests cover capability exclusion, read-only execution and approval flow. Windows conversation acceptance and durable recovery remain unverified. |
 | Durable task checkpoints, postconditions and crash recovery | Partially implemented | Snapshot/recovery and evidence exist; automatic continuation is intentionally absent; real end-to-end acceptance is outstanding. |
 
 ## Wave 6 — permission policy
@@ -78,20 +104,20 @@ external runtime, credential, desktop or network dependency prevents validation.
 | Notepad write and verify | Implemented, unverified | Native/UIA tests exist; run through real DeepSeek agent on target laptop. |
 | Screen inspect and highlight | Implemented, unverified | Scoped screen/UIA tools exist; live capture/overlay acceptance missing. |
 | Board diagram and save | Implemented, unverified | Board tool tests exist; model-call and Windows export acceptance missing. |
-| File organization and document summary | Partially implemented | Base operations exist; batch operations and authored-document round trip absent. |
-| Website form workflow | Partially implemented | Playwright tools exist; target-browser acceptance and upload/download coverage missing. |
-| Saved checklist, recorded workflow, specialist use | Missing | Required capabilities are not connected/implemented. |
+| File organization and document summary | Partially implemented | Batch organization is unit-tested. Supported UTF-8 authoring uses `file_write`; generated binary document formats and a direct source-linked authoring workflow remain incomplete. |
+| Website form workflow | Partially implemented | Playwright tools include semantic forms plus approved file upload/download. Cached Chromium fixture transfer tests pass; target-browser acceptance, remote site confirmation and Electron native dialog flows remain unverified. |
+| Saved checklist, recorded workflow, specialist use | Partially implemented | Project checklists are persisted and editable; specialist use is connected and integration-tested; verified-task recording, editable versioned review, deterministic routine tool order, supported result predicates, observation/postcondition gates, and approval enforcement are implemented and covered by executor tests. Input-bearing replay and actual Windows acceptance remain open. |
 | Offline transcription and neural speech | Blocked | Requires Python 3.12, downloaded model assets, audio/speaker device and Windows acceptance. |
 
 ## Wave 8 — release gate
 
 | Gate | Initial status | Evidence / remaining work |
 |---|---|---|
-| GitHub Windows CI on audited SHA | Done and verified | Run 44786311339 completed successfully, including artifact upload. |
-| Local typecheck/test/build repeat | Done and verified (local only) | Current worktree typecheck and production build passed; Vitest **893 passed, 28 skipped, 0 failed (921 total; 64 files passed, 1 skipped)**. The 28 skips require Chromium, makensis/NSIS, or opt-in Windows foreground integration. The suite used `PIXEL_TEST_HOME` set to a writable isolated workspace directory. No hosted CI run covers this local tree. |
+| GitHub Windows CI on audited SHA | Done and verified | Run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) completed successfully on baseline `8288850`; no CI run covers these uncommitted changes. |
+| Local typecheck/test/build repeat | Done and verified (local only) | Latest `npm run verify` passed both TypeScript projects, production build, and default Vitest **949 passed, 33 skipped, 0 failed (982 total; 73 files passed, 1 skipped)** with `PIXEL_TEST_HOME` under `%TEMP%`. `scripts/build-native.ps1 -OutputPath <temporary exe>` compiled and protocol-smoke-tested `ping` and the new native `system_power_status` command against Windows; its actual response values were not recorded. Cached Chromium separately passes **30** browser tests and **29** tool-policy tests. The renderer emits a 502.74 kB minified entry chunk, above Vite's advisory threshold. Loopback fixtures remain blocked by `ERR_NETWORK_ACCESS_DENIED`; no hosted CI covers this local tree. |
 | Native/helper/voice tests | Done and verified in bounded local checks | Native helper compilation passed; Python worker tests 12/12 passed. These do not establish microphone inference or neural playback with real models. |
-| Windows GUI and installer lifecycle | Blocked | Must use actual interactive Windows Pixel installation; hosted packaging is not this acceptance. |
-| Final capability matrix | In progress | Update after implementation; do not set overall completion while any required row is missing, blocked, or unverified. |
+| Windows GUI and installer lifecycle | Blocked | This local `electron-builder --win --dir --publish never` attempt stopped on `github.com` DNS while fetching a packaging helper; pre-existing ignored release files were preserved. The new launcher resolves the occupied-port case, but latest Electron startup still exits `2147483651` (`0x80000003`) without a visible window on isolated APPDATA. Hosted packaging passed on baseline run 44882229282, but interactive launch, install/upgrade and data-preservation acceptance remain unverified. |
+| Final capability matrix | In progress | Remaining gaps remain as documented; note-document linking, Plugin Manager UI, bundled update compatibility flow, binary text-write refusal, dev port selection, specialist integration, editable skill review, deterministic tool-plan execution, one-time declared inputs, observation/postcondition gates and browser transfers are covered by **949 passed, 33 skipped** default tests plus 30/30 opt-in cached-Chromium tests. Electron native dialog/open, live provider, visual and other Windows acceptance remain unverified. Do not set overall completion while required rows remain missing, blocked, or unverified. |
 
 ## Implementation log
 
@@ -159,6 +185,7 @@ other capabilities above.
   NSIS checks and the opt-in native foreground fixture remain skipped.
 - This does not finish the 6.2 acceptance matrix. It does not add desktop
   drawing, document authoring, UIA installation verification, file restoration,
-  full browser form/session/network acceptance, local document links, persistent
+  full browser form/session/network acceptance, Windows file-dialog/open
+  acceptance, persistent
   agent recovery, voice inference, or installed-app acceptance.
 - Overall Core Tools status remains **in progress**.

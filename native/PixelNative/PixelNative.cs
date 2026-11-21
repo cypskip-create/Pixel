@@ -32,7 +32,7 @@ using System.Windows.Automation;
 
 internal static class Program
 {
-    private const string Version = "1.0.0";
+    private const string Version = "1.1.0";
 
     // Bounds on a search so a huge browser tree cannot hang the helper.
     private const int MaxNodes = 4000;
@@ -90,6 +90,20 @@ internal static class Program
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte AcLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte Reserved;
+        public uint BatteryLifeTime;
+        public uint BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeMessage
@@ -294,6 +308,8 @@ internal static class Program
         {
             case "ping":
                 return new Dictionary<string, object> { { "version", Version }, { "trackingMode", TrackingMode } };
+            case "system_power_status":
+                return SystemPowerStatusSnapshot();
             case "foreground_window":
                 return ForegroundWindow();
             case "last_external_foreground_window":
@@ -317,6 +333,22 @@ internal static class Program
             default:
                 throw new InvalidOperationException("Unknown command: " + command);
         }
+    }
+
+    private static object SystemPowerStatusSnapshot()
+    {
+        SystemPowerStatus status;
+        if (!GetSystemPowerStatus(out status)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        object present = status.BatteryFlag == 255
+            ? null
+            : (object)((status.BatteryFlag & 128) == 0);
+        object percent = status.BatteryLifePercent == 255 ? null : (object)status.BatteryLifePercent;
+        object charging = status.BatteryFlag == 255 ? null : (object)((status.BatteryFlag & 8) != 0);
+        return new Dictionary<string, object> {
+            { "present", present },
+            { "percent", Object.Equals(present, false) ? null : percent },
+            { "charging", Object.Equals(present, false) ? null : charging }
+        };
     }
 
     private static void StartForegroundObserver()

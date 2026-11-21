@@ -29,7 +29,12 @@ Markdown export use main-process file dialogs; import rejects symlinks and
 files over 20 KB, while export confirms replacement and reads the result back.
 The page creates and filters checklists and assigns tasks to them; agent tools
 can create/list checklists and attach or move tasks only within the active
-project. Local document links and Windows GUI acceptance remain open.
+project. Migration 11 adds links from project notes to supported local document
+files. The main process selects files, rejects symlinks/non-regular files and
+unsupported extensions, stores the canonical path, and revalidates it before
+asking Windows to open it. The renderer receives only link ID, display name,
+size and timestamp. Store isolation/deduplication and React open/unlink controls
+are tested; actual Windows dialog/open behavior remains unverified.
 
 ## Browser tabs
 

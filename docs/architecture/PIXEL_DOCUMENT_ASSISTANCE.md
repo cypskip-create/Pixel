@@ -1,0 +1,35 @@
+# Pixel document assistance
+
+## Reading, extraction and provenance
+
+`DocumentIndex` walks only a user-selected directory, with limits on depth,
+file count and file size. It skips symbolic links and extracts supported PDF,
+Office, CSV/TSV, text, structured-text, HTML and source formats through the
+Python worker. Extracted text is chunked and indexed in the active project;
+search results retain the original path and chunk location. The agent receives
+retrieved excerpts inside an untrusted-content frame. Index/search/list are
+registered in the shared tool registry and execute through `ToolExecutors`.
+
+## Authoring and exports
+
+Pixel uses the existing approved `file_write` tool for text document creation
+and editing. It is limited to the user's home directory, does not create parent
+directories, refuses replacement unless `overwrite: true` is part of the
+approved call, rejects sensitive filenames and symlinks, caps content at 64,000
+characters, and reads the result back before reporting success. Common text
+formats include `.txt`, `.md`, `.csv`, `.tsv`, `.json`, `.xml`, `.yaml`, `.html`,
+`.rst` and plain-text configuration/source files.
+
+The tool now refuses known binary formats, including PDF and Word/Excel/PowerPoint
+files. Pixel does not claim to generate those formats by writing UTF-8 bytes.
+After authoring a text document, the user can request indexing of its containing
+directory to include it in provenance-linked search. That indexing is a separate
+approved action; file writing does not silently expand the index scope.
+
+## Remaining limits
+
+There is no dedicated rich-document editor, general Office/PDF authoring/export,
+or automatic binding between a newly written file and a source-cited summary.
+Those remain incomplete. Notes support local Markdown/text import and Markdown
+export, and migration 11 links supported existing document files to notes; see
+`PIXEL_PRODUCTIVITY.md` for that separate workflow.

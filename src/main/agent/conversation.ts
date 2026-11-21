@@ -93,6 +93,10 @@ export interface RunTurnOptions {
    * passes the full list rather than letting the engine rebuild it.
    */
   messages?: ChatMessage[];
+  /** A bounded tool set for an in-process specialist turn. */
+  tools?: ToolDefinition[];
+  /** Keep specialist reasoning and partial output out of the primary chat stream. */
+  suppressEvents?: boolean;
 }
 
 /** What one model turn produced. The agent loop uses this to decide whether to continue. */
@@ -133,14 +137,14 @@ export class ConversationEngine {
     const { provider, getApiKey, isStopped, emit } = this.deps;
 
     if (this.running) {
-      emit(
+      if (!options.suppressEvents) emit(
         errorEvent(requestId, 'BAD_REQUEST', 'Pixel is already answering. Wait, or press stop.'),
       );
       return failedTurn();
     }
 
     if (isStopped()) {
-      emit(
+      if (!options.suppressEvents) emit(
         errorEvent(
           requestId,
           'ABORTED',
@@ -152,7 +156,7 @@ export class ConversationEngine {
 
     const apiKey = getApiKey();
     if (!apiKey) {
-      emit(
+      if (!options.suppressEvents) emit(
         errorEvent(
           requestId,
           'NO_API_KEY',
@@ -171,7 +175,7 @@ export class ConversationEngine {
       const model = resolveModel(options.model, images.length > 0);
       const messages = options.messages ?? buildMessages(request);
       this.addMemoryContext(messages, request);
-      const tools = this.deps.toolsFor?.(request.mode);
+      const tools = options.tools ?? this.deps.toolsFor?.(request.mode);
 
       // done is held back until we know whether the turn produced tool calls.
       // Emitting it eagerly would tell the UI the answer finished on every step
@@ -195,6 +199,7 @@ export class ConversationEngine {
             controller.abort();
             return;
           }
+          if (options.suppressEvents) return;
           if (event.type === 'done') {
             pendingDone = event;
             return;
@@ -204,7 +209,7 @@ export class ConversationEngine {
       });
 
       // Only a turn with no tool calls is a final answer for the UI.
-      if (result.toolCalls.length === 0 && pendingDone) emit(pendingDone);
+      if (!options.suppressEvents && result.toolCalls.length === 0 && pendingDone) emit(pendingDone);
 
       return {
         content: result.content,
@@ -215,7 +220,7 @@ export class ConversationEngine {
         failed: false,
       };
     } catch (error) {
-      emit(errorEvent(requestId, ...toErrorParts(error)));
+      if (!options.suppressEvents) emit(errorEvent(requestId, ...toErrorParts(error)));
       return failedTurn();
     } finally {
       this.running = false;

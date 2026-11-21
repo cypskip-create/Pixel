@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Check, Download, FileText, Plus, Save, Trash2, Upload } from 'lucide-react';
-import type { ProductivityChecklistView, ProductivityNoteView, ProductivityTaskView } from '@shared/types';
+import { Check, Download, ExternalLink, FileText, Link2, Plus, Save, Trash2, Unlink, Upload } from 'lucide-react';
+import type { ProductivityChecklistView, ProductivityDocumentLinkView, ProductivityNoteView, ProductivityTaskView } from '@shared/types';
 import { useBridge } from '@/hooks/useBridge';
 
 export function ProductivityPanel(): React.JSX.Element {
   const bridge = useBridge();
   const [notes, setNotes] = useState<ProductivityNoteView[]>([]);
+  const [documentLinks, setDocumentLinks] = useState<ProductivityDocumentLinkView[]>([]);
   const [tasks, setTasks] = useState<ProductivityTaskView[]>([]);
   const [checklists, setChecklists] = useState<ProductivityChecklistView[]>([]);
   const [checklistTitle, setChecklistTitle] = useState('');
@@ -36,6 +37,13 @@ export function ProductivityPanel(): React.JSX.Element {
   }, [bridge, selectedId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (bridge.kind !== 'ready' || !selectedId) { setDocumentLinks([]); return; }
+    let current = true;
+    void bridge.bridge.productivity.listNoteDocuments(selectedId).then((links) => { if (current) setDocumentLinks(links); }).catch(() => { if (current) setError('Pixel could not load the documents linked to this note.'); });
+    return () => { current = false; };
+  }, [bridge, selectedId]);
 
   const openNote = (note: ProductivityNoteView): void => { setSelectedId(note.id); setTitle(note.title); setBody(note.body); setError(null); };
   const createNote = async (): Promise<void> => {
@@ -75,6 +83,27 @@ export function ProductivityPanel(): React.JSX.Element {
       if (!result.ok && !result.cancelled) setError('Pixel could not verify the Markdown export.');
     } catch { setError('Pixel could not export this note.'); }
     finally { setBusy(false); }
+  };
+  const linkDocument = async (): Promise<void> => {
+    if (!selected || bridge.kind !== 'ready') return;
+    setBusy(true); setError(null);
+    try {
+      const linked = await bridge.bridge.productivity.linkNoteDocument(selected.id);
+      if (linked) setDocumentLinks(await bridge.bridge.productivity.listNoteDocuments(selected.id));
+    } catch { setError('Pixel could not link that file. Choose a supported document file, not a folder or symbolic link.'); }
+    finally { setBusy(false); }
+  };
+  const openDocument = async (link: ProductivityDocumentLinkView): Promise<void> => {
+    if (!selected || bridge.kind !== 'ready') return;
+    setError(null);
+    try { const result = await bridge.bridge.productivity.openNoteDocument(selected.id, link.id); if (!result.ok) setError(`Pixel could not open “${link.displayName}”. It may have moved or been removed.`); }
+    catch { setError(`Pixel could not open “${link.displayName}”.`); }
+  };
+  const unlinkDocument = async (link: ProductivityDocumentLinkView): Promise<void> => {
+    if (!selected || bridge.kind !== 'ready') return;
+    setError(null);
+    try { const removed = await bridge.bridge.productivity.unlinkNoteDocument(selected.id, link.id); if (removed) setDocumentLinks(await bridge.bridge.productivity.listNoteDocuments(selected.id)); }
+    catch { setError('Pixel could not remove this document link.'); }
   };
   const createTask = async (event: FormEvent): Promise<void> => {
     event.preventDefault(); const clean = taskTitle.trim();
@@ -139,6 +168,10 @@ export function ProductivityPanel(): React.JSX.Element {
       <header><div><h2>Edit note</h2><p>Project note · last updated {new Date(selected.updatedAt).toLocaleString()}</p></div><div className="productivity-actions"><button type="button" disabled={busy} onClick={() => void exportMarkdown()} className="workspace-secondary-button"><Download size={14} /> Export .md</button><button type="submit" disabled={busy || !title.trim()} className="workspace-primary-button"><Save size={14} /> Save</button><button type="button" disabled={busy} onClick={() => void deleteNote()} className="workspace-danger-button"><Trash2 size={14} /> Delete</button></div></header>
       <input aria-label="Note title" value={title} maxLength={180} onChange={(event) => setTitle(event.target.value)} />
       <textarea aria-label="Note content" value={body} maxLength={20_000} onChange={(event) => setBody(event.target.value)} rows={9} placeholder="Write a note…" />
+      <section className="productivity-linked-documents" aria-label="Linked documents">
+        <header><h3><Link2 size={14} /> Linked documents <span>{documentLinks.length}</span></h3><button type="button" className="workspace-secondary-button" disabled={busy} onClick={() => void linkDocument()}><Plus size={13} /> Link document</button></header>
+        {documentLinks.length ? <ul>{documentLinks.map((link) => <li key={link.id}><span><strong>{link.displayName}</strong><small>{formatBytes(link.byteSize)}</small></span><button type="button" aria-label={`Open ${link.displayName}`} onClick={() => void openDocument(link)}><ExternalLink size={14} /></button><button type="button" aria-label={`Unlink ${link.displayName}`} onClick={() => void unlinkDocument(link)}><Unlink size={14} /></button></li>)}</ul> : <p>No local documents linked to this note.</p>}
+      </section>
     </form> : null}
   </section>;
 }
@@ -147,4 +180,10 @@ function toLocalDateTimeInput(timestamp: number): string {
   const date = new Date(timestamp);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

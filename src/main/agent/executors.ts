@@ -18,9 +18,10 @@
 import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { arch, cpus, freemem, networkInterfaces, platform, release, totalmem } from 'node:os';
-import type { CaptureResult, ImageAttachment, ScreenWindowTarget, SearchProvider, VisualGuidanceShape } from '../../shared/types';
+import type { CaptureResult, DiagnosticsSnapshot, ImageAttachment, ScreenWindowTarget, SearchProvider, VisualGuidanceShape } from '../../shared/types';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../../shared/browserSearch';
 import { BrowserSession } from './browser';
+import type { BrowserSemanticTarget, BrowserUploadFile } from './browser';
 import { DesktopInputLease } from './inputLease';
 import type { MemoryTools } from '../memory/toolset';
 import type { DocumentTools } from '../documents/toolset';
@@ -102,6 +103,10 @@ export interface ExecutorDeps {
   clearVisualGuidance?: (selector?: string) => void;
   /** Shared browser session, created lazily on first use. */
   browser?: BrowserSession;
+  /** Native file picker plus separate confirmation before a selected file reaches a site. */
+  chooseBrowserUpload?: (destinationUrl: string) => Promise<BrowserUploadFile | null>;
+  /** Native save picker; the browser service independently refuses overwrites. */
+  chooseBrowserDownload?: (suggestedName: string) => Promise<string | null>;
   /** Wave 3 memory tools, scoped to the active project. */
   memory?: MemoryTools;
   /** Wave 3 document tools. */
@@ -121,6 +126,8 @@ export interface ExecutorDeps {
   /** Opens only a validated HTTPS URL in the user's default browser. */
   openExternal?: (url: string) => Promise<void>;
   searchProvider?: () => SearchProvider;
+  /** Reuse the main-process verified system diagnostics probes when available. */
+  systemDiagnostics?: () => DiagnosticsSnapshot | Promise<DiagnosticsSnapshot>;
   /** Read-only public GitHub adapter; injectable for deterministic tests. */
   githubRepository?: (owner: unknown, repository: unknown, signal?: AbortSignal) => Promise<GitHubRepositorySummary>;
   onPluginHealth?: (pluginId: string, error?: string) => void;
@@ -318,6 +325,10 @@ export class ToolExecutors {
           return await this.browserClick(args);
         case 'browser_type':
           return await this.browserType(args);
+        case 'browser_upload':
+          return await this.browserUpload(args);
+        case 'browser_download':
+          return await this.browserDownload(args);
         case 'browser_scroll':
           return await this.browserScroll(args);
         case 'browser_screenshot':
@@ -604,7 +615,7 @@ export class ToolExecutors {
     };
   }
 
-  private getSystemInfo(): ToolResult {
+  private async getSystemInfo(): Promise<ToolResult> {
     const cpuList = cpus();
     // Adapter names and protocol families are useful diagnostics; addresses and
     // hardware identifiers are intentionally not sent to the model.
@@ -614,6 +625,7 @@ export class ToolExecutors {
       ipv6: addresses?.some((address) => address.family === 'IPv6') ?? false,
       internal: addresses?.every((address) => address.internal) ?? true,
     }));
+    const diagnostics = await this.deps.systemDiagnostics?.() ?? null;
     const detail = {
       platform: platform(),
       release: release(),
@@ -622,6 +634,16 @@ export class ToolExecutors {
       cpuCount: cpuList.length,
       totalMemoryGb: round(totalmem() / 1024 ** 3),
       freeMemoryGb: round(freemem() / 1024 ** 3),
+      uptimeSeconds: diagnostics?.uptimeSeconds ?? null,
+      loadAverage1m: diagnostics?.loadAverage1m ?? null,
+      disks: diagnostics?.disks?.map((disk) => ({ mount: disk.mount, totalBytes: disk.totalBytes, freeBytes: disk.freeBytes })) ?? null,
+      battery: diagnostics?.battery ?? null,
+      displays: diagnostics ? {
+        count: diagnostics.displays.length,
+        primaryResolution: diagnostics.primaryDisplay ? `${diagnostics.primaryDisplay.width}x${diagnostics.primaryDisplay.height}` : null,
+        scaleFactor: diagnostics.primaryDisplay?.scaleFactor ?? null,
+      } : null,
+      diagnosticWarnings: diagnostics?.warnings ?? [],
       networkInterfaces: interfaces,
     };
     return {
@@ -630,6 +652,11 @@ export class ToolExecutors {
         `Platform: ${detail.platform} ${detail.release} (${detail.arch})`,
         `CPU: ${detail.cpuModel}, ${detail.cpuCount} cores`,
         `Memory: ${detail.freeMemoryGb} GB free of ${detail.totalMemoryGb} GB`,
+        ...(detail.uptimeSeconds !== null ? [`System uptime: ${Math.floor(detail.uptimeSeconds / 3600)} hours`] : []),
+        ...(detail.loadAverage1m !== null ? [`1-minute load average: ${detail.loadAverage1m.toFixed(2)}`] : []),
+        ...(detail.disks ? [`Disks: ${detail.disks.map((disk) => `${disk.mount}: ${disk.freeBytes === null ? 'space unavailable' : `${round(disk.freeBytes / 1024 ** 3)} GB free`}`).join('; ')}`] : []),
+        ...(detail.battery ? [`Battery: ${describeBatteryStatus(detail.battery)}`] : []),
+        ...(detail.displays ? [`Displays: ${detail.displays.count}${detail.displays.primaryResolution ? `; primary ${detail.displays.primaryResolution} @${detail.displays.scaleFactor}x` : ''}`] : []),
         `Network adapters: ${interfaces.length === 0 ? 'none detected' : interfaces.map((item) => `${item.name} (${[item.ipv4 ? 'IPv4' : '', item.ipv6 ? 'IPv6' : ''].filter(Boolean).join('/') || 'no address'}${item.internal ? ', internal' : ''})`).join(', ')}`,
       ].join('\n'),
       detail,
@@ -1290,7 +1317,7 @@ export class ToolExecutors {
       if (page.inputs.length) {
         const fields = page.inputs
           .map((input) => {
-            const label = input.name || input.type;
+            const label = input.accessibleName || input.name || input.type;
             return input.placeholder ? `${label} (${input.placeholder})` : label;
           })
           .join(' | ');
@@ -1317,23 +1344,23 @@ export class ToolExecutors {
     const ready = this.browserOrError();
     if ('error' in ready) return ready.error;
 
-    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
-    if (selector.length === 0) {
-      return { ok: false, content: 'No selector was provided.', errorCode: 'FAILED' };
-    }
+    const target = browserActionTarget(args);
+    if (!target) return { ok: false, content: 'Provide one CSS selector or one exact accessible target.', errorCode: 'FAILED' };
 
     try {
-      await ready.browser.click(selector);
+      await ready.browser.click(target);
       const page = await ready.browser.snapshot();
+      const targetDescription = describeBrowserTarget(target);
       return {
         ok: true,
-        content: `Clicked ${selector}. The page is now: ${page.title || page.url}`,
-        detail: { selector, url: page.url },
+        content: `Clicked ${targetDescription}. The page is now: ${page.title || page.url}`,
+        detail: { target: targetDescription, url: page.url },
       };
     } catch (error) {
+      const targetDescription = describeBrowserTarget(target);
       return {
         ok: false,
-        content: `Pixel could not click "${selector}": ${message(error)}`,
+        content: `Pixel could not click "${targetDescription}": ${message(error)}`,
         errorCode: 'FAILED',
       };
     }
@@ -1343,26 +1370,96 @@ export class ToolExecutors {
     const ready = this.browserOrError();
     if ('error' in ready) return ready.error;
 
-    const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+    const target = browserActionTarget(args);
     const text = typeof args.text === 'string' ? args.text : '';
-    if (selector.length === 0 || text.length === 0) {
-      return { ok: false, content: 'A selector and text are both required.', errorCode: 'FAILED' };
+    if (!target || text.length === 0) {
+      return { ok: false, content: 'One CSS selector or exact accessible target and a non-empty value are required.', errorCode: 'FAILED' };
     }
+    const submit = args.submit === true;
+    const expectedText = typeof args.expectedText === 'string' ? args.expectedText.trim() : '';
+    if (submit && !expectedText) return { ok: false, content: 'Before submitting, provide expectedText containing the confirmation Pixel must read back afterward.', errorCode: 'FAILED' };
 
     try {
-      await ready.browser.fill(selector, text);
-      if (args.submit === true) await ready.browser.press(selector, 'Enter');
+      if (submit && (await ready.browser.verifyText(expectedText)).found) {
+        return { ok: false, content: 'Pixel will not submit because the requested confirmation text is already present. Choose a confirmation that proves a new result.', errorCode: 'FAILED' };
+      }
+      await ready.browser.fill(target, text);
+      const targetDescription = describeBrowserTarget(target);
+      if (submit) {
+        await ready.browser.press(target, 'Enter');
+        const verification = await ready.browser.verifyText(expectedText);
+        if (!verification.found) {
+          return {
+            ok: false,
+            content: 'Pixel filled the field and pressed Enter, but could not find the expected confirmation text. The submission outcome remains unverified.',
+            detail: { target: targetDescription, submitted: true, confirmationFound: false },
+            errorCode: 'FAILED',
+          };
+        }
+        return {
+          ok: true,
+          content: 'Pixel filled the field, pressed Enter, and read back the expected confirmation text.',
+          detail: { target: targetDescription, submitted: true, confirmationFound: true },
+          verification: { summary: 'The page contains the requested post-submission confirmation text.', source: 'Playwright page text read-back' },
+        };
+      }
       return {
         ok: true,
-        content: `Typed into ${selector}${args.submit === true ? ' and pressed Enter' : ''}.`,
-        detail: { selector, submitted: args.submit === true },
+        content: `Filled ${targetDescription}; the field value was read back and matched.`,
+        detail: { target: targetDescription, submitted: false, valueVerified: true },
+        verification: { summary: 'The exact field value was read back after filling; the value itself is withheld from the result.', source: 'Playwright input value read-back' },
       };
     } catch (error) {
+      const targetDescription = describeBrowserTarget(target);
       return {
         ok: false,
-        content: `Pixel could not type into "${selector}": ${message(error)}`,
+        content: `Pixel could not fill "${targetDescription}": ${message(error)}`,
         errorCode: 'FAILED',
       };
+    }
+  }
+
+  private async browserUpload(args: Record<string, unknown>): Promise<ToolResult> {
+    const ready = this.browserOrError();
+    if ('error' in ready) return ready.error;
+    if (!this.deps.chooseBrowserUpload) return { ok: false, content: 'Pixel file upload is unavailable because the native file picker is not configured.', errorCode: 'UNAVAILABLE' };
+    const target = browserActionTarget(args);
+    if (!target) return { ok: false, content: 'Provide one exact file input target.', errorCode: 'FAILED' };
+    try {
+      const page = await ready.browser.snapshot();
+      const chosen = await this.deps.chooseBrowserUpload(page.url);
+      if (!chosen) return { ok: false, content: 'File upload was cancelled before the file was attached.', errorCode: 'CANCELLED' };
+      const attached = await ready.browser.upload(target, chosen.path);
+      if (attached.fileName !== chosen.fileName || attached.sizeBytes !== chosen.sizeBytes || attached.sha256 !== chosen.sha256) {
+        throw new Error('The selected file changed after confirmation. Nothing was attached.');
+      }
+      return {
+        ok: true,
+        content: `Attached ${attached.fileName} to the selected file input. This confirms the browser input selection only; inspect the page for upload progress and a site confirmation before reporting that the website accepted the file.`,
+        detail: { target: describeBrowserTarget(target), fileName: attached.fileName, sizeBytes: attached.sizeBytes, siteAccepted: false },
+      };
+    } catch (error) {
+      return { ok: false, content: `Pixel could not attach the selected file: ${message(error)}`, errorCode: 'FAILED' };
+    }
+  }
+
+  private async browserDownload(args: Record<string, unknown>): Promise<ToolResult> {
+    const ready = this.browserOrError();
+    if ('error' in ready) return ready.error;
+    if (!this.deps.chooseBrowserDownload) return { ok: false, content: 'Pixel downloads are unavailable because the native save picker is not configured.', errorCode: 'UNAVAILABLE' };
+    const target = browserActionTarget(args);
+    if (!target) return { ok: false, content: 'Provide one exact download link or button target.', errorCode: 'FAILED' };
+    try {
+      const saved = await ready.browser.download(target, (name) => this.deps.chooseBrowserDownload!(name));
+      if (!saved) return { ok: false, content: 'The browser download was cancelled at the save dialog.', errorCode: 'CANCELLED' };
+      return {
+        ok: true,
+        content: `Saved ${saved.fileName} (${saved.sizeBytes.toLocaleString()} bytes). Pixel read the new file back and verified its SHA-256 digest. The file was not opened or executed.`,
+        detail: { fileName: saved.fileName, sizeBytes: saved.sizeBytes, sha256: saved.sha256 },
+        verification: { summary: 'The saved file size and SHA-256 digest matched the browser download stream.', source: 'main-process file write and read-back' },
+      };
+    } catch (error) {
+      return { ok: false, content: `Pixel could not complete the browser download: ${message(error)}`, errorCode: 'FAILED' };
     }
   }
 
@@ -1484,6 +1581,13 @@ function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+function describeBatteryStatus(battery: NonNullable<DiagnosticsSnapshot['battery']>): string {
+  if (battery.present === null) return 'status unavailable';
+  if (!battery.present) return 'none detected';
+  const charge = battery.percent === null ? 'charge unknown' : `${battery.percent}%`;
+  return `${charge}${battery.charging === true ? ' (charging)' : battery.charging === false ? '' : ' (charging status unknown)'}`;
+}
+
 function numberArgument(value: unknown, fallback: number): number {
   return typeof value === 'number' ? value : fallback;
 }
@@ -1531,6 +1635,30 @@ function validColor(value: unknown): string | null {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function browserActionTarget(args: Record<string, unknown>): string | BrowserSemanticTarget | null {
+  const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
+  const raw = args.target;
+  if (selector && raw !== undefined) return null;
+  if (selector) return selector;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const target = raw as Record<string, unknown>;
+  if (typeof target.value !== 'string' || !target.value.trim() || target.value.length > 300) return null;
+  if (target.kind === 'role' && typeof target.role === 'string' && target.role.trim() && target.role.length <= 80) {
+    return { kind: 'role', role: target.role, value: target.value };
+  }
+  if ((target.kind === 'label' || target.kind === 'placeholder' || target.kind === 'text') && target.role === undefined) {
+    return { kind: target.kind, value: target.value };
+  }
+  return null;
+}
+
+function describeBrowserTarget(target: string | BrowserSemanticTarget): string {
+  if (typeof target === 'string') return `selector ${target}`;
+  return target.kind === 'role'
+    ? `${target.role} named "${target.value}"`
+    : `${target.kind} "${target.value}"`;
 }
 
 function looksLikeClipboardSecret(text: string): boolean {

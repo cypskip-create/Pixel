@@ -70,6 +70,21 @@ describe('Workspace Pix play lane', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('shows only quiet ASCII particles at rest and pauses them when the page is hidden', () => {
+    mount('idle');
+    const ambient = host?.querySelector('.workspace-pix-ambient');
+    expect(ambient?.getAttribute('data-active')).toBe('true');
+    expect(ambient?.textContent).toBe('·+·');
+
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(ambient?.getAttribute('data-active')).toBe('false');
+
+    if (visibility) Object.defineProperty(document, 'visibilityState', visibility);
+    else Reflect.deleteProperty(document, 'visibilityState');
+  });
+
   it('honors the Windows reduced-motion preference', () => {
     vi.useFakeTimers();
     const original = window.matchMedia;

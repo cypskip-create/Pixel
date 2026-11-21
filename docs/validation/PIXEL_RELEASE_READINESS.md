@@ -98,7 +98,7 @@ The final test output is in [`artifacts/windows-acceptance/vitest-junit.xml`](..
 
 - UIA invocation verifies only a specified accessible control's exact present/absent state in the same titled foreground window. It does not read arbitrary values, set form values, or operate inaccessible/custom controls.
 - Voice uses local Windows System.Speech with runtime capability probes. Probe results differed by execution context, so this report makes no fixed STT/TTS availability claim. Microphone and voice UI behavior remain unverified.
-- Skills are model-mediated without deterministic interaction recording/replay. Specialist coordination is not connected to an independent model-backed delegation loop.
+- Latest local continuation: completed verified tasks can be recorded into reviewed drafts; active tool-only skills support one-time declared inputs; scheduled routines execute reviewed tool plans in order with current approvals, observation gates and supported result checks. Input-bearing schedules, non-tool steps and broad predicate support remain open. Specialist coordination is connected to the bounded live model-tool pipeline. These source-level changes are not Windows release acceptance.
 - Interrupted tasks recover as paused and require review; Pixel does not resume the old model call stack automatically.
 
 ## Unverified release gates

@@ -22,13 +22,15 @@ export class PluginStore {
     const byId = new Map(rows.map((row) => [String(row.plugin_id), row]));
     return this.manifests.map((manifest) => {
       const row = byId.get(manifest.id);
-      const compatible = manifest.pixelApiVersion === 1;
+      const apiCompatible = manifest.pixelApiVersion === 1;
       const versionMatches = !row || row.manifest_version === manifest.version;
       return pluginView(manifest, {
         installed: Boolean(row),
-        enabled: Boolean(row?.enabled) && compatible && versionMatches,
+        enabled: Boolean(row?.enabled) && apiCompatible && versionMatches,
+        compatibility: !row ? 'not_installed' : !apiCompatible ? 'unsupported_api' : !versionMatches ? 'update_available' : 'compatible',
+        installedVersion: row?.manifest_version,
         updatedAt: row ? Number(row.updated_at) : undefined,
-        error: !compatible ? 'This plugin requires an unsupported Pixel plugin API version.' : !versionMatches ? 'Installed version differs from the bundled manifest. Reinstall to update safely.' : row?.last_error ?? undefined,
+        error: !apiCompatible ? 'This plugin requires an unsupported Pixel plugin API version.' : !versionMatches ? 'A reviewed bundled update is available. Updating will disable the plugin until you enable it again.' : row?.last_error ?? undefined,
       });
     });
   }
@@ -44,14 +46,28 @@ export class PluginStore {
 
   install(id: string): void {
     const manifest = this.requireManifest(id);
+    const existing = this.db.queryOne<PluginInstallationRow>('SELECT * FROM plugin_installations WHERE plugin_id = ?', [id]);
+    if (existing) {
+      if (existing.manifest_version !== manifest.version) throw new Error('Use the reviewed plugin update action for an installed version mismatch.');
+      return;
+    }
     const now = Date.now();
     this.db.execute(
       `INSERT INTO plugin_installations (plugin_id, manifest_version, enabled, config_json, installed_at, updated_at, last_error)
-       VALUES (?, ?, 0, '{}', ?, ?, NULL)
-       ON CONFLICT(plugin_id) DO UPDATE SET manifest_version = excluded.manifest_version,
-         enabled = CASE WHEN plugin_installations.manifest_version = excluded.manifest_version THEN plugin_installations.enabled ELSE 0 END,
-         updated_at = excluded.updated_at, last_error = NULL`,
+       VALUES (?, ?, 0, '{}', ?, ?, NULL)`,
       [manifest.id, manifest.version, now, now],
+    );
+  }
+
+  update(id: string): void {
+    const manifest = this.requireManifest(id);
+    if (manifest.pixelApiVersion !== 1) throw new Error('This plugin targets an unsupported Pixel plugin API version.');
+    const row = this.db.queryOne<PluginInstallationRow>('SELECT * FROM plugin_installations WHERE plugin_id = ?', [id]);
+    if (!row) throw new Error('Install this plugin before updating it.');
+    if (row.manifest_version === manifest.version) throw new Error('This plugin already has the current bundled version.');
+    this.db.execute(
+      'UPDATE plugin_installations SET manifest_version = ?, enabled = 0, updated_at = ?, last_error = NULL WHERE plugin_id = ?',
+      [manifest.version, Date.now(), id],
     );
   }
 

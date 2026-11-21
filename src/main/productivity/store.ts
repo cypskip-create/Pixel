@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { basename, extname } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
 import type { Database } from '../data/database';
+
+export const SUPPORTED_PRODUCTIVITY_DOCUMENT_EXTENSIONS = ['.csv', '.doc', '.docx', '.md', '.odt', '.pdf', '.ppt', '.pptx', '.rtf', '.txt', '.xls', '.xlsx'] as const;
 
 export interface ProductivityNote {
   id: string; projectId: string; title: string; body: string; createdAt: number; updatedAt: number;
@@ -9,6 +13,7 @@ export interface ProductivityTask {
   status: 'open' | 'in_progress' | 'completed'; dueAt: number | null; checklistId: string | null; createdAt: number; updatedAt: number;
 }
 export interface ProductivityChecklist { id: string; projectId: string; title: string; createdAt: number; updatedAt: number }
+export interface ProductivityDocumentLink { id: string; projectId: string; noteId: string; path: string; displayName: string; byteSize: number; createdAt: number }
 
 /** Project-scoped user notes and planning tasks, separate from agent execution history. */
 export class ProductivityStore {
@@ -47,6 +52,53 @@ export class ProductivityStore {
     const bounded = Math.max(1, Math.min(30, Math.floor(limit)));
     const rows = this.db.query<NoteRow>('SELECT * FROM productivity_notes WHERE project_id = ? AND instr(lower(title || char(10) || body), lower(?)) > 0 ORDER BY updated_at DESC LIMIT ?', [projectId, query, bounded]);
     return rows.map(mapNote);
+  }
+
+  linkDocument(projectId: string, noteId: string, selectedPath: string): ProductivityDocumentLink {
+    if (!this.getNote(projectId, noteId)) throw new Error('The note is not available in the active project.');
+    const info = lstatSync(selectedPath);
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error('Only a regular local file can be linked.');
+    const path = realpathSync(selectedPath);
+    const displayName = basename(path).slice(0, 240);
+    if (!displayName) throw new Error('The selected file name is invalid.');
+    if (!(SUPPORTED_PRODUCTIVITY_DOCUMENT_EXTENSIONS as readonly string[]).includes(extname(displayName).toLowerCase())) throw new Error('The selected file format is not supported for document links.');
+    const existing = this.db.queryOne<DocumentLinkRow>(
+      'SELECT * FROM productivity_note_documents WHERE project_id = ? AND note_id = ? AND path = ?',
+      [projectId, noteId, path],
+    );
+    if (existing) return mapDocumentLink(existing);
+    const id = `ndoc_${randomUUID().slice(0, 12)}`;
+    const createdAt = Date.now();
+    this.db.execute(
+      'INSERT INTO productivity_note_documents (id, project_id, note_id, path, display_name, byte_size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, projectId, noteId, path, displayName, info.size, createdAt],
+    );
+    const link = this.getDocumentLink(projectId, noteId, id);
+    if (!link) throw new Error('The document link could not be read back after saving.');
+    return link;
+  }
+
+  listDocumentLinks(projectId: string, noteId: string): ProductivityDocumentLink[] {
+    if (!this.getNote(projectId, noteId)) return [];
+    return this.db.query<DocumentLinkRow>(
+      'SELECT * FROM productivity_note_documents WHERE project_id = ? AND note_id = ? ORDER BY created_at ASC LIMIT 100',
+      [projectId, noteId],
+    ).map(mapDocumentLink);
+  }
+
+  getDocumentLink(projectId: string, noteId: string, id: string): ProductivityDocumentLink | null {
+    const row = this.db.queryOne<DocumentLinkRow>(
+      'SELECT * FROM productivity_note_documents WHERE project_id = ? AND note_id = ? AND id = ?',
+      [projectId, noteId, id],
+    );
+    return row ? mapDocumentLink(row) : null;
+  }
+
+  unlinkDocument(projectId: string, noteId: string, id: string): boolean {
+    return this.db.execute(
+      'DELETE FROM productivity_note_documents WHERE project_id = ? AND note_id = ? AND id = ?',
+      [projectId, noteId, id],
+    ) === 1;
   }
 
   createChecklist(projectId: string, title: string): ProductivityChecklist {
@@ -102,6 +154,8 @@ export class ProductivityStore {
 interface NoteRow { id: string; project_id: string; title: string; body: string; created_at: number; updated_at: number }
 interface TaskRow { id: string; project_id: string; title: string; description: string; status: ProductivityTask['status']; due_at: number | null; checklist_id: string | null; created_at: number; updated_at: number }
 interface ChecklistRow { id: string; project_id: string; title: string; created_at: number; updated_at: number }
+interface DocumentLinkRow { id: string; project_id: string; note_id: string; path: string; display_name: string; byte_size: number; created_at: number }
 function mapNote(row: NoteRow): ProductivityNote { return { id: row.id, projectId: row.project_id, title: row.title, body: row.body, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }; }
 function mapTask(row: TaskRow): ProductivityTask { return { id: row.id, projectId: row.project_id, title: row.title, description: row.description, status: row.status, dueAt: row.due_at === null ? null : Number(row.due_at), checklistId: row.checklist_id ?? null, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }; }
 function mapChecklist(row: ChecklistRow): ProductivityChecklist { return { id: row.id, projectId: row.project_id, title: row.title, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }; }
+function mapDocumentLink(row: DocumentLinkRow): ProductivityDocumentLink { return { id: row.id, projectId: row.project_id, noteId: row.note_id, path: row.path, displayName: row.display_name, byteSize: Number(row.byte_size), createdAt: Number(row.created_at) }; }

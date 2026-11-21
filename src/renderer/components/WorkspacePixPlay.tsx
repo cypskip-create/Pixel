@@ -26,6 +26,7 @@ export function WorkspacePixPlay({ state, reducedMotion }: { state: AssistantSta
   const [systemReducedMotion, setSystemReducedMotion] = useState(() =>
     typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches),
   );
+  const [pageVisible, setPageVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden');
   const motionDisabled = reducedMotion || systemReducedMotion;
 
   useEffect(() => {
@@ -35,6 +36,13 @@ export function WorkspacePixPlay({ state, reducedMotion }: { state: AssistantSta
     update();
     query.addEventListener?.('change', update);
     return () => query.removeEventListener?.('change', update);
+  }, []);
+
+  useEffect(() => {
+    const updateVisibility = (): void => setPageVisible(document.visibilityState !== 'hidden');
+    updateVisibility();
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => document.removeEventListener('visibilitychange', updateVisibility);
   }, []);
 
   useEffect(() => {
@@ -73,9 +81,10 @@ export function WorkspacePixPlay({ state, reducedMotion }: { state: AssistantSta
     };
     const onVisibility = (): void => {
       if (document.visibilityState === 'hidden') {
+        setPageVisible(false);
         clearTimer();
         updateActivity('idle');
-      } else { startedAt = Date.now(); schedule(); }
+      } else { setPageVisible(true); startedAt = Date.now(); schedule(); }
     };
     document.addEventListener('visibilitychange', onVisibility);
     document.addEventListener('keydown', wake, true);
@@ -93,8 +102,12 @@ export function WorkspacePixPlay({ state, reducedMotion }: { state: AssistantSta
   }, [motionDisabled, state]);
 
   const active = state === 'idle' && !motionDisabled ? activity : 'idle';
+  const ambientEnabled = state === 'idle' && !motionDisabled && pageVisible && active === 'idle';
   return <div className="workspace-pix-play" aria-hidden="true" data-activity={active} data-playing={active === 'playing' ? 'true' : 'false'}>
     <span className="workspace-pix-home"><PixMascot size={44} state={active === 'sleeping' || active === 'resting' || active === 'lying' ? 'stopped' : state} reducedMotion={motionDisabled} decorative /></span>
+    <span className="workspace-pix-ambient" data-active={ambientEnabled} aria-hidden="true">
+      <i>·</i><i>+</i><i>·</i>
+    </span>
     <span className="workspace-pix-ball" />
   </div>;
 }

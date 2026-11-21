@@ -220,6 +220,12 @@ describe('summarize', () => {
     expect(lines.some((l) => /none detected/i.test(l))).toBe(true);
   });
 
+  it('distinguishes an unknown battery state from a desktop with no battery', () => {
+    const lines = summarize({ ...base, battery: { present: null, percent: null, charging: null } });
+    expect(lines.some((line) => /battery: status unavailable/i.test(line))).toBe(true);
+    expect(lines.some((line) => /battery: none detected/i.test(line))).toBe(false);
+  });
+
   it('reports per-disk usage when available', () => {
     const lines = summarize({
       ...base,

@@ -6,21 +6,25 @@
 
 `SkillStore` in SQLite keeps project-scoped drafts and immutable versions with integrity hashes and run history. The Settings panel can author JSON drafts, review them before activation, inspect active definitions and delete unreferenced skills. Activation refuses unavailable tools and unsupported native actions. A skill never carries the approval that authorized its original task.
 
-The standalone `replaySkill` wrapper rechecks policy for each step, honors the reviewed per-step approval flag, substitutes only declared inputs and records results. It still takes a caller-supplied `StepRunner`; it is not the runtime used by the task UI. Scheduled runs send the reviewed semantic definition to the existing agent loop with an explicit tool allowlist, so model execution and the normal approval gateway remain authoritative. This is model-mediated execution, not deterministic semantic replay.
+The standalone `replaySkill` wrapper rechecks policy for each step, honors the reviewed per-step approval flag, substitutes only declared inputs and records results. It still takes a caller-supplied `StepRunner`; it is not the desktop tool adapter.
+
+Scheduled routines now pass an ordered, reviewed tool plan to `AgentExecutor`. The model does not select or reorder those calls. Every call still goes through schema validation, current mode and risk policy, emergency stop, cancellation, scoped approval, the normal executor, task history, and postcondition checks. A successful state-changing call must be followed by a fresh observation; unresolved verification prevents later mutations and prevents completion. Plans stop immediately on a failed tool or failed declared predicate. The runner supports exact `resultContains` and structured `urlPrefix` checks plus the tool's own verification result; unknown expectation shapes fail closed. Per-step `approvalRequired` is enforced even if the built-in tool would otherwise be read-only. Scheduled skills must currently be tool-only and have no declared inputs; missing inputs are never guessed. The user can retry a failed routine once, subject to fresh observation and current approvals.
+
+Active tool-only skills also have a **Run once** form for declared inputs. Inputs are checked against the active skill definition and tool schemas in the main process, credential-like values are refused, and the exact values are redacted from task/audit text. Tool permissions still use the live approval gateway. The one-time run is recorded in task history and skill-run history; the Workspace reports the actual final task status.
 
 ## Recording and save-from-task
 
-There is no browser/native interaction recorder or automatic “save this completed task” prompt. A future recorder must have explicit start/stop, a visible recording indicator, secret sanitization, semantic action extraction, edit/review, discard and safe fixture replay. Pixel must not infer a skill from every completed task.
+Tasks & Activity provides explicit save-from-completed-task recording. It requires a completed, verified task, rejects unsupported and withheld values, turns string arguments into declared inputs, and saves a project-scoped draft for review. Review edits create a new immutable version; activation remains separate. Parameterized skills can run once through the declared-input form, but cannot be placed on a daily schedule. Non-tool semantic steps remain unsupported by the live runner. There is no always-on browser/native recorder or automatic save prompt.
 
 ## Local routines
 
 `src/main/routines/index.ts` and migration 6 implement a daily local-time scheduler with an IANA timezone, durable occurrence key, one-at-a-time queue, run history, pause/resume, cancel and user-confirmed manual retry. A routine must reference an active skill in the same project and cannot require interactive skill inputs. Missed occurrences are marked and skipped; interrupted runs are marked cancelled and never replayed. Failed or denied runs pause that schedule. Work only runs while Pixel is open and not emergency-stopped.
 
-Routine execution wraps the normal `AgentExecutor`. It respects the skill tool allowlist and permission gateway. Required approvals may still require the user when a scheduled run starts. A one-time retry tells the model to re-observe before it repeats an irreversible action. There is no cloud worker.
+Routine execution uses the normal `AgentExecutor` with deterministic ordered calls. It respects the skill tool allowlist and permission gateway. Required approvals may still require the user when a scheduled run starts. A one-time retry re-observes the current state before the exact reviewed sequence is attempted again. There is no cloud worker.
 
 ## Specialist coordinator boundary
 
-`src/main/agents/coordinator.ts` provides bounded role definitions, tool allowlists and per-role step/token/time limits. It is not invoked by the live `AgentExecutor` and has no model-backed specialist loop. Research/browser/systems/knowledge roles remain definitions; infrastructure and Pixel Code are intentionally unavailable. Desktop input must remain serialized if model-backed delegation is later added.
+`src/main/agents/coordinator.ts` provides bounded role definitions, tool allowlists and per-role step/token/time limits. The live `AgentExecutor` can invoke the research, browser, systems and knowledge specialists through the configured model, with child tools passing the normal central schema/permission gateway and desktop input lease. Recursive delegation and infrastructure/Pixel Code specialists remain unavailable.
 
 ## Future remote execution
 

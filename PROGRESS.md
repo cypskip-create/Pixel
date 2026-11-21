@@ -4,36 +4,81 @@ Updated: 2026-11-21. Version: 0.2.1.
 
 ## New-chat recovery and current local checkpoint
 
-- Recovery confirmed existing checkout at `e5ee482fd57ca666871e03be2dfc9b2be1b6de18`
+- Recovery confirmed existing checkout at `8288850ac825d5b5c1b79656f1432622a8129bf7`
   on `main`, equal to `origin/main`; it was clean before this checkpoint's
-  edits. GitHub Windows CI run [44876889424](https://github.com/cypskip-create/Pixel/actions/runs/44876889424)
+  edits. GitHub Windows CI run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282)
   succeeded on that exact SHA.
-- REA `6.10.1` setup was applied after user approval. Codex registration and
-  shared skill identity are aligned per `rea doctor --client codex --skill`;
-  `codex mcp list` shows the server enabled. A direct stdio handshake returned
-  REA `6.10.1`; static analysis of a disposable Electron fixture completed and
-  produced Evidence `ev_b3e45b438b7ae1140294fdfcb2049c979b76eed98b054263901a3a5346b89e99`.
-  REA's tool schemas are not loaded in this active Codex process; restart Codex
-  before calling it through MCP.
+- REA `6.10.1` remains registered and its Codex config/skill identity checks are
+  healthy. `codex mcp list` labels it **enabled / Unsupported** and this session
+  has no native REA namespace. A standalone stdio MCP fallback negotiated
+  `2024-11-05`, listed 263 tools, and analyzed a disposable Electron fixture
+  (Evidence `ev_8dab99644a9753790a6514321e92cb0d50d076cc4439cc51005c98dbc163759f`).
+  The packaged Pixel analysis timed out; a public Inspora browser scenario could
+  not start Chrome in the host sandbox and REA reported incomplete cleanup with
+  no retained resources. The PID was absent on follow-up. No no-sandbox override
+  was applied. Reference pages therefore remain direct visual/browser-researched,
+  not REA-analyzed.
 - Local source adds a centralized critical-risk policy, dynamic one-time risk
   for explicit browser submission, a bundled-only plugin lifecycle and UI, and
   a read-only public GitHub repository metadata tool. The plugin has fixture
   integration coverage, not live provider verification.
-- Latest full suite: **901 passed, 28 skipped, 0 failed** (929 total; 65 files
-  passed, 1 skipped), with `PIXEL_TEST_HOME` isolated under the sandbox temp
-  directory. `npm run typecheck` and `npm run build` passed. The run includes
-  the critical broker recheck test. Skips require Chromium,
-  NSIS/makensis or an opt-in native foreground fixture.
-- The live GitHub adapter call for public `octocat/Hello-World` stopped before
-  connecting because `api.github.com` DNS returned `ENOTFOUND`. The plugin's
-  complete permission/executor path is fixture-tested, not live-provider
-  verified.
+- Latest `npm run verify`: typecheck and production build passed; the full
+  default suite reports **949 passed, 33 skipped, 0 failed** (982 total; 73
+  files passed, 1 skipped), with `PIXEL_TEST_HOME` isolated under the sandbox
+  temp directory. Default Vitest skips browser-dependent tests; a separate
+  cached-Chromium run passes **30/30** browser tests and **29/29** policy tests
+  against disposable local HTML/file fixtures. This includes actual file-input
+  selection and a browser download saved to a new file with SHA-256 read-back.
+  NSIS/makensis and opt-in native foreground scenarios remain skipped.
+- Agent `get_system_info` now consumes the same main-process diagnostics
+  snapshot as Pixel's diagnostics view for uptime, load average, system-volume
+  capacity through Node `statfs`, primary display dimensions/scale and battery
+  state via a typed native `GetSystemPowerStatus` helper command. A disposable
+  C# compile/protocol smoke returned a real response; no battery percentage was
+  retained. The maintained native build script now validates the command too.
+  Process and audio-device details remain open.
+- The renderer production bundle currently emits a 502.74 kB minified entry
+  chunk, 2.74 kB over Vite's advisory 500 kB threshold; the build remains
+  successful. Revisit route-level code splitting after measuring actual
+  Workspace startup and interaction performance.
+- The live GitHub adapter call for public `octocat/Hello-World` was retried and
+  again stopped before HTTP because `api.github.com` DNS returned `ENOTFOUND`.
+  The adapter now rechecks cancellation after DNS and validates every returned
+  IP family/address before its pinned TLS request; focused plugin tests pass
+  9/9, including unsupported API refusal and cancellation during DNS. The
+  complete permission/executor path is fixture-tested, not
+  live-provider verified.
+- Tasks & Activity can record a completed verified task into a project skill
+  draft; review edits create a new version. Scheduled routines now invoke the
+  ordered reviewed tool plan directly, without model step selection. Current
+  permission checks, reviewed approval floors, observation cadence, supported
+  result/URL predicates, and postcondition gates apply. Parameterized and
+  non-tool skill steps still cannot run as routines; broader predicates and
+  actual Windows acceptance remain open.
 - Core Tools 6.2 is not complete. Windows application launch, installed UI,
   clipboard, UIA, voice/model, packaged acceptance and multiple listed tool
   gaps remain blocked or unverified. See the maintained matrix and fresh
   checkpoint report rather than treating earlier results as current.
-- Workspace visual redesign remains deferred until the user confirms the
-  reference direction. See `docs/research/REA_REFERENCE_WORKFLOW.md`.
+- The user supplied the Ostrand dashboard reference. A warm matte Workspace
+  redesign, project grid/list and reduced-motion Pix ambient treatment are now
+  present in the uncommitted source; actual Windows visual comparison remains
+  blocked because only the separate `C:\dev\Pixel` checkout opened. See
+  `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`.
+- Note-to-local-document associations are now implemented with migration,
+  scoped main-process IPC and UI; store tests cover de-duplication, project
+  isolation, directory refusal and unlink. Windows dialog/open behavior remains
+  unverified.
+- The Plugin Manager is now a separate Workspace component with expandable
+  permission disclosures, explicit connection state, update metadata, in-flight
+  action locking and visible failure state. It now identifies version mismatch
+  and offers a reviewed bundled update that leaves the plugin disabled until
+  re-enabled. Five UI tests cover grouping, disclosures, duplicate clicks,
+  failure handling and the compatibility/update behavior.
+- The approved `file_write` path now explicitly refuses known binary document,
+  media and archive extensions rather than writing UTF-8 bytes and reporting a
+  corrupted PDF/Office file as success. Markdown, CSV and JSON creation/edit
+  round trips are covered. Rich PDF/Office authoring and export remain open; see
+  `docs/architecture/PIXEL_DOCUMENT_ASSISTANCE.md`.
 
 ## Core Completion 6.2 follow-on (local, uncommitted)
 
@@ -899,7 +944,7 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
 
 - General action verification is limited to operations with implemented read-back or postconditions; UIA only checks exact accessible-control presence/absence.
 - Voice depends on local Windows capabilities; microphone/UI behavior is unverified.
-- Skills are model-mediated without deterministic interaction recording/replay. Specialist-agent coordination is not independently model-backed in the user task flow.
+- Routine tool steps are deterministic and ordered, with supported result predicates. Active tool-only skills also have a one-time declared-input form whose values are redacted from task/audit text. Daily schedules still exclude inputs; non-tool replay and broader predicate semantics remain incomplete. Specialist coordination runs through the live bounded model-tool loop.
 
 ### Unverified
 
@@ -911,7 +956,7 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
 
 ### Missing
 
-- General credential broker, deterministic UI interaction recorder/replay, independent model-backed delegation, VirtualBox/SSH and Pixel Code.
+- General credential broker, broader predicate language, VirtualBox/SSH and Pixel Code.
 - Automatic continuation of an interrupted task. Recovery pauses and asks for review; it does not replay the old call stack.
 
 ## Research and architecture
@@ -956,3 +1001,110 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
   delegation, document authoring, interactive desktop annotation, offline
   model inference, and actual Windows GUI/install acceptance. No claims of
   Windows acceptance are made for this worktree.
+
+## 2026-11-21 follow-on: Workspace design system and reference research
+
+- Continued from committed `8288850ac825d5b5c1b79656f1432622a8129bf7` on
+  `main`; the working tree was clean at start. Baseline Windows workflow
+  [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282)
+  passed. It is committed-source CI evidence, not installed-app GUI acceptance.
+  This follow-on is local and uncommitted.
+- Inspected the supplied 1170×789 Ostrand screenshot and public Inspora Folders
+  and ASCII Sharks references. `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`
+  records observations, adaptations, unknowns and source links. ASCII Sharks
+  is MIT. Its fixed-step simulation, capped frame accumulator, resize/visibility
+  observers, reduced-motion handling and cleanup informed Pixel's lightweight
+  adaptation; no upstream code/assets were copied.
+- Added warm semantic matte tokens, compact grouped navigation plus existing
+  conversation history, searchable project grid/list over real local records,
+  and a subtle `·+·` Pix-side animation paused while hidden or reduced motion
+  is requested. See `docs/architecture/PIXEL_DESIGN_TOKENS.md`.
+- `npm run typecheck` and final `npm run build` passed. Full Vitest with
+  `PIXEL_TEST_HOME=%TEMP%`: **934 passed, 28 skipped, 0 failed** (962 total; 72
+  files passed, 1 skipped). Final focused renderer/theme rerun: **22/22**.
+  `npm run build:native` passed and `npm run test:voice-worker` passed **12/12**.
+  Chromium, local NSIS and opt-in native foreground cases remain skipped.
+- Local unpacked Windows packaging was attempted with `npx electron-builder
+  --win --dir --publish never`; it stopped while fetching a packaging helper
+  because `github.com` DNS failed. Existing `release` installer, portable and
+  unpacked artifacts predate this attempt and were preserved; no new package or
+  successful local packaging result is claimed.
+- See the current REA connectivity result in `docs/debug/REA_INTEGRATION.md`:
+  direct MCP stdio analysis succeeded on a fixture, while REA browser capture
+  of the reference and analysis of packaged Pixel were blocked. The reference
+  pages were manually researched; raw ASCII Sharks source acquisition from the
+  shell remains blocked by `codeload.github.com` DNS.
+- An earlier CUA capture showed Pixel from a separate `C:\dev\Pixel` checkout;
+  it showed older Chats/Library navigation and was left untouched. In the
+  latest inventory, after the user accepted the Electron access prompt, no
+  Pixel app window was available. Launching this checkout's diagnostic
+  Electron window exited without a visible target; no root cause is
+  established. This tree still has no real before/after screenshot or UI
+  acceptance.
+- Note-to-document links now have project-scoped storage, supported-file
+  validation, metadata-only renderer payloads, and open/unlink controls. Store
+  and React bridge interactions are tested; native dialog/open remains unverified.
+- The UTF-8 `file_write` safeguard refuses known binary document/media/archive
+  extensions; Markdown, CSV and JSON round trips plus PDF-byte preservation on
+  refusal pass in the new full suite.
+- Latest Windows checks: `npm run dev` now selects an available loopback port;
+  its renderer started, but Electron exited `2147483651` (`0x80000003`) without
+  a targetable window, even with isolated temporary APPDATA. No other Pixel
+  process was stopped.
+  `npm run diagnose` reported 19 pass, one network failure (`api.deepseek.com`
+  fetch failed), and one warning (no installed speech recognizer). Explicitly
+  selecting the installed `.pw-browsers` Chromium allowed it to launch, but the
+  host denied loopback fixture traffic (`ERR_NETWORK_ACCESS_DENIED`): the opt-in
+  browser file had 13 pass, 2 fail and 10 skipped. These remain environment
+  blockers, not application acceptance evidence.
+- Default `npm run dev` now uses Vite's actual loopback port, falls forward when
+  5199 is occupied, and passes the bound URL to Electron. Port-fallback tests
+  pass; Electron's host exit remains unresolved.
+- Remaining: capture/compare at standard, minimum and narrow dimensions; finish
+  document authoring and safe workflow replay; verify plugin
+  UI and live public GitHub read; complete actual Windows/voice/browser
+  acceptance when the required runtime/access is available. Do not mark 6.2 or
+  6.3 complete and do not start Pixel Code.
+- Latest follow-on validation (2026-11-21): TypeScript check passed, production
+  build passed, `git diff --check` passed, and the complete Vitest suite reports
+  **934 passed, 28 skipped, 0 failed** (962 total; 72 files passed, 1 skipped).
+- The bounded coordinator is now connected to live agent tool selection through
+  `delegate_to_specialist` for research, browser, systems, and knowledge.
+  Child tools use allowlists and central validation/approval, with bounded
+  steps/time/tokens, no recursive delegation, task-history capture and
+  emergency-stop checks. Focused executor/coordinator integration tests pass.
+  Windows execution and durable recovery remain unverified.
+- Tasks & Activity now converts completed verified task tool steps into a
+  project-scoped skill draft for review. String arguments become required named
+  inputs instead of being copied from task history; incomplete, secret-marked,
+  unsupported and overlong tasks are refused. Typecheck and production build
+  pass; full Vitest is **934 passed, 28 skipped, 0 failed**. Routines now execute
+  ordered tool plans; active tool-only skills also support one-time declared
+  inputs with task/audit redaction. Daily scheduling with inputs, non-tool
+  steps, broader predicates, and Windows acceptance remain open.
+
+## Browser forms and transfers follow-on (local, uncommitted)
+
+- Browser snapshots now expose accessible names from field labels, ARIA labels,
+  `aria-labelledby`, names and placeholders. Actions support exact role, label,
+  placeholder or text targets and reject ambiguous, hidden or disabled targets.
+  CSS selectors remain available for pages with poor accessibility metadata.
+- Field fills read back the value without returning it and refuse password
+  fields pending a dedicated credential broker. Submission requires explicit
+  `submit: true`, a fresh critical approval for that exact action, and an
+  `expectedText` confirmation check after Enter. A click target check is not
+  treated as proof of the resulting state; callers must run `browser_verify`.
+- Browser uploads require a critical exact-action agent approval, then a
+  main-process file picker and separate confirmation naming the selected file
+  and site. Credential-like filenames, symlinks, non-regular files and files
+  above 25 MB are refused. The exact enabled file input is set and its filename
+  and size read back; this does not claim the site accepted the upload.
+- Browser downloads require fresh approval and a native Save dialog, cap at
+  25 MB, refuse overwrite with exclusive file creation, fsync and verify the
+  saved bytes by size and SHA-256. Pixel never opens or executes the result.
+- Browser tests use disposable local HTML/file fixtures with local-file access
+  enabled only on the isolated test session, because host loopback networking
+  is denied. Cached real Chromium passes **30/30** browser tests and tool policy
+  passes **29/29**, including actual upload selection and download read-back.
+  Native Electron dialog, remote site acceptance, and real app-window/network
+  acceptance remain unverified.

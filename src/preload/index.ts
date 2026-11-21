@@ -42,6 +42,7 @@ import type {
   PixelMemoryKind,
   ProjectView,
   ProductivityNoteView,
+  ProductivityDocumentLinkView,
   ProductivityTaskView,
   ProductivityChecklistView,
   PluginView,
@@ -227,8 +228,10 @@ const bridge: CypsBridge = {
 
   skills: {
     list: () => ipcRenderer.invoke(CH.skillsList) as Promise<SkillRecord[]>,
+    run: (skillId: string, inputs: Record<string, string>) => ipcRenderer.invoke(CH.skillsRun, skillId, inputs) as Promise<TaskRecord>,
     createDraft: (draft: SkillDraftRequest) =>
       ipcRenderer.invoke(CH.skillsCreateDraft, draft) as Promise<SkillRecord>,
+    recordTask: (taskId: string) => ipcRenderer.invoke(CH.skillsRecordTask, taskId) as Promise<SkillRecord>,
     activate: (skillId: string) => ipcRenderer.invoke(CH.skillsActivate, skillId) as Promise<SkillRecord>,
     delete: (skillId: string) => ipcRenderer.invoke(CH.skillsDelete, skillId) as Promise<boolean>,
   },
@@ -265,6 +268,10 @@ const bridge: CypsBridge = {
     deleteNote: (id: string) => ipcRenderer.invoke(CH.productivityNotesDelete, id) as Promise<boolean>,
     importMarkdown: () => ipcRenderer.invoke(CH.productivityNotesImportMarkdown) as Promise<ProductivityNoteView | null>,
     exportMarkdown: (id: string) => ipcRenderer.invoke(CH.productivityNotesExportMarkdown, id) as Promise<{ ok: boolean; cancelled?: boolean; verified?: boolean }>,
+    listNoteDocuments: (noteId: string) => ipcRenderer.invoke(CH.productivityNoteDocumentsList, noteId) as Promise<ProductivityDocumentLinkView[]>,
+    linkNoteDocument: (noteId: string) => ipcRenderer.invoke(CH.productivityNoteDocumentsLink, noteId) as Promise<ProductivityDocumentLinkView | null>,
+    openNoteDocument: (noteId: string, linkId: string) => ipcRenderer.invoke(CH.productivityNoteDocumentsOpen, noteId, linkId) as Promise<{ ok: boolean }>,
+    unlinkNoteDocument: (noteId: string, linkId: string) => ipcRenderer.invoke(CH.productivityNoteDocumentsUnlink, noteId, linkId) as Promise<boolean>,
     listChecklists: () => ipcRenderer.invoke(CH.productivityChecklistsList) as Promise<ProductivityChecklistView[]>,
     createChecklist: (title: string) => ipcRenderer.invoke(CH.productivityChecklistsCreate, title) as Promise<ProductivityChecklistView>,
     listTasks: () => ipcRenderer.invoke(CH.productivityTasksList) as Promise<ProductivityTaskView[]>,
@@ -283,6 +290,7 @@ const bridge: CypsBridge = {
   plugins: {
     list: () => ipcRenderer.invoke(CH.pluginsList) as Promise<PluginView[]>,
     install: (pluginId: string) => ipcRenderer.invoke(CH.pluginsInstall, pluginId) as Promise<PluginView[]>,
+    update: (pluginId: string) => ipcRenderer.invoke(CH.pluginsUpdate, pluginId) as Promise<PluginView[]>,
     uninstall: (pluginId: string) => ipcRenderer.invoke(CH.pluginsUninstall, pluginId) as Promise<PluginView[]>,
     setEnabled: (pluginId: string, enabled: boolean) => ipcRenderer.invoke(CH.pluginsSetEnabled, pluginId, enabled) as Promise<PluginView[]>,
   },

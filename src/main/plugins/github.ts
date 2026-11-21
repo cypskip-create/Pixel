@@ -13,15 +13,32 @@ export interface GitHubRepositorySummary {
   updatedAt: string;
 }
 
+export interface GitHubAddress {
+  address: string;
+  family: number;
+}
+
+type ResolveGitHubHost = (hostname: string) => Promise<GitHubAddress[]>;
+const GITHUB_API_HOST = 'api.github.com';
+const resolveGitHubHost: ResolveGitHubHost = (hostname) => lookup(hostname, { all: true, verbatim: true });
+
 /** Reads a fixed GitHub API host over TLS, pins a checked public DNS answer per request, and never accepts an arbitrary URL. */
-export async function readPublicGitHubRepository(owner: unknown, repository: unknown, signal?: AbortSignal): Promise<GitHubRepositorySummary> {
+export async function readPublicGitHubRepository(
+  owner: unknown,
+  repository: unknown,
+  signal?: AbortSignal,
+  resolveHost: ResolveGitHubHost = resolveGitHubHost,
+): Promise<GitHubRepositorySummary> {
   const ownerName = cleanPathSegment(owner, /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/);
   const repoName = cleanPathSegment(repository, /^[A-Za-z0-9_.-]{1,100}$/);
   if (!ownerName || !repoName) throw new Error('Provide a valid public GitHub owner and repository name.');
   if (signal?.aborted) throw new Error('Request cancelled.');
 
-  const addresses = await lookup('api.github.com', { all: true, verbatim: true });
-  if (addresses.length === 0 || addresses.some((entry) => isPrivateHost(entry.address))) {
+  const addresses = await resolveHost(GITHUB_API_HOST);
+  // DNS itself may take longer than cancellation. Recheck before opening a TLS
+  // socket so an aborted tool can never begin a provider request after lookup.
+  if (signal?.aborted) throw new Error('Request cancelled.');
+  if (addresses.length === 0 || addresses.some((entry) => (entry.family !== 4 && entry.family !== 6) || isPrivateHost(entry.address))) {
     throw new Error('GitHub API DNS returned an unsafe address; Pixel blocked the request.');
   }
   const address = addresses[0];
@@ -29,7 +46,7 @@ export async function readPublicGitHubRepository(owner: unknown, repository: unk
   const payload = await new Promise<unknown>((resolve, reject) => {
     const req = request({
       protocol: 'https:', hostname: address.address, family: address.family, port: 443,
-      servername: 'api.github.com', method: 'GET', path,
+      servername: GITHUB_API_HOST, method: 'GET', path,
       headers: { Host: 'api.github.com', Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Pixel-Plugin/1.0' },
       timeout: 8_000,
     }, (response) => {

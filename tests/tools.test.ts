@@ -3,6 +3,7 @@ import {
   BUILTIN_TOOLS,
   ToolRegistry,
   applyDecision,
+  classifyInvocationRisk,
   evaluateInvocation,
   hasValidGrant,
   riskWeight,
@@ -12,6 +13,7 @@ import { BOARD_TOOL_DEFINITIONS } from '../src/main/board/tools';
 import { DOCUMENT_TOOL_DEFINITIONS } from '../src/main/documents/toolset';
 import { FILE_TOOL_DEFINITIONS } from '../src/main/files/toolset';
 import { MEMORY_TOOL_DEFINITIONS } from '../src/main/memory/toolset';
+import { buildPermissionRequest } from '../src/main/agent/executor';
 
 function context(overrides: Partial<Parameters<typeof evaluateInvocation>[1]> = {}) {
   return {
@@ -182,6 +184,21 @@ describe('ToolRegistry', () => {
     expect(registry.validateArgs('analyze_screen', { target: 'desktop_everywhere' })).toMatchObject({ ok: false });
   });
 
+  it('requires one browser target and verified confirmation text for submissions', () => {
+    const registry = new ToolRegistry();
+    const target = { kind: 'label', value: 'Your name' };
+    expect(registry.validateArgs('browser_type', { target, text: 'Ada' })).toEqual({ ok: true });
+    expect(registry.validateArgs('browser_type', { selector: '#name', text: 'Ada' })).toEqual({ ok: true });
+    expect(registry.validateArgs('browser_type', { target, selector: '#name', text: 'Ada' })).toMatchObject({ ok: false });
+    expect(registry.validateArgs('browser_type', { target, text: 'Ada', submit: true })).toMatchObject({ ok: false, message: expect.stringMatching(/expectedText/i) });
+    expect(registry.validateArgs('browser_type', { target, text: 'Ada', submit: true, expectedText: 'Saved' })).toEqual({ ok: true });
+    expect(registry.validateArgs('browser_click', { target: { kind: 'role', role: 'button', value: 'Save' } })).toEqual({ ok: true });
+    expect(registry.validateArgs('browser_upload', { target })).toEqual({ ok: true });
+    expect(registry.validateArgs('browser_upload', {})).toMatchObject({ ok: false });
+    expect(registry.validateArgs('browser_download', { selector: 'a[download]' })).toEqual({ ok: true });
+    expect(registry.validateArgs('browser_download', { target, selector: '#file' })).toMatchObject({ ok: false });
+  });
+
   it('exposes only read-only tools in guide mode', () => {
     const registry = new ToolRegistry();
     const available = registry.availableFor('guide');
@@ -209,6 +226,45 @@ describe('ToolRegistry', () => {
     expect(registry.grant({ id: 'critical-session', toolName: 'browser_type', scope: 'session', risk: 'critical', grantedAt: Date.now() })).toBe(false);
     expect(registry.grant({ id: 'critical-always', toolName: 'browser_type', scope: 'always', risk: 'critical', policyVersion: 1, grantedAt: Date.now() })).toBe(false);
     expect(registry.evaluate('browser_type', 'agent', { ...args, submit: false })).toMatchObject({ allowed: false, needsApproval: true });
+  });
+
+  it('raises unnamed CSS browser clicks and consequential named actions to critical', () => {
+    const registry = new ToolRegistry();
+    const tool = registry.get('browser_click')!;
+    expect(registry.evaluate('browser_click', 'agent', { selector: '#confirm' })).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.evaluate('browser_click', 'agent', { target: { kind: 'role', role: 'button', value: 'Send message' } })).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.canGrantSession('browser_click', { selector: '#confirm' }).allowed).toBe(false);
+    expect(registry.evaluate('browser_click', 'agent', { target: { kind: 'role', role: 'button', value: 'Open menu' } })).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.grant({ id: 'critical-click', toolName: 'browser_click', scope: 'always', risk: 'critical', policyVersion: 1, grantedAt: Date.now() })).toBe(false);
+    expect(tool.risk).toBe('high');
+    expect(classifyInvocationRisk(tool, { selector: '#confirm' })).toBe('critical');
+    expect(classifyInvocationRisk(tool, { target: { kind: 'role', role: 'button', value: 'Send message' } })).toBe('critical');
+    expect(classifyInvocationRisk(tool, { target: { kind: 'role', role: 'button', value: 'Open menu' } })).toBe('high');
+  });
+
+  it('requires a fresh exact-action approval for uploads and a fresh approval for downloads', () => {
+    const registry = new ToolRegistry();
+    const upload = { target: { kind: 'label', value: 'Attachment' } };
+    expect(registry.evaluate('browser_upload', 'agent', upload)).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.canGrantSession('browser_upload', upload).allowed).toBe(false);
+    expect(registry.canGrantAlways('browser_upload', upload).allowed).toBe(false);
+    expect(classifyInvocationRisk(registry.get('browser_upload')!, upload)).toBe('critical');
+    expect(registry.evaluate('browser_download', 'agent', { target: { kind: 'role', role: 'link', value: 'Download report' } })).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.canGrantSession('browser_download', {}).allowed).toBe(false);
+  });
+
+  it('shows an exact browser form target in approval while withholding both field and confirmation text', () => {
+    const tool = new ToolRegistry().get('browser_type')!;
+    const approval = buildPermissionRequest(tool, {
+      target: { kind: 'label', value: 'Email address' },
+      text: 'person@example.test', submit: true, expectedText: 'Thanks person@example.test',
+    });
+    expect(approval.risk).toBe('critical');
+    expect(approval.action).toContain('label "Email address"');
+    expect(approval.target).toContain('label "Email address"');
+    expect(JSON.stringify(approval)).not.toContain('person@example.test');
+    expect(approval.args.text).toContain('hidden for privacy');
+    expect(approval.args.expectedText).toBe('[confirmation text hidden]');
   });
 
   it('revokeAll clears every grant and reports the count', () => {

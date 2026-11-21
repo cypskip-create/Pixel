@@ -1,6 +1,6 @@
 # REA reference analysis workflow
 
-Updated: 2026-11-21. This is a reusable research procedure; no user reference has been supplied yet.
+Updated: 2026-11-21. This is the reusable workflow used for the Workspace references supplied on 2026-11-21. Findings and limitations: `PIXEL_REFERENCE_RESEARCH_6_3.md`.
 
 ## Establish scope
 
@@ -50,10 +50,11 @@ estimated values, component mapping and open questions.
   responsive rules. The code also uses utility classes and component-local
   state; avoid introducing another styling system. Audit repeated cards,
   headings, return controls and status badges before consolidating them.
-- The only supplied visual is a narrow 962×274 screenshot labeled “Workspace —
-  proposed Pix play area.” It shows a dark chat surface, Pix at upper right, and
-  an expanded composer. It is evidence for that region only; it does not specify
-  the complete Workspace navigation or all responsive states.
+- The reference set now includes the 1170×789 Ostrand dashboard screenshot and
+  public Inspora folders and ASCII Sharks pages. See the reference research
+  report for measured screenshot geometry and source evidence. The separately
+  supplied 962×274 Pix play-area screenshot remains evidence only for that chat
+  region, not for complete navigation or responsive behavior.
 
 ## Implement and compare
 
@@ -68,6 +69,19 @@ screenshots and measurements.
 
 - Installed separately from Pixel: `rea-agents@6.10.1`, Node `26.13.0`, npm
   `11.20.0`.
+- `codex mcp list` shows the setup-owned stdio registration enabled, and the
+  installed `rea doctor --client codex --skill --json` reports that registration
+  and skill identity aligned. Its `environment_healthy` flag is false because
+  optional Hopper, Ghidra, IDA, JADX and Kuna analysis engines are not configured.
+- The current Codex tool catalog does not expose REA, and server-scoped MCP
+  discovery returns `unknown MCP server`. The doctor's `live_server` value is
+  unknown. A Codex restart/reconnect is required to load the tools and a real
+  call must confirm connectivity. Public source inspection in this checkpoint
+  used direct visual/browser reading. A standalone stdio MCP client later
+  verified REA 6.10.1 with a disposable fixture, but the Ostrand, Inspora and
+  ASCII Sharks references have not yet been analyzed with REA. Codex still marks
+  the registration `Unsupported`, and no REA tool namespace is exposed in this
+  session.
 - Codex's setup-owned stdio registration points at the exact installed package
   entry under the user's npm cache. `rea doctor --client codex --skill --json`
   reports the Codex registration and skill identity healthy. Restart Codex to

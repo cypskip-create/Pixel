@@ -419,6 +419,24 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 11,
+    name: 'project-scoped-note-document-links',
+    sql: `
+      CREATE TABLE productivity_note_documents (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        note_id TEXT NOT NULL REFERENCES productivity_notes(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
+        created_at INTEGER NOT NULL,
+        UNIQUE (note_id, path)
+      );
+      CREATE INDEX idx_productivity_note_documents_note
+        ON productivity_note_documents(project_id, note_id, created_at);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */
