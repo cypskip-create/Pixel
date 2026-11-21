@@ -23,6 +23,7 @@ export const MAX_SEARCH_VISITS = 1_200;
 export const MAX_COPY_FILE_BYTES = 50_000_000;
 export const MAX_BATCH_FILES = 20;
 export const MAX_DUPLICATE_SCAN_BYTES = 500_000_000;
+const OPENABLE_DOCUMENT_EXTENSIONS = new Set(['.csv', '.docx', '.jpeg', '.jpg', '.md', '.pdf', '.png', '.pptx', '.rtf', '.txt', '.webp', '.xlsx']);
 
 export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
@@ -61,7 +62,7 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   },
   {
     name: 'file_search',
-    description: 'Searches a bounded directory tree under the current user home folder by file name and optional extension. It skips hidden items, symlinks, and sensitive credential-like names. Requires approval for the exact search root and filters.',
+    description: 'Searches a bounded directory tree under the current user home folder by file name, extension, size, and modified-time range. It skips hidden items, symlinks, and sensitive credential-like names. Requires approval for the exact search root and filters.',
     category: 'files', risk: 'high', requiresApproval: true, changesState: false,
     parameters: {
       type: 'object',
@@ -69,6 +70,10 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         directory: { type: 'string', description: 'Absolute search root under the user home folder.' },
         query: { type: 'string', minLength: 1, maxLength: 120, description: 'Case-insensitive filename substring.' },
         extension: { type: 'string', maxLength: 12, description: 'Optional extension such as pdf, without a wildcard.' },
+        minSizeBytes: { type: 'integer', minimum: 0, maximum: 1_000_000_000_000, description: 'Optional inclusive minimum file size.' },
+        maxSizeBytes: { type: 'integer', minimum: 0, maximum: 1_000_000_000_000, description: 'Optional inclusive maximum file size.' },
+        modifiedAfter: { type: 'string', maxLength: 40, description: 'Optional ISO date/time lower bound; files must be newer.' },
+        modifiedBefore: { type: 'string', maxLength: 40, description: 'Optional ISO date/time upper bound; files must be older.' },
         maxResults: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum matches to return; defaults to 25.' },
       },
       required: ['directory', 'query'], additionalProperties: false,
@@ -79,6 +84,18 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     description: 'Reads size, type and last-modified time for one regular file under the current user home folder. Does not read its contents. Requires approval for this exact path.',
     category: 'files', risk: 'high', requiresApproval: true, changesState: false,
     parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute file path under the user home folder.' } }, required: ['path'], additionalProperties: false },
+  },
+  {
+    name: 'file_open',
+    description: 'Opens a user-selected folder in File Explorer or a supported document/image with its Windows default application. Executables, scripts, symlinks and credential-like paths are refused. The exact path requires approval; success means Windows accepted the open request, not that a UI was independently observed.',
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute file or folder path under the user home folder.' } }, required: ['path'], additionalProperties: false },
+  },
+  {
+    name: 'file_trash',
+    description: 'Moves one user-selected regular file under the current user home folder to the Windows Recycle Bin using the operating system. It never permanently deletes. Credential-like files and symlinks are refused. Requires fresh approval for this exact path.',
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Absolute regular file path under the user home folder.' } }, required: ['path'], additionalProperties: false },
   },
   {
     name: 'file_write',
@@ -150,7 +167,7 @@ export interface FileToolResult {
   ok: boolean;
   content: string;
   detail?: Record<string, unknown>;
-  errorCode?: 'NOT_FOUND' | 'FAILED' | 'DENIED';
+  errorCode?: 'NOT_FOUND' | 'FAILED' | 'DENIED' | 'UNAVAILABLE';
   verification?: { summary: string; source: string };
 }
 
@@ -181,6 +198,64 @@ export class FileTools {
       if (code === 'ENOENT') return { ok: false, content: 'The requested file or directory does not exist.', errorCode: 'NOT_FOUND' };
       if (code === 'EACCES' || code === 'EPERM') return { ok: false, content: 'Windows denied access to the requested path.', errorCode: 'DENIED' };
       return { ok: false, content: `File operation failed: ${error instanceof Error ? error.message : String(error)}`, errorCode: 'FAILED' };
+    }
+  }
+
+  async open(args: Record<string, unknown>, openPath?: (path: string) => Promise<string>): Promise<FileToolResult> {
+    if (!openPath) return { ok: false, content: 'Windows file opening is unavailable in this application session.', errorCode: 'UNAVAILABLE' };
+    const raw = typeof args.path === 'string' ? args.path.trim() : '';
+    if (!raw || !isAbsolute(raw)) return invalidPath();
+    const requested = resolve(raw);
+    try {
+      if (lstatSync(requested).isSymbolicLink()) return { ok: false, content: 'Pixel will not open a symbolic link.', errorCode: 'DENIED' };
+      const target = realpathSync(requested);
+      assertWithinHome(target);
+      if (isSensitiveName(basename(target))) return { ok: false, content: 'Pixel will not open a path whose name resembles a credential or private-key file.', errorCode: 'DENIED' };
+      const stats = statSync(target);
+      if (!stats.isDirectory() && (!stats.isFile() || !OPENABLE_DOCUMENT_EXTENSIONS.has(extname(target).toLocaleLowerCase()))) {
+        return { ok: false, content: 'Pixel opens folders and common document/image formats only; executables, scripts and unsupported file types are refused.', errorCode: 'DENIED' };
+      }
+      const failure = await openPath(target);
+      if (failure) return { ok: false, content: `Windows could not open the selected path: ${failure.slice(0, 300)}`, errorCode: 'FAILED' };
+      if (!pathExists(target)) return { ok: false, content: 'The selected path disappeared after Windows accepted the open request.', errorCode: 'FAILED' };
+      return {
+        ok: true,
+        content: `Windows accepted an open request for ${target}. Pixel did not verify which application displayed it.`,
+        detail: { path: target, type: stats.isDirectory() ? 'directory' : 'file', windowsAccepted: true },
+        verification: { summary: `Windows returned no error for the open request and the selected path still exists: ${target}.`, source: 'Electron shell.openPath result and filesystem existence' },
+      };
+    } catch (error) {
+      if (error instanceof FileToolsError) return { ok: false, content: error.message, errorCode: error.errorCode };
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') return { ok: false, content: 'The requested file or folder does not exist.', errorCode: 'NOT_FOUND' };
+      if (code === 'EACCES' || code === 'EPERM') return { ok: false, content: 'Windows denied access to the requested path.', errorCode: 'DENIED' };
+      return { ok: false, content: `File open request failed: ${error instanceof Error ? error.message : String(error)}`, errorCode: 'FAILED' };
+    }
+  }
+
+  async trash(args: Record<string, unknown>, trashItem?: (path: string) => Promise<void>, signal?: AbortSignal): Promise<FileToolResult> {
+    if (!trashItem) return { ok: false, content: 'Windows Recycle Bin access is unavailable in this application session.', errorCode: 'UNAVAILABLE' };
+    if (signal?.aborted) return { ok: false, content: 'The recycle request was cancelled before it started.', errorCode: 'FAILED' };
+    let target: string;
+    try {
+      target = resolveExistingFile(args.path);
+      if (isSensitiveName(basename(target))) return { ok: false, content: 'Pixel will not move a credential-like file to the Recycle Bin.', errorCode: 'DENIED' };
+      const before = statSync(target);
+      if (!before.isFile()) return { ok: false, content: 'Only one regular file can be moved to the Recycle Bin by this tool.', errorCode: 'FAILED' };
+      await trashItem(target);
+      if (pathExists(target)) return { ok: false, content: `Windows returned from the Recycle Bin request, but the original path still exists. Pixel cannot confirm removal: ${target}`, errorCode: 'FAILED' };
+      return {
+        ok: true,
+        content: `Windows accepted the move to Recycle Bin and the original file path is now absent: ${target}. Restore it through the Windows Recycle Bin if needed.`,
+        detail: { path: target, recycled: true, originalPathAbsent: true },
+        verification: { summary: `The original path is absent after Electron's OS Recycle Bin operation: ${target}.`, source: 'Electron shell.trashItem and filesystem existence check' },
+      };
+    } catch (error) {
+      if (error instanceof FileToolsError) return { ok: false, content: error.message, errorCode: error.errorCode };
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') return { ok: false, content: 'The requested file does not exist.', errorCode: 'NOT_FOUND' };
+      if (code === 'EACCES' || code === 'EPERM') return { ok: false, content: 'Windows denied the Recycle Bin operation.', errorCode: 'DENIED' };
+      return { ok: false, content: `Recycle Bin operation failed: ${error instanceof Error ? error.message : String(error)}`, errorCode: 'FAILED' };
     }
   }
 
@@ -263,6 +338,32 @@ export class FileTools {
     if (!query || query.length > 120) return { ok: false, content: 'query must contain 1 to 120 characters.', errorCode: 'FAILED' };
     const extensionValue = typeof args.extension === 'string' ? args.extension.trim().replace(/^\./, '').toLocaleLowerCase() : '';
     if (extensionValue && !/^[a-z0-9]{1,12}$/.test(extensionValue)) return { ok: false, content: 'extension must be a simple file extension without wildcards.', errorCode: 'FAILED' };
+    const minSizeBytes = args.minSizeBytes;
+    const maxSizeBytes = args.maxSizeBytes;
+    for (const [name, value] of [['minSizeBytes', minSizeBytes], ['maxSizeBytes', maxSizeBytes]] as const) {
+      if (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 1_000_000_000_000)) {
+        return { ok: false, content: `${name} must be a whole number from 0 to 1,000,000,000,000.`, errorCode: 'FAILED' };
+      }
+    }
+    if (typeof minSizeBytes === 'number' && typeof maxSizeBytes === 'number' && minSizeBytes > maxSizeBytes) {
+      return { ok: false, content: 'minSizeBytes cannot exceed maxSizeBytes.', errorCode: 'FAILED' };
+    }
+    const parseTime = (name: 'modifiedAfter' | 'modifiedBefore'): number | undefined => {
+      const value = args[name];
+      if (value === undefined) return undefined;
+      if (typeof value !== 'string' || value.length > 40 ||
+        !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(value) ||
+        !Number.isFinite(Date.parse(value))) return Number.NaN;
+      return Date.parse(value);
+    };
+    const modifiedAfter = parseTime('modifiedAfter');
+    const modifiedBefore = parseTime('modifiedBefore');
+    if (Number.isNaN(modifiedAfter) || Number.isNaN(modifiedBefore)) {
+      return { ok: false, content: 'modifiedAfter and modifiedBefore must be valid ISO date/time values.', errorCode: 'FAILED' };
+    }
+    if (modifiedAfter !== undefined && modifiedBefore !== undefined && modifiedAfter > modifiedBefore) {
+      return { ok: false, content: 'modifiedAfter cannot be later than modifiedBefore.', errorCode: 'FAILED' };
+    }
     const maxResults = args.maxResults === undefined ? 25 : args.maxResults;
     if (typeof maxResults !== 'number' || !Number.isSafeInteger(maxResults) || maxResults < 1 || maxResults > 50) {
       return { ok: false, content: 'maxResults must be a whole number from 1 to 50.', errorCode: 'FAILED' };
@@ -299,6 +400,11 @@ export class FileTools {
           if (extensionValue && extname(entry.name).slice(1).toLocaleLowerCase() !== extensionValue) continue;
           try {
             const stats = statSync(path);
+            if (typeof minSizeBytes === 'number' && stats.size < minSizeBytes) continue;
+            if (typeof maxSizeBytes === 'number' && stats.size > maxSizeBytes) continue;
+            const modified = stats.mtimeMs;
+            if (modifiedAfter !== undefined && modified <= modifiedAfter) continue;
+            if (modifiedBefore !== undefined && modified >= modifiedBefore) continue;
             matches.push({ path, sizeBytes: stats.size, modifiedAt: stats.mtime.toISOString() });
           } catch { /* the file may have disappeared during the bounded scan */ }
         }
@@ -310,7 +416,7 @@ export class FileTools {
     return {
       ok: true,
       content: `${matches.length} matching file${matches.length === 1 ? '' : 's'} found in the inspected portion of ${root}${truncated ? ` (bounded scan: ${visited} entries / ${MAX_SEARCH_DEPTH} levels; the complete tree may contain newer matches)` : ''}${returned.length ? `; newest ${returned.length}${matches.length > returned.length ? ` of ${matches.length}` : ''}:\n${returned.map((item) => `- ${item.path} (${item.sizeBytes} bytes; modified ${item.modifiedAt})`).join('\n')}` : '.'}`,
-      detail: { root, query, extension: extensionValue || null, visited, truncated, totalMatchesInScannedTree: matches.length, matches: returned },
+      detail: { root, query, extension: extensionValue || null, minSizeBytes: minSizeBytes ?? null, maxSizeBytes: maxSizeBytes ?? null, modifiedAfter: args.modifiedAfter ?? null, modifiedBefore: args.modifiedBefore ?? null, visited, truncated, totalMatchesInScannedTree: matches.length, matches: returned },
       verification: { summary: `Inspected ${visited} filesystem entries under the authorized search root and returned the newest ${returned.length} matching file metadata records${truncated ? ' from a bounded, incomplete scan' : ''}.`, source: 'bounded filesystem enumeration' },
     };
   }

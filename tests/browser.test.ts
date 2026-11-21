@@ -98,6 +98,51 @@ describe('BrowserSession.validateUrl', () => {
   });
 });
 
+describe('browser tab tool registration and executor routing', () => {
+  const tabs = [
+    { id: 'tab_1', active: true, url: 'https://example.test/', title: 'Example' },
+  ];
+  const fakeBrowser = {
+    validateUrl: () => null,
+    newTab: async (url: string) => ({ id: 'tab_2', active: true, url, title: 'Second' }),
+    snapshot: async () => ({ url: 'https://example.test/second', title: 'Second', text: 'Fixture', links: [], buttons: [], inputs: [] }),
+    listTabs: async () => tabs,
+    switchTab: async (id: string) => id === 'tab_1' ? { ...tabs[0], active: true } : null,
+    closeTab: async (id: string) => ({ closed: id === 'tab_2', remaining: 1, activeTabId: 'tab_1' }),
+  } as unknown as BrowserSession;
+  const registry = new ToolRegistry();
+  const executors = new ToolExecutors({ browser: fakeBrowser });
+
+  it('registers bounded tab tools with explicit mutation policy', () => {
+    expect(registry.get('browser_new_tab')).toMatchObject({ risk: 'medium', requiresApproval: true, changesState: true });
+    expect(registry.get('browser_list_tabs')).toMatchObject({ risk: 'low', requiresApproval: false, changesState: false });
+    expect(registry.get('browser_switch_tab')).toMatchObject({ risk: 'low', requiresApproval: false, changesState: false });
+    expect(registry.get('browser_close_tab')).toMatchObject({ risk: 'high', requiresApproval: true, changesState: true });
+    expect(registry.availableFor('agent').map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      'browser_new_tab', 'browser_list_tabs', 'browser_switch_tab', 'browser_close_tab',
+    ]));
+  });
+
+  it('routes create, list, switch and close through real executor handlers', async () => {
+    const created = await executors.run('browser_new_tab', { url: 'https://example.test/second' });
+    expect(created.ok).toBe(true);
+    expect(created.detail).toMatchObject({ id: 'tab_2', active: true });
+    expect(created.verification?.summary).toContain('loaded');
+
+    const listed = await executors.run('browser_list_tabs', {});
+    expect(listed.ok).toBe(true);
+    expect(listed.detail).toMatchObject({ tabs: [{ id: 'tab_1', active: true }] });
+
+    const switched = await executors.run('browser_switch_tab', { tabId: 'tab_1' });
+    expect(switched.ok).toBe(true);
+    expect(switched.detail).toMatchObject({ id: 'tab_1', active: true });
+
+    const closed = await executors.run('browser_close_tab', { tabId: 'tab_2' });
+    expect(closed.ok).toBe(true);
+    expect(closed.detail).toMatchObject({ closedTabId: 'tab_2', remaining: 1, activeTabId: 'tab_1' });
+  });
+});
+
 /* ------------------------------------------------------------------ *
  * Live automation
  * ------------------------------------------------------------------ */
@@ -169,6 +214,22 @@ live('browser automation (live chromium)', () => {
 
   it('refuses to navigate to a javascript: URL at the session level', async () => {
     await expect(session.navigate('javascript:alert(1)')).rejects.toThrow(/will not open/i);
+  });
+
+  it('creates, lists, switches and closes independently identified tabs', async () => {
+    const second = await session.newTab(`${baseUrl}/second`);
+    expect(second).toMatchObject({ id: expect.stringMatching(/^tab_\d+$/), active: true, title: 'Second' });
+    const tabs = await session.listTabs();
+    expect(tabs).toHaveLength(2);
+    expect(tabs.find((tab) => tab.id === second.id)?.active).toBe(true);
+    const first = tabs.find((tab) => tab.id !== second.id);
+    expect(first).toBeDefined();
+    const selected = await session.switchTab(first!.id);
+    expect(selected?.active).toBe(true);
+    expect(selected?.id).toBe(first!.id);
+    const closed = await session.closeTab(second.id);
+    expect(closed).toMatchObject({ closed: true, remaining: 1, activeTabId: first!.id });
+    expect((await session.listTabs()).map((tab) => tab.id)).toEqual([first!.id]);
   });
 });
 

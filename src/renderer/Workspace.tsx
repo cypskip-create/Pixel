@@ -13,6 +13,7 @@ import { WorkspaceConversationHeader } from '@/components/WorkspaceConversationH
 import { WorkspaceComposer } from '@/components/WorkspaceComposer';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { MemoryPanel } from '@/components/MemoryPanel';
+import { ProductivityPanel } from '@/components/ProductivityPanel';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelBoard } from '@/components/PixelBoard';
 import { PixelMark } from '@/components/PixelMark';
@@ -404,7 +405,7 @@ export function Workspace(): React.JSX.Element {
   const currentProject = projects.find((project) => project.active);
 
   const viewTitle: Record<WorkspaceView, string> = {
-    chat: 'Workspace', projects: 'Projects', tasks: 'Tasks & Activity', skills: 'Skills & Routines',
+    chat: 'Workspace', projects: 'Projects', tasks: 'Tasks & Activity', notes: 'Notes & Planning', skills: 'Skills & Routines',
     memory: 'Memory', tools: 'Tools', board: 'Pixel Board', settings: 'Settings',
   };
   const pendingApproval = permission ? (
@@ -509,6 +510,7 @@ export function Workspace(): React.JSX.Element {
 
           {view === 'projects' ? <ProjectsView projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /> : null}
           {view === 'tasks' ? <TasksView tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} /> : null}
+          {view === 'notes' ? <ProductivityPanel /> : null}
           {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'tools' ? <ToolsView tools={tools} /> : null}
@@ -546,6 +548,7 @@ function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element 
     { id: 'browser', title: 'Browser' },
     { id: 'files', title: 'Files' },
     { id: 'documents', title: 'Documents' },
+    { id: 'productivity', title: 'Notes & tasks' },
     { id: 'board', title: 'Pixel Board' },
     { id: 'system', title: 'System' },
     { id: 'memory', title: 'Memory' },
@@ -553,11 +556,12 @@ function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element 
   ];
   const capabilityNotes = [
     { title: 'Desktop drawing editor', status: 'Partial', detail: 'Pixel can show passive highlights and arrows on verified accessible controls. Freehand desktop editing and saved overlay sessions are not available.' },
-    { title: 'File organization', status: 'Partial', detail: 'Scoped list, search, metadata, read, write, create, copy and single-file rename/move are available. Batch previews, duplicate detection and Recycle Bin recovery are not available.' },
-    { title: 'Document creation', status: 'Partial', detail: 'Documents can be indexed and searched. There is no direct document authoring or editing tool.' },
+    { title: 'File organization', status: 'Partial', detail: 'Scoped list, filtered search, metadata, read, write, create, copy, rename/move, bounded batch operations, duplicate detection, approved open and Recycle Bin send are available. Visible application launch and restore-from-Recycle-Bin verification remain outstanding.' },
+    { title: 'Document creation', status: 'Partial', detail: 'Documents can be indexed and searched. Direct authored document round-trip remains unavailable.' },
     { title: 'Workflow recording', status: 'Partial', detail: 'Saved workflow and local routine infrastructure exists. A live semantic recorder integrated with normal tasks is not available.' },
     { title: 'Specialist delegation', status: 'Partial', detail: 'The bounded coordinator exists but is not connected to live conversation execution. Infrastructure and Pixel Code specialists are unavailable.' },
-    { title: 'Clipboard access', status: 'Unavailable', detail: 'Pixel does not read, monitor, or write the Windows clipboard through agent tools.' },
+    { title: 'Clipboard access', status: 'Partial', detail: 'Approval-gated one-shot text read/copy/conditional restore and verified field set are available. Real Windows acceptance remains outstanding.' },
+    { title: 'Notes and planning tasks', status: 'Partial', detail: 'Project-scoped notes and tasks are persisted, agent-editable, and user-browsable/editable in Notes & Planning. Checklist grouping, richer due-date editing, Markdown import/export, and Windows acceptance remain outstanding.' },
     { title: 'Expanded system diagnostics', status: 'Partial', detail: 'CPU, memory, disk, uptime and display facts are available. Network adapter, running-app, selected-process and audio-device diagnostics are not available.' },
   ];
   return <section className="workspace-page">

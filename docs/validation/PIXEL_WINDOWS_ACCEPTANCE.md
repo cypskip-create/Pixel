@@ -2,20 +2,51 @@
 
 ## Core Completion 6.2 — current local verification boundary
 
-Source base reviewed: `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`. The cited
-Windows workflow [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339)
-passed on that base commit and built unpacked, portable and NSIS artifacts;
-the new clipboard changes below are local and have not been covered by that
-run. No commit, push, release, install, upgrade or uninstall was performed.
+Committed base reviewed: `64e0383484cfcbc35370c9f8aa2498f9428dd15d`. Windows
+workflow [44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637)
+passed on that exact commit, including unpacked, portable and NSIS packaging.
+The current file, browser-tab and productivity changes are local and are not
+covered by that run. No release, install, upgrade or uninstall was performed
+for the local changes.
 
-The current local checks are: TypeScript passed; Vitest **877 passed, 27
-skipped, 0 failed (904 total; 62 files passed, 1 skipped)**; production build passed; native helper
-compilation passed; Python worker tests **12/12 passed**. Skips are the 17
-Chromium-dependent browser cases, 7 local NSIS cases (`makensis` absent), and 3
-opt-in foreground integration cases. The local sandboxed preload test rebuilt
-the bundled preload but Electron exited `2147483651` (`0x80000003`) before its
-report; the hosted run's preload smoke passed on the base SHA. This is an
-environment difference, not evidence that local bridge behavior passed.
+Latest local verification on 2026-11-21: typecheck passed; Vitest **893 passed,
+28 skipped, 0 failed (921 total; 64 files passed, 1 skipped)**; production
+build passed; native helper compilation passed; Python worker tests **12/12
+passed**. Skips are Chromium-dependent browser tests, local NSIS tests
+(`makensis` absent), and opt-in foreground integration tests. The local
+sandboxed preload test rebuilt the bundled preload but Electron exited
+`2147483651` (`0x80000003`) before its report. The hosted run's preload smoke
+passed on the committed base SHA; local bridge behavior remains unverified.
+The dev launch also found port 5199 occupied and no branch-local Electron
+window. The visible Pixel windows belonged to a separate `C:\dev\Pixel`
+checkout and were not modified.
+
+`npm run pack` rebuilt the renderer and native helper, then failed in
+`scripts/build-voice-worker.ps1` with “No suitable Python runtime found.” The
+required Python 3.12 x64 is not installed here; no unpacked app, portable
+executable or NSIS installer was generated for the current local changes.
+
+The local Notes & Planning page now supports note creation/editing and Markdown
+import/export through native file dialogs. Automated checks cover renderer
+routing; complete this acceptance on a disposable project after building the
+current local tree. The latest green GitHub run is not evidence for these edits.
+
+### File search/open/Recycle Bin acceptance
+
+Use only disposable fixtures inside a temporary folder under the current user
+profile. The local unit tests use injected adapters and do not prove the OS UI.
+
+1. Create a PDF fixture and a text fixture with known sizes and modified dates.
+2. Ask Pixel to search the folder with a size bound and an ISO modified-time
+   bound; compare the returned file paths/metadata to the fixture values.
+3. Ask Pixel to open the PDF and folder, approve each exact path, and verify the
+   expected default application/Explorer window appears. Pixel currently only
+   reports the OS open request and path existence.
+4. Ask Pixel to move a disposable text fixture to the Recycle Bin, approve it,
+   verify its original path is absent, then restore it manually through the
+   Windows Recycle Bin and verify its contents.
+5. Confirm executable/script files, symlinks, and paths outside the user home
+   are refused without invoking the OS adapter.
 
 ### Clipboard tool laptop acceptance
 

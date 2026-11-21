@@ -156,7 +156,7 @@ export function applyDecision(
 export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'get_system_info',
-    description: 'Reads CPU, memory, disk and display information from this computer.',
+    description: 'Reads CPU, memory and local network-adapter status from this computer. Adapter IP and hardware addresses are not returned.',
     category: 'system',
     risk: 'safe',
     requiresApproval: false,
@@ -502,6 +502,30 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'browser_new_tab',
+    description: 'Opens an approved HTTP or HTTPS URL in a new isolated Pixel browser tab and verifies the final URL/title. Redirects and subresources remain subject to the network guard.',
+    category: 'browser', risk: 'medium', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { url: { type: 'string', minLength: 8, maxLength: 2_048 } }, required: ['url'], additionalProperties: false },
+  },
+  {
+    name: 'browser_list_tabs',
+    description: 'Lists the current Pixel-controlled browser tabs, their opaque tab IDs, titles, URLs and active state. It does not inspect page content.',
+    category: 'browser', risk: 'low', requiresApproval: false, changesState: false,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'browser_switch_tab',
+    description: 'Selects one currently open Pixel browser tab by an ID returned by browser_list_tabs.',
+    category: 'browser', risk: 'low', requiresApproval: false, changesState: false,
+    parameters: { type: 'object', properties: { tabId: { type: 'string', minLength: 5, maxLength: 80 } }, required: ['tabId'], additionalProperties: false },
+  },
+  {
+    name: 'browser_close_tab',
+    description: 'Closes one specified Pixel browser tab. A blank replacement tab is kept if it was the last tab. Requires approval for that exact tab ID.',
+    category: 'browser', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { tabId: { type: 'string', minLength: 5, maxLength: 80 } }, required: ['tabId'], additionalProperties: false },
+  },
+  {
     name: 'browser_inspect',
     description:
       'Reads the current browser page: title, URL, visible text, links, buttons and input fields.',
@@ -816,6 +840,8 @@ export function toolCategoryLabel(category: ToolCategory): string {
       return 'Files';
     case 'documents':
       return 'Documents';
+    case 'productivity':
+      return 'Notes & tasks';
     case 'code':
       return 'Code';
   }

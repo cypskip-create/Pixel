@@ -279,6 +279,14 @@ describe('emergency stop lifecycle', () => {
 });
 
 describe('ToolExecutors cancellation', () => {
+  it('reports local adapter types without exposing network addresses', async () => {
+    const result = await new ToolExecutors().run('get_system_info', {});
+    expect(result.ok).toBe(true);
+    expect(result.detail).toHaveProperty('networkInterfaces');
+    expect(result.content).toContain('Network adapters:');
+    expect(JSON.stringify(result.detail)).not.toMatch(/\b(?:\d{1,3}\.){3}\d{1,3}\b|[0-9a-f]{2}(?::[0-9a-f]{2}){5}/i);
+  });
+
   it('refuses to start a call whose signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();

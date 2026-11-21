@@ -1,12 +1,60 @@
 # Pixel progress
 
-Updated: 2026-11-20. Version: 0.2.1.
+Updated: 2026-11-21. Version: 0.2.1.
 
-## Core Completion 6.2 follow-up (local, uncommitted)
+## Core Completion 6.2 follow-on (local, uncommitted)
 
-Reviewed the latest source at `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`.
-The worktree was clean before this task. The user will commit and push; no
-commit, push, or release was created here.
+Rechecked GitHub `main` at
+`64e0383484cfcbc35370c9f8aa2498f9428dd15d` (unchanged from the local base).
+Latest Windows Actions run
+[44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637)
+passed on that exact commit, including NSIS setup, type checking, worker tests,
+sandboxed preload smoke, full automated tests, native-helper compilation,
+unpacked/portable/NSIS packaging and artifact upload. It predates the local
+file-tool changes below.
+
+- Extended `file_search` with validated minimum/maximum byte and ISO modified-
+  time filters, preserving the existing bounded traversal, hidden/symlink
+  exclusions and home-directory scope.
+- Added approved `file_open` through main-process `shell.openPath` for folders
+  and a fixed set of document/image formats. It refuses symlinks, executable or
+  script formats and sensitive-name paths. Its verification is deliberately
+  limited to Windows accepting the request and the path still existing; it does
+  not claim the target window appeared.
+- Added approval-gated `file_trash` through Electron `shell.trashItem`, limited
+  to one home-scoped regular file. It rejects sensitive-name paths and verifies
+  that the original path disappeared. Its unit test uses a deterministic
+  adapter; actual Windows Recycle Bin behavior remains unverified.
+- Browser tab create/list/switch/close tools are registered with the central
+  schema and executor. Navigation remains behind `NetworkGuard`; live Chromium
+  lifecycle tests are skipped because browser download fails DNS resolution.
+- Migration 8 adds project-scoped notes/tasks with model-visible CRUD tools,
+  verified SQLite read-back and a Workspace Notes & Planning page. The page
+  supports note create/edit/delete, task create/complete, and Markdown/text
+  import plus Markdown export through main-process dialogs. Import is capped at
+  20 KB, accepts Markdown/text and rejects symlinks; export reads back the
+  saved contents. Task descriptions and due dates can also be created/edited in
+  Workspace; migration 9 adds project-scoped checklist grouping and task assignment.
+- **Current local verification:** typecheck passed; Vitest **893 passed, 28
+  skipped, 0 failed (921 total; 64 files passed, 1 skipped)**; production
+  build passed; native helper build passed; Python worker tests **12/12**. The
+  28 skips require Chromium, local NSIS, or an opt-in native foreground fixture.
+- A local `npm run pack` rebuilt the renderer and native helper, then stopped in
+  `build-voice-worker.ps1`: the Windows Python launcher reported “No suitable
+  Python runtime found.” This machine lacks the pinned Python 3.12 runtime, so
+  unpacked/portable/NSIS packaging was not produced for these edits.
+- These changes are uncommitted and not covered by GitHub Actions. `npm run
+  dev` is blocked by occupied port 5199 and Electron's pre-app exit
+  `2147483651` (`0x80000003`); the sandbox smoke also exits before its report.
+  The only visible Pixel windows belonged to another checkout. Real model calls,
+  installed-app behavior and Windows GUI acceptance remain unverified. Overall
+  Core Tools completion remains outstanding as recorded in the matrix below.
+
+## Core Completion 6.2 clipboard and batch-file work (committed baseline)
+
+This earlier work started from `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee` and
+is now included in main at `64e0383484cfcbc35370c9f8aa2498f9428dd15d`. No
+release was published.
 
 - **Hosted Windows CI:** the latest cited run
   [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339)
@@ -35,6 +83,12 @@ commit, push, or release was created here.
   Duplicate scans are bounded by entry, depth, file size and aggregate bytes;
   they never delete anything. Focused tests cover copy/move, hash duplicate
   matches and pre-mutation refusal.
+- **Filtered discovery and open:** `file_search` now accepts bounded size and
+  modified-time filters in addition to name/extension. Added approved `file_open`
+  for home-scoped folders and supported documents/images through Electron's
+  main-process `shell.openPath`; executable/script types and credential-like
+  paths are refused. Its result reports OS acceptance and path existence, not
+  that a visible application window was observed.
 - **Tests/build:** current-worktree typecheck passed; full Vitest result is
   **877 passed, 27 skipped, 0 failed (904 total; 62 files passed, 1 skipped)**. Production renderer/main
   build passed. Native helper compiled. Python worker tests passed **12/12**.
@@ -837,3 +891,35 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
 - [Skills and routines](docs/architecture/PIXEL_SKILLS_AND_ROUTINES.md)
 - [Windows acceptance](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
 - [Handoff](WAVE_HANDOFF.md)
+
+## Core Tools continuation (2026-11-21, uncommitted)
+
+- Browser tab management is registered and routed through the existing session:
+  create, list, switch and close with scoped IDs and URL/title read-back. Chromium
+  lifecycle tests are present but blocked here because `cdn.playwright.dev`
+  returns DNS `ENOTFOUND` during browser installation.
+- Migration 8 adds project-scoped notes and personal planning tasks distinct
+  from agent execution history. The agent can create/read/search/update/delete
+  notes and create/list/update/complete tasks through strict main-process tools.
+  Mutations read back saved state; active-project scope is taken from main, not
+  model arguments. Note deletion remains high-risk and requires fresh approval.
+- `tests/productivity.test.ts` covers tool schemas, registry visibility,
+  project isolation, CRUD, postcondition read-back and shared executor routing.
+  Six service/tool tests and one renderer create/edit test pass. `npm run typecheck`
+  passed after this addition.
+- Final full Vitest run: **889 passed, 28 skipped, 0 failed (917 total; 64
+  files passed, 1 opt-in file skipped)**. Skips: 18 Chromium-dependent tests
+  (browser binary unavailable), 7 local NSIS integration tests (`makensis` is
+  absent), and 3 opt-in native foreground tests. `npm run build`,
+  `npm run build:native`, and `npm run test:voice-worker` passed; Python worker
+  tests were **12/12**.
+- The actual `npm run dev` attempt failed because port 5199 is occupied, then
+  Electron exited `2147483651 (0x80000003)`. The sandboxed preload smoke also
+  exited with `2147483651` before its app entry point. CUA found only the
+  already-running Pixel process under `C:\dev\Pixel`, a different checkout;
+  it was not interacted with. No GUI result is claimed for this worktree.
+- Still outstanding: checklist grouping,
+  Markdown import/export, semantic workflow recorder/replay, live specialist
+  delegation, document authoring, interactive desktop annotation, offline
+  model inference, and actual Windows GUI/install acceptance. No claims of
+  Windows acceptance are made for this worktree.

@@ -1,10 +1,83 @@
 # Pixel implementation handoff
 
-## Core Completion 6.2 local follow-up
+## Core Completion 6.2 continuation — current local changes
+
+Reviewed source at `64e0383484cfcbc35370c9f8aa2498f9428dd15d`; it matches the
+latest GitHub `main` as of 2026-11-21. The latest hosted Windows CI run
+[44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637)
+passed on that exact commit, including NSIS setup, type checking, local worker
+tests, sandboxed preload smoke, full tests, native helper compilation,
+unpacked/portable/NSIS packaging and artifacts. It predates the local edits
+below.
+
+- `file_search` now accepts validated size and modified-time bounds.
+- Added `file_open` through main-process `shell.openPath`, limited to
+  home-scoped folders and supported documents/images. It rejects symlinks,
+  executable/script types, and credential-like paths. It reports that Windows
+  accepted the request and the path still exists; visible app activation is not
+  claimed.
+- Added approval-gated `file_trash` through `shell.trashItem` for one
+  home-scoped regular file, with credential-like name refusal and original-path
+  absence verification. Its test adapter is deterministic; the real Windows
+  Recycle Bin path remains unverified.
+- Current local validation after the productivity UI: TypeScript check passed;
+  Vitest **893 passed, 28 skipped, 0 failed (921 total; 64 passed files, 1
+  opt-in file skipped)**; production build and native-helper build passed;
+  Python worker tests were **12/12**. Chromium, local NSIS and foreground
+  integration requirements account for the 28 skips.
+- These file-tool and documentation changes remain uncommitted and are not
+  covered by the hosted CI run. Actual application opening, model execution,
+  installed-app behavior and Windows GUI acceptance remain unverified.
+
+- Browser tab create/list/switch/close tools use the existing `BrowserSession`,
+  registry and executor. Always-on dispatch/schema tests pass; live Chromium
+  tests remain skipped because downloading from `cdn.playwright.dev` fails with
+  DNS `ENOTFOUND`.
+- Added migration 8 with project-scoped notes/tasks, model-visible tools, typed
+  preload/main IPC and a `Notes & Planning` Workspace page. Project isolation,
+  CRUD, postcondition read-back and renderer note create/edit/import tests pass.
+  Markdown export is verified by read-back in the main process. Checklist
+  grouping is implemented in migration 9; descriptions and due dates remain editable in Workspace.
+- A fresh `npm run dev` attempt failed because port 5199 is occupied; Electron
+  exited `2147483651`. The Electron sandbox smoke also exited `2147483651` before
+  its app entry point. CUA found the only existing Pixel windows under
+  `C:\dev\Pixel`, a different checkout; they were not changed.
+- `git diff --check` passed. Local changes remain uncommitted, and no hosted CI
+  run covers them. The latest green run is still
+  [44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637)
+  on base `64e0383`.
+
+## Core Completion 6.2 clipboard and batch-file work (committed in 64e0383)
+
+## Core continuation after browser and productivity work (local, 2026-11-21)
+
+Changes remain uncommitted on top of `64e0383484cfcbc35370c9f8aa2498f9428dd15d`.
+
+- Browser tab tools now create/list/switch/close pages through the existing
+  `BrowserSession`, central registry and executor. Exact IDs are session-local;
+  URL checks remain behind `NetworkGuard`. Always-on tests cover dispatch and
+  result verification; actual Chromium tab tests cannot run because the browser
+  archive download failed with DNS `ENOTFOUND`.
+- Added migration 8 and project-bound `notes_*` and `tasks_*` tools. The main
+  process selects the active project; create/update/completion reads the saved
+  row back for verification. Note deletion is high-risk and approval-gated.
+- Productivity store/tool tests cover CRUD, grouping, project isolation and
+  renderer editing; descriptions and due dates are editable in the task UI.
+  Markdown import/export uses native dialogs and main-process file access.
+  Migration 9 adds distinct project-scoped checklists and task assignment.
+- Superseding final local run (2026-11-21): TypeScript passed; Vitest **893
+  passed, 28 skipped, 0 failed (921 total; 64 files passed, 1 skipped)**; the
+  final production build passed; native helper build passed; voice worker tests
+  passed **12/12**. The skipped tests require Chromium, local NSIS, or an
+  opt-in Windows foreground fixture. `git diff --check` passed.
+- A final local `npm run pack` rebuilt the app and native helper, then failed
+  in `build-voice-worker.ps1` because the Windows Python launcher found no
+  suitable runtime (the required Python 3.12 x64 is absent). No packaged app or
+  installer was produced from this tree.
+- Last green GitHub run remains [44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637) on `64e0383`; no hosted run covers this local work.
 
 Base source reviewed: `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`.
-The worktree was clean before edits. This work remains uncommitted and unpushed,
-as requested; no release was published.
+This section records the predecessor changes; no release was published.
 
 - Latest cited Windows Actions run
   [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339)
@@ -21,7 +94,7 @@ as requested; no release was published.
   session-only in chat history, and durable task results are replaced with a
   content-free privacy note. The “paste” tool sets a selected UIA ValuePattern
   field (replacement semantics) and verifies read-back; it is not raw Ctrl+V.
-- Focused clipboard/file/agent tests passed **56/56**. After adding a
+- Focused clipboard/file/agent tests passed **58/58**. After adding a
   test-only `PIXEL_TEST_HOME` fixture root, the full local suite passed **877**,
   skipped **27**, failed **0** (904 total; 62 files passed, 1 skipped).
   Typecheck, production build, native helper compilation and Python worker tests

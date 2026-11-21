@@ -41,6 +41,9 @@ import type {
   MemoryRevisionView,
   PixelMemoryKind,
   ProjectView,
+  ProductivityNoteView,
+  ProductivityTaskView,
+  ProductivityChecklistView,
   WorkspaceWindowState,
   ToolCatalogEntry,
   ScreenWindowTarget,
@@ -252,6 +255,20 @@ const bridge: CypsBridge = {
     delete: (id: string) => ipcRenderer.invoke(CH.memoryDelete, id) as Promise<boolean>,
     history: (id: string) => ipcRenderer.invoke(CH.memoryHistory, id) as Promise<MemoryRevisionView[]>,
     export: () => ipcRenderer.invoke(CH.memoryExport) as Promise<MemoryExportView>,
+  },
+
+  productivity: {
+    listNotes: () => ipcRenderer.invoke(CH.productivityNotesList) as Promise<ProductivityNoteView[]>,
+    createNote: (title: string, body: string) => ipcRenderer.invoke(CH.productivityNotesCreate, title, body) as Promise<ProductivityNoteView>,
+    updateNote: (id: string, patch: { title?: string; body?: string }) => ipcRenderer.invoke(CH.productivityNotesUpdate, id, patch) as Promise<ProductivityNoteView | null>,
+    deleteNote: (id: string) => ipcRenderer.invoke(CH.productivityNotesDelete, id) as Promise<boolean>,
+    importMarkdown: () => ipcRenderer.invoke(CH.productivityNotesImportMarkdown) as Promise<ProductivityNoteView | null>,
+    exportMarkdown: (id: string) => ipcRenderer.invoke(CH.productivityNotesExportMarkdown, id) as Promise<{ ok: boolean; cancelled?: boolean; verified?: boolean }>,
+    listChecklists: () => ipcRenderer.invoke(CH.productivityChecklistsList) as Promise<ProductivityChecklistView[]>,
+    createChecklist: (title: string) => ipcRenderer.invoke(CH.productivityChecklistsCreate, title) as Promise<ProductivityChecklistView>,
+    listTasks: () => ipcRenderer.invoke(CH.productivityTasksList) as Promise<ProductivityTaskView[]>,
+    createTask: (title: string, description?: string, dueAt?: string, checklistId?: string) => ipcRenderer.invoke(CH.productivityTasksCreate, title, description, dueAt, checklistId) as Promise<ProductivityTaskView>,
+    updateTask: (id: string, patch: { title?: string; description?: string; status?: ProductivityTaskView['status']; dueAt?: string | null; checklistId?: string | null }) => ipcRenderer.invoke(CH.productivityTasksUpdate, id, patch) as Promise<ProductivityTaskView | null>,
   },
 
   audit: {

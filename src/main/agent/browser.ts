@@ -29,6 +29,13 @@ export interface BrowserCapability {
   reason?: string;
 }
 
+export interface BrowserTabInfo {
+  id: string;
+  active: boolean;
+  url: string;
+  title: string;
+}
+
 export interface PageSnapshot {
   url: string;
   title: string;
@@ -52,6 +59,9 @@ interface PlaywrightPage {
   screenshot(options?: { type?: 'png' | 'jpeg' }): Promise<Buffer>;
   evaluate<T, A = void>(fn: (arg: A) => T, arg?: A): Promise<T>;
   setViewportSize?(size: { width: number; height: number }): Promise<void>;
+  bringToFront?(): Promise<void>;
+  close?(): Promise<void>;
+  isClosed?(): boolean;
 }
 
 interface PlaywrightRoute {
@@ -100,6 +110,9 @@ export class BrowserSession {
   private browser: PlaywrightBrowser | null = null;
   private context: PlaywrightContext | null = null;
   private page: PlaywrightPage | null = null;
+  private readonly tabs = new Map<string, PlaywrightPage>();
+  private nextTabId = 1;
+  private activeTabId: string | null = null;
   private launchError: string | null = null;
   private launching: Promise<void> | null = null;
   private readonly options: BrowserOptions;
@@ -188,6 +201,72 @@ export class BrowserSession {
     // Give client-rendered pages a moment without waiting for idle network.
     await page.waitForSelector('body', { timeout: PAGE_TIMEOUT_MS }).catch(() => undefined);
     return this.snapshot();
+  }
+
+  /** Create a separately identified tab after validating its initial URL. */
+  async newTab(url: string): Promise<BrowserTabInfo> {
+    const problem = this.validateUrl(url);
+    if (problem) throw new Error(problem);
+    const networkProblem = await this.guard.check(url);
+    if (networkProblem) throw new Error(networkProblem);
+    await this.ensurePage();
+    if (!this.context) throw new Error('The browser context is unavailable.');
+    const page = await this.context.newPage();
+    const id = `tab_${this.nextTabId++}`;
+    this.tabs.set(id, page);
+    this.page = page;
+    this.activeTabId = id;
+    try {
+      await this.navigate(url);
+      return { id, active: true, url: page.url(), title: await page.title().catch(() => '') };
+    } catch (error) {
+      if (page.close) await page.close().catch(() => undefined);
+      this.tabs.delete(id);
+      this.selectFallbackTab();
+      throw error;
+    }
+  }
+
+  async listTabs(): Promise<BrowserTabInfo[]> {
+    await this.ensurePage();
+    const result: BrowserTabInfo[] = [];
+    for (const [id, page] of this.tabs) {
+      if (page.isClosed?.()) { this.tabs.delete(id); continue; }
+      result.push({ id, active: id === this.activeTabId, url: page.url(), title: await page.title().catch(() => '') });
+    }
+    return result;
+  }
+
+  async switchTab(id: string): Promise<BrowserTabInfo | null> {
+    await this.ensurePage();
+    const page = this.tabs.get(id);
+    if (!page || page.isClosed?.()) {
+      this.tabs.delete(id);
+      return null;
+    }
+    this.page = page;
+    this.activeTabId = id;
+    await page.bringToFront?.();
+    return { id, active: true, url: page.url(), title: await page.title().catch(() => '') };
+  }
+
+  async closeTab(id: string): Promise<{ closed: boolean; remaining: number; activeTabId: string | null }> {
+    await this.ensurePage();
+    const page = this.tabs.get(id);
+    if (!page) return { closed: false, remaining: this.tabs.size, activeTabId: this.activeTabId };
+    // Keep one usable tab so subsequent browser tools have a defined target.
+    if (this.tabs.size === 1) {
+      const replacement = await this.context?.newPage();
+      if (!replacement) throw new Error('A replacement browser tab could not be created.');
+      const replacementId = `tab_${this.nextTabId++}`;
+      this.tabs.set(replacementId, replacement);
+      this.page = replacement;
+      this.activeTabId = replacementId;
+    }
+    this.tabs.delete(id);
+    if (page.close) await page.close();
+    if (this.activeTabId === id) this.selectFallbackTab();
+    return { closed: true, remaining: this.tabs.size, activeTabId: this.activeTabId };
   }
 
   /** Read the current page. */
@@ -292,6 +371,8 @@ export class BrowserSession {
     this.page = null;
     this.context = null;
     this.browser = null;
+    this.tabs.clear();
+    this.activeTabId = null;
     try {
       if (context) await context.close();
     } catch {
@@ -307,7 +388,14 @@ export class BrowserSession {
   /* ------------------------------ internals --------------------------- */
 
   private async ensurePage(): Promise<PlaywrightPage> {
-    if (this.page) return this.page;
+    if (this.page && !this.page.isClosed?.()) return this.page;
+    if (this.page) this.page = null;
+    const openTab = [...this.tabs.entries()].find(([, page]) => !page.isClosed?.());
+    if (openTab) {
+      this.activeTabId = openTab[0];
+      this.page = openTab[1];
+      return openTab[1];
+    }
     if (!this.launching) {
       this.launching = this.launch();
     }
@@ -354,16 +442,28 @@ export class BrowserSession {
         await route.continue();
       });
       this.page = await this.context.newPage();
+      const id = `tab_${this.nextTabId++}`;
+      this.tabs.set(id, this.page);
+      this.activeTabId = id;
       this.launchError = null;
     } catch (error) {
       this.launchError = message(error);
       this.browser = null;
       this.context = null;
       this.page = null;
+      this.tabs.clear();
+      this.activeTabId = null;
       throw error;
     } finally {
       this.launching = null;
     }
+  }
+
+  private selectFallbackTab(): void {
+    const fallback = [...this.tabs.entries()].find(([, page]) => !page.isClosed?.());
+    this.activeTabId = fallback?.[0] ?? null;
+    this.page = fallback?.[1] ?? null;
+    if (fallback) void fallback[1].bringToFront?.();
   }
 }
 

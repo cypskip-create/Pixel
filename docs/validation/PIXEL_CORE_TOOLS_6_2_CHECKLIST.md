@@ -1,8 +1,10 @@
 # Pixel Core Completion 6.2 implementation checklist
 
-Audited against local/GitHub `main` at `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`.
-The working tree was clean at audit start. This checklist is the execution
-record; status changes require code and evidence, not documentation-only claims.
+The initial 6.2 audit used `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`;
+clipboard/batch-file work is committed in `64e0383484cfcbc35370c9f8aa2498f9428dd15d`.
+The current local file-tool follow-on is based on that commit. This checklist is
+the execution record; status changes require code and evidence, not
+documentation-only claims.
 
 Status key: **Done and verified** means behavior has direct test evidence;
 **Implemented, unverified** means code exists but intended Windows behavior has
@@ -15,7 +17,7 @@ external runtime, credential, desktop or network dependency prevents validation.
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
 | NSIS provisioning fix | Done and verified | Latest run [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339) is green and built NSIS, portable, unpacked outputs. |
-| Hosted typecheck, tests, preload smoke, helper build and package build | Done and verified on base SHA | Windows job steps all completed successfully on `e57f11e`; the new local clipboard changes have not been pushed or run in hosted CI. The GitHub log endpoint did not return decoded log text, so hosted test totals are not asserted here. |
+| Hosted typecheck, tests, preload smoke, helper build and package build | Done and verified on `64e0383` | Windows CI run [44869374637](https://github.com/cypskip-create/Pixel/actions/runs/44869374637) passed on the committed clipboard/batch-file SHA. Its job steps include NSIS setup, typecheck, worker tests, sandboxed preload smoke, full tests, native helper compile, unpacked/portable/NSIS packaging and artifact upload. Current local file-search/open changes are not covered. |
 | Installed-app clean install, upgrade, uninstall, data preservation | Implemented, unverified | CI builds installer but does not perform interactive install lifecycle acceptance. |
 | Settings return button in actual Pixel GUI | Implemented, unverified | Renderer test exists; real desktop run still required. |
 | Local Electron GUI launch and sandbox preload | Blocked by local launch environment | Current `npm run test:preload-sandbox` rebuilt the bridge, then Electron exited `2147483651` (`0x80000003`) before its report. CUA saw windows only from a different checkout. Hosted smoke success is on the base SHA and does not verify this local launch failure. |
@@ -37,20 +39,20 @@ external runtime, credential, desktop or network dependency prevents validation.
 |---|---|---|
 | Clipboard read/copy/paste/restore agent tools | Partially implemented and unit-verified | Registered main-process `clipboard_read`, `clipboard_copy`, `clipboard_restore`, and `clipboard_paste`; strict schemas, explicit approvals, credential-pattern refusal, bounded text, memory-only conditional restoration limited to non-secret values up to 20,000 characters with timed expiry, verified UIA field write, and session-only chat/task retention after reads. Windows model/clipboard acceptance and IPC history integration test remain outstanding. |
 | Documents read/create/edit/export | Partially implemented | Index/search pipeline exists; direct authored document round-trip is incomplete. |
-| Batch file operations, filters, duplicates, open/recycle | Partially implemented and unit-verified | Added approved `file_batch_copy`, `file_batch_rename`, and read-only `file_find_duplicates`. Batches cap at 20 operations, reject overwrite/credential-like names, stage and SHA-256 verify destinations before removing move sources, and report partial source-removal failures. Duplicate scans cap at 1,200 entries, 8 levels, 500 MB total and 50 MB/file, skipping hidden/symlink/sensitive-name items. File tests cover success and no-mutation refusal. Date/size filters, opening files/folders, Recycle Bin restore and real Windows confirmation remain missing/unverified. |
-| Browser tabs/forms/uploads/downloads | Partially implemented | Playwright navigate/inspect/click/type/scroll/screenshot/verify exists; tab/upload/download workflow coverage is incomplete. |
+| Batch file operations, filters, duplicates, open/recycle | Partially implemented and unit-verified | Added approved `file_batch_copy`, `file_batch_rename`, `file_find_duplicates`, size/time filters for `file_search`, main-process `file_open` for home-scoped folders and supported documents/images, and approval-gated `file_trash` through Electron `shell.trashItem`. Batches cap at 20 operations, reject overwrite/credential-like names, stage and SHA-256 verify destinations before removing move sources, and report partial source-removal failures. Duplicate scans cap at 1,200 entries, 8 levels, 500 MB total and 50 MB/file. Open verifies OS acceptance and path existence, not visible-window appearance. Trash verifies the original path is absent using a deterministic unit adapter; real Windows Recycle Bin behavior, restore, and visible app confirmation remain unverified. |
+| Browser tabs/forms/uploads/downloads | Partially implemented | Added real session-local tab create/list/switch/close agent tools with URL/title verification and schema/executor tests. Real Chromium tab lifecycle remains unverified because browser binaries cannot be downloaded in this network-restricted environment; semantic form locators, upload/download workflow coverage remain incomplete. |
 | Screen target freshness, region/display conversion, hierarchy | Partially implemented | Native window identity and screen/display capture paths exist; freshness evidence and richer hierarchy need verification. |
 | Editable desktop annotation and export | Missing | Passive UIA rectangle/circle/arrow guidance exists; interactive freehand/editor/export is absent. |
 | Pixel Board model workflow and richer exports | Implemented, unverified | Main-process service/tools and tests exist; actual model-generated diagram and user-selected file export need Windows acceptance. |
-| System process/network/battery/audio diagnostics | Partially implemented | CPU/memory/disk/display basics exist; requested complete diagnostics are not verified/implemented. |
+| System process/network/battery/audio diagnostics | Partially implemented | Added safe adapter-name/protocol-family status to model-facing system info without exposing IP/MAC addresses. Existing diagnostics panel reports CPU, memory, disk, battery and displays. Process, selected-process and audio-device diagnostics remain incomplete. |
 
 ## Wave 4 — productivity
 
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
-| Notes create/edit/search/project association | Partially implemented | Memory and project/document indexes exist; editable user notes system and model tools need audit/implementation. |
-| Checklists/tasks persistent status and agent tools | Partially implemented | Durable agent task execution exists; user productivity checklist/task CRUD is not an equivalent capability. |
-| Local document linking and Markdown import/export | Partially implemented | Document indexing and Board exports exist; linked-note and full import/export workflows need verification. |
+| Notes create/edit/search/project association | Partially implemented | Migration-backed project-scoped note CRUD is exposed to the agent; Notes & Planning supports browse/create/edit/delete plus Markdown/text import and Markdown export through main-process dialogs. Import limits type/size and rejects symlinks; export reads back saved content. Local store/UI tests pass; local document links and Windows acceptance remain open. |
+| Checklists/tasks persistent status and agent tools | Implemented, locally unit-verified; Windows acceptance open | Migration 9 adds project-owned checklists and task grouping; model tools can create/list checklists and create/list/update tasks within the active project. Workspace creates, filters and assigns checklists and edits task title/description/due date/status. |
+| Local document linking and Markdown import/export | Partially implemented | Markdown/text import and Markdown export are implemented for notes through the main-process file-dialog IPC; linked-note relationships and Windows file-dialog acceptance remain missing/unverified. |
 
 ## Wave 5 — workflows and specialists
 
@@ -86,18 +88,18 @@ external runtime, credential, desktop or network dependency prevents validation.
 | Gate | Initial status | Evidence / remaining work |
 |---|---|---|
 | GitHub Windows CI on audited SHA | Done and verified | Run 44786311339 completed successfully, including artifact upload. |
-| Local typecheck/test/build repeat | Done and verified | Current worktree typecheck passed; Vitest 877 passed, 27 skipped, 0 failed (904 total; 62 files passed, 1 skipped); production build passed. The 27 skips require Chromium, makensis/NSIS, or an opt-in Windows foreground integration fixture. |
+| Local typecheck/test/build repeat | Done and verified (local only) | Current worktree typecheck and production build passed; Vitest **893 passed, 28 skipped, 0 failed (921 total; 64 files passed, 1 skipped)**. The 28 skips require Chromium, makensis/NSIS, or opt-in Windows foreground integration. The suite used `PIXEL_TEST_HOME` set to a writable isolated workspace directory. No hosted CI run covers this local tree. |
 | Native/helper/voice tests | Done and verified in bounded local checks | Native helper compilation passed; Python worker tests 12/12 passed. These do not establish microphone inference or neural playback with real models. |
 | Windows GUI and installer lifecycle | Blocked | Must use actual interactive Windows Pixel installation; hosted packaging is not this acceptance. |
 | Final capability matrix | In progress | Update after implementation; do not set overall completion while any required row is missing, blocked, or unverified. |
 
 ## Implementation log
 
-The initial 6.2 audit found no registered clipboard agent tools. A bounded
-clipboard implementation has now been added locally; the remaining rows still
-reflect the inspected source and are intentionally not marked complete from
-the 6.1 research report. That report is supporting context, not completion
-evidence for the other capabilities above.
+The initial 6.2 audit found no registered clipboard agent tools. Clipboard,
+file, browser-tab and productivity additions are local implementation slices;
+the remaining rows are intentionally not marked complete from the 6.1 research
+report. That report is supporting context, not completion evidence for the
+other capabilities above.
 
 ### Local implementation evidence
 
@@ -115,9 +117,10 @@ evidence for the other capabilities above.
   `ValuePattern` field to clipboard text; it replaces the field value and does
   not simulate caret-position Ctrl+V. It is approval-gated, secret-pattern
   guarded, and verifies the control value through the native helper.
-- Focused clipboard/file/agent tests passed **56/56** after the final clipboard
-  snapshot privacy guard. The full suite passed **877**, skipped **27**, failed
-  **0** (904 total; 62 files passed, 1 skipped). The test harness uses the
+- Focused file/agent suites passed **53/53**, and clipboard/file/agent passed
+  **59/59** after adding the Recycle Bin adapter path. The full suite passed
+  **880**, skipped **27**, failed **0**
+  (907 total; 62 files passed, 1 skipped). The test harness uses the
   opt-in test-only `PIXEL_TEST_HOME` variable to keep temporary file fixtures
   inside the writable workspace; production home resolution is unchanged.
 - `npm run typecheck`, `npm run build`, `npm run build:native`, and
@@ -125,6 +128,17 @@ evidence for the other capabilities above.
 - No local Windows GUI or interactive installed-app acceptance was achieved.
   The green GitHub run is on the audited base SHA, not this uncommitted change.
 - The existing home-scoped `FileTools` now also registers batch copy, batch
-  move/rename, and duplicate scanning with strict schemas and fresh approvals.
-  Focused file tests pass in the isolated fixture root; folder filters, open,
-  recycle/restore, and laptop execution are still outstanding.
+  move/rename, duplicate scanning, metadata filters and a main-process open
+  request with strict schemas and fresh approvals. Focused file tests pass in
+  the isolated fixture root; recycle/restore and laptop execution are still
+  outstanding.
+- Browser tab tools are registered in the central tool registry and shared
+  executor. Chromium-dependent lifecycle tests were added but could not execute:
+  Playwright download failed at `cdn.playwright.dev` with DNS `ENOTFOUND`.
+- Added project-scoped productivity migration 8 and `ProductivityStore` /
+  `ProductivityTools`. Notes/tasks are model-visible, strict-schema validated,
+  isolated to the trusted active project and checked by database read-back.
+  Six local tests cover schemas, executor wiring, CRUD and cross-project refusal.
+  The Workspace supports note/task browse, edit and create flows, Markdown
+  import/export, task descriptions/due dates and checklist assignment. Local
+  document links and real Windows acceptance remain open.

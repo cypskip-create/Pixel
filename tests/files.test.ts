@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FILE_TOOL_DEFINITIONS, FileTools, MAX_DIRECTORY_ENTRIES } from '../src/main/files/toolset';
 import { buildPermissionRequest } from '../src/main/agent/executor';
 import { ToolExecutors } from '../src/main/agent/executors';
@@ -21,7 +21,7 @@ afterEach(() => {
 describe('local file tools', () => {
   it('exposes bounded file operations as high-risk approved operations', () => {
     expect(FILE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([
-      'file_list', 'file_read', 'file_search', 'file_metadata', 'file_write',
+      'file_list', 'file_read', 'file_search', 'file_metadata', 'file_open', 'file_trash', 'file_write',
       'directory_create', 'file_copy', 'file_rename', 'file_batch_copy',
       'file_batch_rename', 'file_find_duplicates',
     ]);
@@ -59,10 +59,15 @@ describe('local file tools', () => {
 
   it('routes file tools through the shared executor', async () => {
     const root = tempHome();
-    writeFileSync(join(root, 'readme.txt'), 'pixel file tool');
-    const result = await new ToolExecutors({ files: new FileTools() }).run('file_read', { path: join(root, 'readme.txt') });
+    const path = join(root, 'readme.txt');
+    writeFileSync(path, 'pixel file tool');
+    const openPath = vi.fn(async () => '');
+    const executors = new ToolExecutors({ files: new FileTools(), openPath });
+    const result = await executors.run('file_read', { path });
     expect(result.ok).toBe(true);
     expect(result.content).toContain('pixel file tool');
+    expect(await executors.run('file_open', { path })).toMatchObject({ ok: true, detail: { windowsAccepted: true } });
+    expect(openPath).toHaveBeenCalledWith(path);
   });
 
   it('reads text in bounded excerpts and labels it as untrusted', () => {
@@ -141,6 +146,25 @@ describe('local file tools', () => {
     expect(result.verification?.source).toContain('filesystem enumeration');
   });
 
+  it('filters file search by byte size and modified-time bounds', () => {
+    const root = tempHome();
+    const file = join(root, 'manual.pdf');
+    writeFileSync(file, 'document bytes');
+    const tools = new FileTools();
+    const result = tools.run('file_search', {
+      directory: root,
+      query: 'manual',
+      extension: 'pdf',
+      minSizeBytes: 5,
+      maxSizeBytes: 100,
+      modifiedAfter: '2000-01-01T00:00:00.000Z',
+      modifiedBefore: '2999-01-01T00:00:00.000Z',
+    });
+    expect(result).toMatchObject({ ok: true, detail: { matches: [{ path: file }], minSizeBytes: 5, maxSizeBytes: 100 } });
+    expect(tools.run('file_search', { directory: root, query: 'manual', minSizeBytes: 20, maxSizeBytes: 10 }).ok).toBe(false);
+    expect(tools.run('file_search', { directory: root, query: 'manual', modifiedAfter: 'not-a-date' }).ok).toBe(false);
+  });
+
   it('reads metadata and creates only a new one-level directory with postcondition checks', () => {
     const root = tempHome();
     const source = join(root, 'ordinary.txt');
@@ -152,6 +176,45 @@ describe('local file tools', () => {
     expect(existsSync(join(root, 'Project Notes'))).toBe(true);
     expect(tools.run('directory_create', { path: join(root, 'missing', 'child') }).ok).toBe(false);
     expect(tools.run('directory_create', { path: join(root, 'Project Notes') }).errorCode).toBe('DENIED');
+  });
+
+  it('opens only approved document types and folders through the main-process adapter', async () => {
+    const root = tempHome();
+    const document = join(root, 'guide.pdf');
+    const executable = join(root, 'program.exe');
+    const folder = join(root, 'notes');
+    writeFileSync(document, 'pdf fixture');
+    writeFileSync(executable, 'not a real executable');
+    mkdirSync(folder);
+    const openPath = vi.fn(async () => '');
+    const files = new FileTools();
+
+    const opened = await files.open({ path: document }, openPath);
+    expect(opened).toMatchObject({ ok: true, detail: { path: document, type: 'file', windowsAccepted: true } });
+    expect(openPath).toHaveBeenCalledWith(document);
+    expect((await files.open({ path: folder }, openPath)).detail).toMatchObject({ type: 'directory' });
+    expect(await files.open({ path: executable }, openPath)).toMatchObject({ ok: false, errorCode: 'DENIED' });
+    expect(await files.open({ path: document })).toMatchObject({ ok: false, errorCode: 'UNAVAILABLE' });
+  });
+
+  it('uses the operating-system recycle adapter and verifies the original path is gone', async () => {
+    const root = tempHome();
+    const file = join(root, 'old-report.txt');
+    const secret = join(root, 'api-token.txt');
+    writeFileSync(file, 'disposable fixture');
+    writeFileSync(secret, 'not used');
+    const trashItem = vi.fn(async (path: string) => { unlinkSync(path); });
+    const files = new FileTools();
+
+    expect(await files.trash({ path: file }, trashItem)).toMatchObject({
+      ok: true,
+      detail: { path: file, recycled: true, originalPathAbsent: true },
+      verification: { source: 'Electron shell.trashItem and filesystem existence check' },
+    });
+    expect(existsSync(file)).toBe(false);
+    expect(await files.trash({ path: secret }, trashItem)).toMatchObject({ ok: false, errorCode: 'DENIED' });
+    expect(await files.trash({ path: secret })).toMatchObject({ ok: false, errorCode: 'UNAVAILABLE' });
+    expect(trashItem).toHaveBeenCalledTimes(1);
   });
 
   it('copies and renames files without overwriting and verifies the resulting data', () => {

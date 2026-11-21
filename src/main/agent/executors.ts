@@ -17,7 +17,7 @@
 
 import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { arch, cpus, freemem, platform, release, totalmem } from 'node:os';
+import { arch, cpus, freemem, networkInterfaces, platform, release, totalmem } from 'node:os';
 import type { CaptureResult, ImageAttachment, ScreenWindowTarget, SearchProvider, VisualGuidanceShape } from '../../shared/types';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../../shared/browserSearch';
 import { BrowserSession } from './browser';
@@ -33,6 +33,7 @@ import { BOARD_HEIGHT, BOARD_WIDTH, wrapBoardText } from '../../shared/drawingBo
 import type { BoardDiagramEdge, BoardObject, BoardOperation, BoardSnapshot } from '../../shared/drawingBoard';
 import type { BoardFileFormat, PixelBoardService } from '../board/service';
 import { isBoardTool } from '../board/tools';
+import type { ProductivityTools } from '../productivity/toolset';
 
 const sharedDesktopInputLease = new DesktopInputLease();
 
@@ -75,6 +76,10 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 export interface ExecutorDeps {
   /** Main-process text clipboard access. Never exposed to renderer code. */
   clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
+  /** Opens only paths independently validated by the home-scoped FileTools service. */
+  openPath?: (path: string) => Promise<string>;
+  /** Uses the operating system Recycle Bin after FileTools validates the path. */
+  trashPath?: (path: string) => Promise<void>;
   /**
    * Capture access. Only called for `analyze_screen`, and only after the
    * permission flow has approved that specific call.
@@ -99,6 +104,8 @@ export interface ExecutorDeps {
   memory?: MemoryTools;
   /** Wave 3 document tools. */
   documents?: DocumentTools;
+  /** Project-scoped notes and personal task planning tools. */
+  productivity?: ProductivityTools;
   /** Bounded, user-approved local file tools. */
   files?: FileTools;
   /** Isolated desktop-input lease for integration tests; production shares one lease. */
@@ -219,6 +226,15 @@ export class ToolExecutors {
       if (this.deps.documents?.handles(name)) {
         return await this.deps.documents.run(name, args, signal);
       }
+      if (this.deps.productivity?.handles(name)) {
+        return this.deps.productivity.run(name, args);
+      }
+      if (name === 'file_open' && this.deps.files?.handles(name)) {
+        return await this.deps.files.open(args, this.deps.openPath);
+      }
+      if (name === 'file_trash' && this.deps.files?.handles(name)) {
+        return await this.deps.files.trash(args, this.deps.trashPath, signal);
+      }
       if (this.deps.files?.handles(name)) {
         return this.deps.files.run(name, args);
       }
@@ -281,6 +297,14 @@ export class ToolExecutors {
           return await this.typeText(args, signal);
         case 'browser_navigate':
           return await this.browserNavigate(args);
+        case 'browser_new_tab':
+          return await this.browserNewTab(args);
+        case 'browser_list_tabs':
+          return await this.browserListTabs();
+        case 'browser_switch_tab':
+          return await this.browserSwitchTab(args);
+        case 'browser_close_tab':
+          return await this.browserCloseTab(args);
         case 'browser_open_search':
           return await this.browserOpenSearch(args, signal);
         case 'browser_inspect':
@@ -562,6 +586,14 @@ export class ToolExecutors {
 
   private getSystemInfo(): ToolResult {
     const cpuList = cpus();
+    // Adapter names and protocol families are useful diagnostics; addresses and
+    // hardware identifiers are intentionally not sent to the model.
+    const interfaces = Object.entries(networkInterfaces()).map(([name, addresses]) => ({
+      name,
+      ipv4: addresses?.some((address) => address.family === 'IPv4') ?? false,
+      ipv6: addresses?.some((address) => address.family === 'IPv6') ?? false,
+      internal: addresses?.every((address) => address.internal) ?? true,
+    }));
     const detail = {
       platform: platform(),
       release: release(),
@@ -570,6 +602,7 @@ export class ToolExecutors {
       cpuCount: cpuList.length,
       totalMemoryGb: round(totalmem() / 1024 ** 3),
       freeMemoryGb: round(freemem() / 1024 ** 3),
+      networkInterfaces: interfaces,
     };
     return {
       ok: true,
@@ -577,6 +610,7 @@ export class ToolExecutors {
         `Platform: ${detail.platform} ${detail.release} (${detail.arch})`,
         `CPU: ${detail.cpuModel}, ${detail.cpuCount} cores`,
         `Memory: ${detail.freeMemoryGb} GB free of ${detail.totalMemoryGb} GB`,
+        `Network adapters: ${interfaces.length === 0 ? 'none detected' : interfaces.map((item) => `${item.name} (${[item.ipv4 ? 'IPv4' : '', item.ipv6 ? 'IPv6' : ''].filter(Boolean).join('/') || 'no address'}${item.internal ? ', internal' : ''})`).join(', ')}`,
       ].join('\n'),
       detail,
     };
@@ -1133,6 +1167,71 @@ export class ToolExecutors {
         errorCode: 'FAILED',
       };
     }
+  }
+
+  private async browserNewTab(args: Record<string, unknown>): Promise<ToolResult> {
+    const ready = this.browserOrError();
+    if ('error' in ready) return ready.error;
+    const url = typeof args.url === 'string' ? args.url.trim() : '';
+    if (!url) return { ok: false, content: 'No URL was provided for the new tab.', errorCode: 'FAILED' };
+    const problem = ready.browser.validateUrl(url);
+    if (problem) return { ok: false, content: problem, errorCode: 'DENIED' };
+    try {
+      const tab = await ready.browser.newTab(url);
+      const snapshot = await ready.browser.snapshot();
+      return {
+        ok: true,
+        content: `Opened tab ${tab.id}: ${tab.title || '(untitled)'} — ${tab.url}\n\n${snapshot.text || '(the page has no visible text)'}`,
+        detail: { id: tab.id, url: tab.url, title: tab.title, active: true },
+        verification: { summary: `The new tab ${tab.id} loaded at ${tab.url} and became active.`, source: 'Playwright tab URL and page title' },
+      };
+    } catch (error) {
+      return { ok: false, content: `Pixel could not open the new tab: ${message(error)}`, errorCode: 'FAILED' };
+    }
+  }
+
+  private async browserListTabs(): Promise<ToolResult> {
+    const ready = this.browserOrError();
+    if ('error' in ready) return ready.error;
+    try {
+      const tabs = await ready.browser.listTabs();
+      return {
+        ok: true,
+        content: tabs.length ? `Open Pixel browser tabs:\n${tabs.map((tab) => `- ${tab.id}${tab.active ? ' (active)' : ''}: ${tab.title || '(untitled)'} — ${tab.url}`).join('\n')}` : 'No Pixel browser tabs are open.',
+        detail: { tabs },
+        verification: { summary: `Read ${tabs.length} open tab(s) and their active state from the current browser context.`, source: 'Playwright browser context pages' },
+      };
+    } catch (error) {
+      return { ok: false, content: `Pixel could not list browser tabs: ${message(error)}`, errorCode: 'FAILED' };
+    }
+  }
+
+  private async browserSwitchTab(args: Record<string, unknown>): Promise<ToolResult> {
+    const ready = this.browserOrError();
+    if ('error' in ready) return ready.error;
+    const tabId = typeof args.tabId === 'string' ? args.tabId : '';
+    const tab = await ready.browser.switchTab(tabId);
+    if (!tab) return { ok: false, content: 'That Pixel browser tab is no longer open. List tabs again before choosing.', errorCode: 'NOT_FOUND' };
+    return {
+      ok: true,
+      content: `Selected ${tab.id}: ${tab.title || '(untitled)'} — ${tab.url}`,
+      detail: { ...tab },
+      verification: { summary: `Tab ${tab.id} is now the active Pixel browser page at ${tab.url}.`, source: 'Playwright selected page identity' },
+    };
+  }
+
+  private async browserCloseTab(args: Record<string, unknown>): Promise<ToolResult> {
+    const ready = this.browserOrError();
+    if ('error' in ready) return ready.error;
+    const tabId = typeof args.tabId === 'string' ? args.tabId : '';
+    const result = await ready.browser.closeTab(tabId);
+    if (!result.closed) return { ok: false, content: 'That Pixel browser tab is no longer open. List tabs again before closing.', errorCode: 'NOT_FOUND' };
+    return {
+      ok: true,
+      content: `Closed ${tabId}; ${result.remaining} tab(s) remain. Active tab: ${result.activeTabId ?? 'none'}.`,
+      detail: { closedTabId: tabId, remaining: result.remaining, activeTabId: result.activeTabId },
+      verification: { summary: `Tab ${tabId} was removed from the browser context; ${result.remaining} tab(s) remain.`, source: 'Playwright browser context tab map' },
+    };
   }
 
   private async browserOpenSearch(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {

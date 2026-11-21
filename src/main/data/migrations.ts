@@ -356,6 +356,54 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_memory_revisions_memory ON memory_revisions(memory_id, updated_at DESC);
     `,
   },
+  {
+    version: 8,
+    name: 'project-scoped-notes-and-productivity-tasks',
+    sql: `
+      CREATE TABLE productivity_notes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_productivity_notes_project_updated
+        ON productivity_notes(project_id, updated_at DESC);
+
+      CREATE TABLE productivity_tasks (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'completed')),
+        due_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_productivity_tasks_project_status
+        ON productivity_tasks(project_id, status, updated_at DESC);
+    `,
+  },
+  {
+    version: 9,
+    name: 'project-checklists-and-task-grouping',
+    sql: `
+      CREATE TABLE productivity_checklists (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_productivity_checklists_project_updated
+        ON productivity_checklists(project_id, updated_at DESC);
+      ALTER TABLE productivity_tasks ADD COLUMN checklist_id TEXT
+        REFERENCES productivity_checklists(id) ON DELETE SET NULL;
+      CREATE INDEX idx_productivity_tasks_checklist_due
+        ON productivity_tasks(project_id, checklist_id, due_at, updated_at DESC);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

@@ -118,6 +118,18 @@ export const CHANNELS = {
   memorySetActiveProject: 'memory:setActiveProject',
   memoryProjectChanged: 'memory:projectChanged',
 
+  productivityNotesList: 'productivity:notes:list',
+  productivityNotesCreate: 'productivity:notes:create',
+  productivityNotesUpdate: 'productivity:notes:update',
+  productivityNotesDelete: 'productivity:notes:delete',
+  productivityNotesImportMarkdown: 'productivity:importMarkdown',
+  productivityNotesExportMarkdown: 'productivity:exportMarkdown',
+  productivityChecklistsList: 'productivity:checklistsList',
+  productivityChecklistsCreate: 'productivity:checklistsCreate',
+  productivityTasksList: 'productivity:tasks:list',
+  productivityTasksCreate: 'productivity:tasks:create',
+  productivityTasksUpdate: 'productivity:tasks:update',
+
   auditList: 'audit:list',
   toolsList: 'tools:list',
 

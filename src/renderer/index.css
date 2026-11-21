@@ -437,6 +437,57 @@
 .workspace-create-project input { flex: 1; min-width: 0; border: 1px solid var(--color-border); border-radius: 10px; padding: 9px 11px; background: var(--workspace-panel); color: var(--color-ink); font-size: 12px; }
 .workspace-create-project button { display: flex; align-items: center; gap: 6px; border: 1px solid rgb(175 175 175 / .28); border-radius: 10px; padding: 0 12px; background: rgb(145 145 145 / .12); color: var(--color-ink); font-size: 11px; }
 .workspace-create-project button:disabled { opacity: .5; }
+.workspace-primary-button,.workspace-secondary-button,.workspace-danger-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 10px; font-size: 11px; color: var(--color-ink); }
+.workspace-primary-button { border-color: color-mix(in srgb, var(--color-accent) 48%, transparent); background: color-mix(in srgb, var(--color-accent) 18%, var(--workspace-panel)); }
+.workspace-primary-button:hover { background: color-mix(in srgb, var(--color-accent) 28%, var(--workspace-panel)); }
+.workspace-secondary-button { background: var(--workspace-surface); }
+.workspace-secondary-button:hover { background: var(--workspace-hover); }
+.workspace-danger-button { margin-left: 6px; background: var(--workspace-panel); color: #C8C8C8; }
+.workspace-danger-button:hover { border-color: #666666; background: #292929; }
+.workspace-primary-button:disabled,.workspace-danger-button:disabled { opacity: .5; }
+.productivity-page { gap: 0; }
+.productivity-columns { display: grid; grid-template-columns: minmax(260px, .85fr) minmax(300px, 1fr); gap: 14px; max-width: 1050px; }
+.productivity-section,.productivity-editor { min-width: 0; border: 1px solid var(--color-border); border-radius: 12px; background: var(--workspace-panel); }
+.productivity-section { overflow: hidden; }
+.productivity-section > header,.productivity-editor > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--color-border); padding: 12px 13px; }
+.productivity-section > header select,.productivity-task-form select,.productivity-task-editor select { min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 7px 9px; background: var(--workspace-surface); color: var(--color-ink); font: inherit; font-size: 11px; }
+.productivity-section > header h2,.productivity-editor > header h2 { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 620; }
+.productivity-section > header h2 span { color: var(--color-ink-dim); font-size: 10px; font-weight: 450; }
+.productivity-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.productivity-note-list,.productivity-task-list { display: grid; max-height: 300px; overflow: auto; padding: 6px; }
+.productivity-note-row { display: grid; gap: 4px; border-radius: 8px; padding: 9px; text-align: left; }
+.productivity-note-row:hover,.productivity-note-row.is-active { background: var(--workspace-hover); }
+.productivity-note-row strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.productivity-note-row span { overflow: hidden; color: var(--color-ink-dim); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.productivity-note-row small { color: var(--color-ink-dim); font-size: 9px; }
+.productivity-task-form { display: grid; grid-template-columns: minmax(0,1fr) 34px; gap: 6px; padding: 10px; }
+.productivity-task-form input,.productivity-editor > input,.productivity-editor textarea { min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; background: var(--workspace-surface); color: var(--color-ink); }
+.productivity-task-form input { width: 100%; padding: 8px 9px; font-size: 11px; }
+.productivity-task-form input:nth-of-type(n+2) { grid-column: 1 / -1; }
+.productivity-task-form button { display: grid; width: 34px; place-items: center; border-radius: 8px; background: var(--color-accent); color: #fff; }
+.productivity-task-form button:disabled { opacity: .45; }
+.productivity-checklist-form { display: flex; gap: 6px; border-bottom: 1px solid var(--color-border); padding: 9px 10px; }
+.productivity-checklist-form input { flex: 1; min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 7px 9px; background: var(--workspace-surface); color: var(--color-ink); font-size: 11px; }
+.productivity-checklist-form button { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 9px; background: var(--workspace-hover); color: var(--color-ink); font-size: 10px; }
+.productivity-task-form select { grid-column: 1 / -1; }
+.productivity-task-row { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--color-border); padding: 9px 8px; font-size: 11px; }
+.productivity-task-row input { accent-color: var(--color-accent); }
+.productivity-task-row.is-completed .productivity-task-edit { color: var(--color-ink-dim); text-decoration: line-through; }
+.productivity-task-edit { flex: 1; min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.productivity-task-edit small { color: var(--color-ink-dim); font-size: 10px; }
+.productivity-task-editor { display: grid; gap: 7px; border-top: 1px solid var(--color-border); padding: 10px; }
+.productivity-task-editor input,.productivity-task-editor textarea { min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px; background: var(--workspace-surface); color: var(--color-ink); font: inherit; font-size: 11px; }
+.productivity-task-editor textarea { resize: vertical; }
+.productivity-task-editor > div { display: flex; gap: 6px; }
+.productivity-section > .workspace-sidebar-empty { padding: 12px; }
+.productivity-editor { display: grid; gap: 10px; max-width: 1050px; margin-top: 14px; padding: 0 13px 13px; }
+.productivity-editor > header { margin: 0 -13px; }
+.productivity-editor > header h2 { display: block; }
+.productivity-editor > header p { margin-top: 3px; color: var(--color-ink-dim); font-size: 10px; }
+.productivity-editor > header > div:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.productivity-editor > input,.productivity-editor textarea { width: 100%; padding: 9px 10px; font-size: 12px; }
+.productivity-editor textarea { resize: vertical; line-height: 1.55; }
+@media (max-width: 760px) { .productivity-columns { grid-template-columns: 1fr; } }
 .workspace-project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 11px; max-width: 920px; }
 .workspace-project-card { display: flex; min-height: 78px; align-items: center; gap: 12px; border: 1px solid var(--color-border); border-radius: 13px; padding: 12px; background: var(--workspace-panel); text-align: left; }
 .workspace-project-card:hover, .workspace-project-card.is-active { border-color: rgb(179 179 179 / .32); background: var(--workspace-hover); }

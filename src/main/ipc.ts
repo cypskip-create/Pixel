@@ -14,7 +14,7 @@
 
 import { app, clipboard, dialog, ipcMain, screen, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AppSettings,
@@ -45,6 +45,7 @@ import type {
   SearchProvider,
   ToolCatalogEntry,
   ScreenWindowTarget,
+  ProductivityChecklistView,
 } from '../shared/types';
 import type { BoardOperation, PixelBoardDocument } from '../shared/drawingBoard';
 import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
@@ -84,6 +85,8 @@ import { recordConversationStreamEvent } from './history/stream';
 import type { PendingConversationStream } from './history/stream';
 import { SURFACE_SIZES } from '../shared/surfaces';
 import { TaskStore } from './tasks/store';
+import { ProductivityStore } from './productivity/store';
+import { ProductivityTools, PRODUCTIVITY_TOOL_DEFINITIONS } from './productivity/toolset';
 import { SkillStore } from './skills/store';
 import { LocalRoutineScheduler, RoutineStore } from './routines';
 import type { ModelProvider } from './providers/deepseek';
@@ -331,6 +334,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const memoryTools = new MemoryTools(memoryStore, projectId);
   const documentTools = new DocumentTools(documentIndex, projectId, () => pythonWorker.availability());
+  const productivityStore = new ProductivityStore(database);
+  const productivityTools = new ProductivityTools(productivityStore, projectId);
   const fileTools = new FileTools();
   const boardService = new PixelBoardService(join(app.getPath('userData'), 'boards', 'active-board.json'));
   boardService.subscribe((snapshot) => {
@@ -392,6 +397,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     ...MEMORY_TOOL_DEFINITIONS.filter((definition) => definition.name !== 'memory_save'),
     ...DOCUMENT_TOOL_DEFINITIONS,
     ...FILE_TOOL_DEFINITIONS,
+    ...PRODUCTIVITY_TOOL_DEFINITIONS,
   ], (grant) => {
     try { permissionGrantStore.markUsed(grant); } catch { /* persistence failure must not change the authorization decision */ }
   });
@@ -528,6 +534,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const executors = new ToolExecutors({
     clipboard,
+    openPath: (path) => shell.openPath(path),
+    trashPath: (path) => shell.trashItem(path),
     browser,
     openExternal: (url) => {
       const safeUrl = safeExternalHttpUrl(url);
@@ -537,6 +545,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     searchProvider: () => settings.get().browserSearchProvider,
     memory: memoryTools,
     documents: documentTools,
+    productivity: productivityTools,
     files: fileTools,
     board: boardService,
     chooseBoardFile,
@@ -816,6 +825,93 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     context.sendToRenderer(CHANNELS.memoryProjectChanged, project);
     broadcastActiveConversation();
     return project;
+  });
+
+  registerHandler(CHANNELS.productivityNotesList, () => productivityStore.listNotes(projectId()));
+  registerHandler(CHANNELS.productivityNotesCreate, (_event, title: string, body: string) => {
+    if (typeof title !== 'string' || title.trim().length === 0 || title.length > 180 || typeof body !== 'string' || body.length > 20_000) throw new Error('Note title/body is outside the supported limits.');
+    return productivityStore.createNote(projectId(), title, body);
+  });
+  registerHandler(CHANNELS.productivityNotesUpdate, (_event, id: string, patch: { title?: string; body?: string }) => {
+    if (typeof id !== 'string' || id.length > 80 || !patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid note update request.');
+    if (Object.keys(patch).some((key) => key !== 'title' && key !== 'body')) throw new Error('Unsupported note update field.');
+    if (patch.title !== undefined && (typeof patch.title !== 'string' || patch.title.trim().length === 0 || patch.title.length > 180)) throw new Error('Note title is outside the supported limits.');
+    if (patch.body !== undefined && (typeof patch.body !== 'string' || patch.body.length > 20_000)) throw new Error('Note body is outside the supported limits.');
+    return productivityStore.updateNote(projectId(), id, patch);
+  });
+  registerHandler(CHANNELS.productivityNotesDelete, (_event, id: string) => {
+    if (typeof id !== 'string' || id.length > 80) throw new Error('Invalid note ID.');
+    return productivityStore.deleteNote(projectId(), id);
+  });
+  registerHandler(CHANNELS.productivityNotesImportMarkdown, async (_event): Promise<ReturnType<ProductivityStore['createNote']> | null> => {
+    const parent = windows.getWorkspaceWindow();
+    const options = { title: 'Import a Markdown note', properties: ['openFile'] as Array<'openFile'>, filters: [{ name: 'Markdown or text', extensions: ['md', 'markdown', 'txt'] }] };
+    const result = parent && !parent.isDestroyed() ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+    const selected = result.filePaths[0];
+    if (result.canceled || !selected) return null;
+    try {
+      const info = lstatSync(selected);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 20_000) throw new Error('unsupported note file');
+      const source = readFileSync(selected, 'utf8').replace(/^\uFEFF/, '');
+      if (source.includes('\u0000')) throw new Error('binary content');
+      const firstHeading = source.match(/^#\s+(.+)\s*$/m)?.[1]?.trim();
+      const base = selected.split(/[\\/]/).pop()?.replace(/\.(md|markdown|txt)$/i, '')?.trim();
+      const title = (firstHeading || base || 'Imported note').slice(0, 180);
+      const body = firstHeading ? source.replace(/^#\s+.+\s*\n?/, '').trimStart() : source;
+      if (body.length > 20_000) throw new Error('note too large');
+      return productivityStore.createNote(projectId(), title, body);
+    } catch {
+      throw new Error('Pixel could not import that file. Choose a readable Markdown or text file up to 20 KB.');
+    }
+  });
+  registerHandler(CHANNELS.productivityNotesExportMarkdown, async (_event, id: string): Promise<{ ok: boolean; cancelled?: boolean; verified?: boolean }> => {
+    if (typeof id !== 'string' || id.length > 80) throw new Error('Invalid note ID.');
+    const note = productivityStore.getNote(projectId(), id);
+    if (!note) return { ok: false };
+    const safeName = note.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').trim().slice(0, 100) || 'pixel-note';
+    const parent = windows.getWorkspaceWindow();
+    const options = { title: 'Export note as Markdown', defaultPath: `${safeName}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] };
+    const result = parent && !parent.isDestroyed() ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return { ok: true, cancelled: true };
+    const content = `# ${note.title}\n\n${note.body}${note.body.endsWith('\n') || !note.body ? '' : '\n'}`;
+    try {
+      const alreadyExists = existsSync(result.filePath);
+      if (alreadyExists) {
+        const message = { type: 'warning' as const, title: 'Replace existing file?', message: `A file already exists at ${result.filePath}. Replace it?`, buttons: ['Cancel', 'Replace'], defaultId: 0, cancelId: 0, noLink: true };
+        const answer = parent && !parent.isDestroyed() ? await dialog.showMessageBox(parent, message) : await dialog.showMessageBox(message);
+        if (answer.response !== 1) return { ok: true, cancelled: true };
+      }
+      writeFileSync(result.filePath, content, { encoding: 'utf8', flag: alreadyExists ? 'w' : 'wx', mode: 0o600 });
+      const saved = readFileSync(result.filePath, 'utf8');
+      return { ok: saved === content, verified: saved === content };
+    } catch {
+      return { ok: false };
+    }
+  });
+  registerHandler(CHANNELS.productivityChecklistsList, (): ProductivityChecklistView[] => productivityStore.listChecklists(projectId()));
+  registerHandler(CHANNELS.productivityChecklistsCreate, (_event, title: string): ProductivityChecklistView => {
+    if (typeof title !== 'string' || !title.trim() || title.length > 180) throw new Error('Checklist title is outside the supported limits.');
+    return productivityStore.createChecklist(projectId(), title);
+  });
+  registerHandler(CHANNELS.productivityTasksList, () => productivityStore.listTasks(projectId()));
+  registerHandler(CHANNELS.productivityTasksCreate, (_event, title: string, description = '', dueAt?: string, checklistId?: string) => {
+    if (typeof title !== 'string' || title.trim().length === 0 || title.length > 180 || typeof description !== 'string' || description.length > 4_000) throw new Error('Task title/description is outside the supported limits.');
+    const dueTimestamp = dueAt === undefined || dueAt === '' ? null : typeof dueAt === 'string' ? Date.parse(dueAt) : Number.NaN;
+    if (dueTimestamp !== null && !Number.isFinite(dueTimestamp)) throw new Error('Task due date is invalid.');
+    if (checklistId !== undefined && (typeof checklistId !== 'string' || checklistId.length > 80 || !productivityStore.getChecklist(projectId(), checklistId))) throw new Error('Checklist is not available in the active project.');
+    return productivityStore.createTask(projectId(), title, description, dueTimestamp, checklistId ?? null);
+  });
+  registerHandler(CHANNELS.productivityTasksUpdate, (_event, id: string, patch: { title?: string; description?: string; status?: 'open' | 'in_progress' | 'completed'; dueAt?: string | null; checklistId?: string | null }) => {
+    if (typeof id !== 'string' || id.length > 80 || !patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid task update request.');
+    if (Object.keys(patch).some((key) => !['title', 'description', 'status', 'dueAt', 'checklistId'].includes(key))) throw new Error('Unsupported task update field.');
+    if (patch.title !== undefined && (typeof patch.title !== 'string' || patch.title.trim().length === 0 || patch.title.length > 180)) throw new Error('Task title is outside the supported limits.');
+    if (patch.description !== undefined && (typeof patch.description !== 'string' || patch.description.length > 4_000)) throw new Error('Task description is outside the supported limits.');
+    if (patch.status !== undefined && !['open', 'in_progress', 'completed'].includes(patch.status)) throw new Error('Invalid task status.');
+    const dueAt = patch.dueAt === undefined ? undefined : patch.dueAt === null || patch.dueAt === '' ? null : typeof patch.dueAt === 'string' ? Date.parse(patch.dueAt) : Number.NaN;
+    if (dueAt !== undefined && dueAt !== null && !Number.isFinite(dueAt)) throw new Error('Task due date is invalid.');
+    if (patch.checklistId !== undefined && patch.checklistId !== null && (typeof patch.checklistId !== 'string' || patch.checklistId.length > 80 || !productivityStore.getChecklist(projectId(), patch.checklistId))) throw new Error('Checklist is not available in the active project.');
+    const { dueAt: _rawDueAt, ...taskPatch } = patch;
+    return productivityStore.updateTask(projectId(), id, { ...taskPatch, ...(dueAt === undefined ? {} : { dueAt }) });
   });
 
   /* ----------------------------- settings ---------------------------- */

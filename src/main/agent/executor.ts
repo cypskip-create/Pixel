@@ -867,6 +867,31 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return `Open ${typeof args.name === 'string' ? args.name : 'an application'}`;
     case 'browser_open_search':
       return `Open browser search for “${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : 'the requested query'}”`;
+    case 'browser_new_tab':
+      return `Open a new Pixel browser tab at ${typeof args.url === 'string' ? args.url.slice(0, 180) : 'the approved URL'}`;
+    case 'browser_list_tabs':
+      return 'List the open Pixel browser tabs';
+    case 'browser_switch_tab':
+      return `Switch to Pixel browser tab ${typeof args.tabId === 'string' ? args.tabId : '(unknown tab)'}`;
+    case 'browser_close_tab':
+      return `Close Pixel browser tab ${typeof args.tabId === 'string' ? args.tabId : '(unknown tab)'}`;
+    case 'notes_create':
+      return `Create project note “${typeof args.title === 'string' ? args.title.slice(0, 100) : 'Untitled'}”`;
+    case 'notes_read':
+      return `Read project note ${typeof args.id === 'string' ? args.id : '(unknown note)'}`;
+    case 'notes_search':
+      return `Search project notes for “${typeof args.query === 'string' ? args.query.slice(0, 100) : ''}”`;
+    case 'notes_update':
+      return `Update project note ${typeof args.id === 'string' ? args.id : '(unknown note)'}`;
+    case 'notes_delete':
+      return `Delete project note ${typeof args.id === 'string' ? args.id : '(unknown note)'}`;
+    case 'tasks_create':
+      return `Create project task “${typeof args.title === 'string' ? args.title.slice(0, 100) : 'Untitled'}”`;
+    case 'tasks_list':
+      return 'List tasks in the active project';
+    case 'tasks_update':
+    case 'tasks_complete':
+      return `${name === 'tasks_complete' ? 'Complete' : 'Update'} project task ${typeof args.id === 'string' ? args.id : '(unknown task)'}`;
     case 'type_text': {
       return `Type ${typeof args.text === 'string' ? args.text.length : 0} approved characters into the specified foreground window`;
     }
@@ -880,6 +905,10 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return `Search ${typeof args.directory === 'string' ? args.directory : 'a folder'} for files matching “${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : ''}”`;
     case 'file_metadata':
       return `Inspect metadata for ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_open':
+      return `Ask Windows to open ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
+    case 'file_trash':
+      return `Move ${typeof args.path === 'string' ? args.path : '(unknown path)'} to the Windows Recycle Bin`;
     case 'directory_create':
       return `Create directory ${typeof args.path === 'string' ? args.path : '(unknown path)'}`;
     case 'file_copy':
@@ -928,9 +957,12 @@ export function buildPermissionRequest(
 
 function targetFor(name: string, args: Record<string, unknown>): string {
   if (name.startsWith('board_')) return 'the active Pixel Board';
+  if (name.startsWith('notes_') || name.startsWith('tasks_')) return 'the active Pixel project';
   if (name === 'analyze_screen') return typeof args.targetWindowId === 'string' ? describeWindowTarget(args) : 'this screen';
   if (name === 'screen_draw_arrow' || name === 'screen_highlight_control') return describeWindowTarget(args);
   if (name === 'browser_navigate' && typeof args.url === 'string') return args.url;
+  if (name === 'browser_new_tab' && typeof args.url === 'string') return args.url;
+  if ((name === 'browser_switch_tab' || name === 'browser_close_tab') && typeof args.tabId === 'string') return `Pixel browser ${args.tabId}`;
   if (name === 'browser_open_search' && typeof args.query === 'string') return `Search: ${args.query.trim().slice(0, 120)}`;
   if (name === 'documents_index' && typeof args.directory === 'string') return args.directory;
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
@@ -946,6 +978,8 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'file_find_duplicates' && typeof args.directory === 'string') return args.directory;
   if (name === 'file_batch_copy' || name === 'file_batch_rename') return `${Array.isArray(args.operations) ? args.operations.length : 0} explicitly selected file path(s) in the user home folder`;
   if ((name === 'file_metadata' || name === 'directory_create') && typeof args.path === 'string') return args.path;
+  if (name === 'file_open' && typeof args.path === 'string') return args.path;
+  if (name === 'file_trash' && typeof args.path === 'string') return args.path;
   if ((name === 'file_copy' || name === 'file_rename') && typeof args.source === 'string' && typeof args.destination === 'string') return `${args.source} → ${args.destination}`;
   if ((name === 'file_read' || name === 'file_write') && typeof args.path === 'string') return args.path;
   return 'this computer';

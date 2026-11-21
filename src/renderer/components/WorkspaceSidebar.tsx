@@ -1,17 +1,18 @@
 import { useState, type FormEvent } from 'react';
 import {
-  Brain, Check, ChevronDown, ChevronRight, FolderKanban, ListTodo, MessagesSquare,
+  Brain, Check, ChevronDown, ChevronRight, FileText, FolderKanban, ListTodo, MessagesSquare,
   PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings, Sparkles, Trash2,
   Wrench, X,
 } from 'lucide-react';
 import { PenLine } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
 
-export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'skills' | 'memory' | 'tools' | 'board' | 'settings';
+export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'board' | 'settings';
 
 const LIBRARY_ITEMS: Array<{ id: Exclude<WorkspaceView, 'chat' | 'settings'>; label: string; icon: typeof FolderKanban }> = [
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'tasks', label: 'Tasks & Activity', icon: ListTodo },
+  { id: 'notes', label: 'Notes & Planning', icon: FileText },
   { id: 'skills', label: 'Skills & Routines', icon: Sparkles },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'tools', label: 'Tools', icon: Wrench },

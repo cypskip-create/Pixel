@@ -825,6 +825,7 @@ export type ToolCategory =
   | 'board'
   | 'files'
   | 'documents'
+  | 'productivity'
   | 'code';
 
 export interface ToolDefinition {
@@ -1038,6 +1039,19 @@ export interface CypsBridge {
     history(id: string): Promise<MemoryRevisionView[]>;
     export(): Promise<MemoryExportView>;
   };
+  productivity: {
+    listNotes(): Promise<ProductivityNoteView[]>;
+    createNote(title: string, body: string): Promise<ProductivityNoteView>;
+    updateNote(id: string, patch: { title?: string; body?: string }): Promise<ProductivityNoteView | null>;
+    deleteNote(id: string): Promise<boolean>;
+    importMarkdown(): Promise<ProductivityNoteView | null>;
+    exportMarkdown(id: string): Promise<{ ok: boolean; cancelled?: boolean; verified?: boolean }>;
+    listChecklists(): Promise<ProductivityChecklistView[]>;
+    createChecklist(title: string): Promise<ProductivityChecklistView>;
+    listTasks(): Promise<ProductivityTaskView[]>;
+    createTask(title: string, description?: string, dueAt?: string, checklistId?: string): Promise<ProductivityTaskView>;
+    updateTask(id: string, patch: { title?: string; description?: string; status?: ProductivityTaskView['status']; dueAt?: string | null; checklistId?: string | null }): Promise<ProductivityTaskView | null>;
+  };
   audit: {
     list(limit?: number): Promise<AuditEntry[]>;
   };
@@ -1154,6 +1168,10 @@ export interface ProjectView {
   description: string | null;
   active: boolean;
 }
+
+export interface ProductivityNoteView { id: string; projectId: string; title: string; body: string; createdAt: number; updatedAt: number }
+export interface ProductivityChecklistView { id: string; projectId: string; title: string; createdAt: number; updatedAt: number }
+export interface ProductivityTaskView { id: string; projectId: string; title: string; description: string; status: 'open' | 'in_progress' | 'completed'; dueAt: number | null; checklistId: string | null; createdAt: number; updatedAt: number }
 
 export interface WorkspaceWindowState {
   maximized: boolean;
