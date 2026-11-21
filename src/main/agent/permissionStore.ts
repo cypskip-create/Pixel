@@ -36,7 +36,7 @@ export class PermissionGrantStore {
   }
 
   save(grant: PermissionGrant): void {
-    if (grant.scope !== 'always' || grant.risk === 'high' || grant.policyVersion !== PERMISSION_POLICY_VERSION || !validateStandingGrant(grant.toolName, grant.target)) {
+    if (grant.scope !== 'always' || grant.risk === 'high' || grant.risk === 'critical' || grant.policyVersion !== PERMISSION_POLICY_VERSION || !validateStandingGrant(grant.toolName, grant.target)) {
       throw new Error('The persistent permission does not match the current capability policy.');
     }
     this.db.execute(
@@ -83,8 +83,8 @@ function toGrant(row: GrantRow): PermissionGrant | null {
     return null;
   }
   if (Number(row.policy_version) !== PERMISSION_POLICY_VERSION || !validateStandingGrant(String(row.tool_name), target)) return null;
-  const risk = ['safe', 'low', 'medium', 'high'].includes(String(row.risk)) ? String(row.risk) as RiskLevel : 'high';
-  if (risk === 'high') return null;
+  const risk = ['safe', 'low', 'medium', 'high', 'critical'].includes(String(row.risk)) ? String(row.risk) as RiskLevel : 'high';
+  if (risk === 'high' || risk === 'critical') return null;
   return {
     id: String(row.id),
     toolName: String(row.tool_name),

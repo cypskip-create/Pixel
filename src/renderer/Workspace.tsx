@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import type {
   AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, ImageAttachment, Mode, PermissionDecision,
-  PermissionRequest, ProjectView, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
+  PermissionRequest, PluginView, ProjectView, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
 } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { deriveAssistantState } from '@shared/companion-state';
@@ -51,6 +51,7 @@ export function Workspace(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [projectDraft, setProjectDraft] = useState('');
   const [tools, setTools] = useState<ToolCatalogEntry[]>([]);
+  const [plugins, setPlugins] = useState<PluginView[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
@@ -147,6 +148,15 @@ export function Workspace(): React.JSX.Element {
   }, [bridge]);
 
   useEffect(() => {
+    if (bridge.kind !== 'ready' || view !== 'plugins') return;
+    let alive = true;
+    void Promise.all([bridge.bridge.plugins.list(), bridge.bridge.tools.list()]).then(([nextPlugins, nextTools]) => {
+      if (alive) { setPlugins(nextPlugins); setTools(nextTools); }
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [bridge, view]);
+
+  useEffect(() => {
     if (bridge.kind !== 'ready') return;
     return safeSubscribe(bridge.bridge.board.onFocusRequested, () => {
       setContextOpen(false);
@@ -223,8 +233,8 @@ export function Workspace(): React.JSX.Element {
   useEffect(() => {
     if (bridge.kind !== 'ready') return;
     let alive = true;
-    void Promise.all([bridge.bridge.tools.list(), bridge.bridge.audit.list(80)]).then(([nextTools, nextAudit]) => {
-      if (alive) { setTools(nextTools); setAudit(nextAudit); }
+    void Promise.all([bridge.bridge.tools.list(), bridge.bridge.audit.list(80), bridge.bridge.plugins.list()]).then(([nextTools, nextAudit, nextPlugins]) => {
+      if (alive) { setTools(nextTools); setAudit(nextAudit); setPlugins(nextPlugins); }
     }).catch(() => undefined);
     return () => { alive = false; };
   }, [bridge]);
@@ -406,7 +416,7 @@ export function Workspace(): React.JSX.Element {
 
   const viewTitle: Record<WorkspaceView, string> = {
     chat: 'Workspace', projects: 'Projects', tasks: 'Tasks & Activity', notes: 'Notes & Planning', skills: 'Skills & Routines',
-    memory: 'Memory', tools: 'Tools', board: 'Pixel Board', settings: 'Settings',
+    memory: 'Memory', tools: 'Tools', plugins: 'Plugins', board: 'Pixel Board', settings: 'Settings',
   };
   const pendingApproval = permission ? (
     <div className="workspace-approval" aria-label="Approval required">
@@ -514,6 +524,18 @@ export function Workspace(): React.JSX.Element {
           {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
           {view === 'tools' ? <ToolsView tools={tools} /> : null}
+          {view === 'plugins' ? <PluginsView plugins={plugins} onChange={async (action, pluginId, enabled) => {
+            if (bridge.kind !== 'ready') return;
+            try {
+              const next = action === 'install' ? await bridge.bridge.plugins.install(pluginId)
+                : action === 'uninstall' ? await bridge.bridge.plugins.uninstall(pluginId)
+                  : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
+              setPlugins(next);
+              setTools(await bridge.bridge.tools.list());
+            } catch (error) {
+              setNotice(error instanceof Error ? error.message : 'Pixel could not update that plugin.');
+            }
+          }} /> : null}
           {view === 'board' ? <PixelBoard emergencyStopped={stopped} /> : null}
           {view === 'settings' ? <div className="workspace-settings"><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></div> : null}
         </main>
@@ -589,6 +611,36 @@ function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element 
         <p>{item.detail}</p>
       </article>)}</div>
     </section>
+  </section>;
+}
+
+function PluginsView({ plugins, onChange }: {
+  plugins: PluginView[];
+  onChange: (action: 'install' | 'uninstall' | 'enable', pluginId: string, enabled?: boolean) => Promise<void>;
+}): React.JSX.Element {
+  const available = plugins.filter((plugin) => !plugin.installed);
+  const installed = plugins.filter((plugin) => plugin.installed);
+  const renderPlugin = (plugin: PluginView): React.JSX.Element => <article className="workspace-plugin-card" key={plugin.id}>
+    <header><div><h2>{plugin.name}</h2><p>by {plugin.publisher} · v{plugin.version}</p></div><span className={`workspace-plugin-status plugin-${plugin.health}`}>{plugin.health}</span></header>
+    <p className="workspace-plugin-description">{plugin.description}</p>
+    <section><h3>Capabilities</h3><ul>{plugin.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul></section>
+    <section><h3>Permissions</h3><ul>{plugin.permissions.map((permission) => <li key={permission}>{permission}</li>)}</ul></section>
+    <p className="workspace-plugin-connection">{plugin.connection === 'not_required' ? 'No account connection required' : plugin.connection === 'connected' ? 'Account connected' : 'Account not connected'}</p>
+    {plugin.error ? <p className="workspace-plugin-error" role="status">{plugin.error}</p> : null}
+    <footer>
+      {!plugin.installed ? <button type="button" onClick={() => void onChange('install', plugin.id)}>Install</button> : null}
+      {plugin.installed ? <button type="button" aria-pressed={plugin.enabled} onClick={() => void onChange('enable', plugin.id, !plugin.enabled)}>{plugin.enabled ? 'Disable' : 'Enable'}</button> : null}
+      {plugin.installed ? <button type="button" className="workspace-plugin-remove" onClick={() => void onChange('uninstall', plugin.id)}>Uninstall</button> : null}
+    </footer>
+  </article>;
+
+  return <section className="workspace-page workspace-plugins-page">
+    <div className="workspace-page-heading"><h1>Plugins</h1><p>Connect Pixel to reviewed capabilities. Installing a plugin is separate from connecting an external account.</p></div>
+    <div className="workspace-plugin-notice"><strong>Plugin safety</strong><span>Pixel’s first plugin uses a bundled, declarative tool adapter. Third-party code does not run inside Electron or receive direct filesystem, credential, or native access.</span></div>
+    <h2 className="workspace-section-title">Browse Plugins</h2>
+    {available.length ? <div className="workspace-plugin-grid">{available.map(renderPlugin)}</div> : <div className="workspace-empty-card">All plugins in the current catalog are installed.</div>}
+    <h2 className="workspace-section-title mt-6">Installed Plugins</h2>
+    {installed.length ? <div className="workspace-plugin-grid">{installed.map(renderPlugin)}</div> : <div className="workspace-empty-card">No plugins installed. Pixel’s built-in tools remain available.</div>}
   </section>;
 }
 

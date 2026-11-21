@@ -404,6 +404,21 @@ export const MIGRATIONS: readonly Migration[] = [
         ON productivity_tasks(project_id, checklist_id, due_at, updated_at DESC);
     `,
   },
+  {
+    version: 10,
+    name: 'plugin-installation-state',
+    sql: `
+      CREATE TABLE plugin_installations (
+        plugin_id TEXT PRIMARY KEY,
+        manifest_version TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+        config_json TEXT NOT NULL DEFAULT '{}',
+        installed_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_error TEXT
+      );
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

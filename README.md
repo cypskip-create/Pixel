@@ -9,32 +9,21 @@ long content scrolls inside the available display work area.
 
 Pixel has a bounded DeepSeek tool loop, a main-process permission gateway,
 project-scoped SQLite memory, browser/file/document capabilities, a compact task
-timeline, reviewed skills, local routines and multi-conversation chat history.
-The Windows UI Automation helper can inspect accessible controls and invoke a
-uniquely matched control after approval. The primary bar stays pinned to a
-selected display; an optional cursor companion follows independently. Tasks
-are stored durably; work interrupted by restart is restored as paused and is
-never resumed automatically. State-changing actions that lack postcondition
-evidence finish as **Needs verification**.
+timeline, reviewed skills, local routines, multi-conversation history and an
+editable Pixel Board. The current committed baseline is `e5ee482` on `main`;
+GitHub Windows CI run [44876889424](https://github.com/cypskip-create/Pixel/actions/runs/44876889424)
+passed for that exact commit on 2026-11-21. Local changes in the current working
+tree add a critical-risk approval policy and the first constrained plugin
+foundation. They are not yet covered by CI or an installed-app acceptance run.
 
-The current uncommitted Experience 5.1 working tree keeps the official Pix
-mascot and separate pointer-shaped Cursor Buddy, changes interactive controls
-from sage to blue while retaining Pix's mint artwork, adds category navigation
-to Workspace Settings, and places Pix in the compact Island assistant identity
-slot. Pixel Board adds an editable in-Workspace drawing scene with local draft
-recovery and `.pixelboard`, SVG and PNG export. It does not draw over Windows
-applications; the existing desktop guidance overlay remains passive. The
-frozen voice worker now configures its bundled eSpeak runtime explicitly, but
-the Windows frozen executable has not been rebuilt here. These changes have
-not yet been verified by a new GitHub Actions run, packaged build or laptop
-screenshots. See the
-[`Experience 5.1 readiness report`](docs/validation/PIXEL_EXPERIENCE_POLISH_5_READINESS.md)
-for exact status and acceptance commands.
-
-The existing per-tool approvals and emergency-stop controls remain the source
-of computer-use authorization. The requested four-tier risk policy, reduced
-repeat approvals for Agent screen observation, interactive desktop drawing,
-and coordinate-based pointer fallback are not part of this change.
+Core Tools 6.2 remains incomplete. Several capabilities and target-machine
+acceptance items are still blocked or unverified; use
+[`PIXEL_CORE_TOOLS_6_2_CHECKLIST.md`](docs/validation/PIXEL_CORE_TOOLS_6_2_CHECKLIST.md)
+and [`PIXEL_WINDOWS_ACCEPTANCE.md`](docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md)
+for evidence and limitations. Improvement 6.3 begins with the bundled-only
+plugin manager and the read-only public GitHub metadata plugin; see
+[`PIXEL_PLUGINS.md`](docs/architecture/PIXEL_PLUGINS.md) and its
+[`checkpoint report`](docs/validation/PIXEL_6_3_PLUGIN_FOUNDATION.md).
 
 Recent Chats restores conversations saved while `privacy.persistHistory` is
 enabled. Stored transcripts contain sanitized user-facing messages; disabling

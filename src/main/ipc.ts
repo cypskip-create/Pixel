@@ -46,6 +46,7 @@ import type {
   ToolCatalogEntry,
   ScreenWindowTarget,
   ProductivityChecklistView,
+  PluginView,
 } from '../shared/types';
 import type { BoardOperation, PixelBoardDocument } from '../shared/drawingBoard';
 import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
@@ -101,6 +102,7 @@ import { isCursorIpcChannelAllowed } from './windowPolicy';
 import { PixelBoardService } from './board/service';
 import type { BoardFileFormat } from './board/service';
 import { BOARD_TOOL_DEFINITIONS } from './board/tools';
+import { PluginStore } from './plugins/store';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -391,6 +393,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   };
 
   const permissionGrantStore = new PermissionGrantStore(database);
+  const pluginStore = new PluginStore(database);
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
     ...BOARD_TOOL_DEFINITIONS,
@@ -398,6 +401,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     ...DOCUMENT_TOOL_DEFINITIONS,
     ...FILE_TOOL_DEFINITIONS,
     ...PRODUCTIVITY_TOOL_DEFINITIONS,
+    ...pluginStore.installedTools(),
   ], (grant) => {
     try { permissionGrantStore.markUsed(grant); } catch { /* persistence failure must not change the authorization decision */ }
   });
@@ -570,6 +574,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     describeImage,
     showVisualGuidance: (request) => windows.showVisualGuidance(request),
     clearVisualGuidance: (selector) => windows.clearVisualGuidance(selector),
+    onPluginHealth: (pluginId, error) => pluginStore.recordHealth(pluginId, error),
   });
 
   const agent = new AgentExecutor({
@@ -1608,6 +1613,41 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       }
       return entry;
     });
+  });
+  registerHandler(CHANNELS.pluginsList, (): PluginView[] => pluginStore.list());
+  registerHandler(CHANNELS.pluginsInstall, (_event, pluginId: string): PluginView[] => {
+    pluginStore.install(pluginId);
+    audit.record('system', `Installed Pixel plugin ${pluginId}`, 'ok', 'Bundled, declarative plugin; no external code was executed.');
+    return pluginStore.list();
+  });
+  registerHandler(CHANNELS.pluginsUninstall, (_event, pluginId: string): PluginView[] => {
+    const manifest = pluginStore.manifest(pluginId);
+    pluginStore.uninstall(pluginId);
+    if (manifest) for (const tool of manifest.tools) toolRegistry.unregister(tool.name);
+    audit.record('system', `Uninstalled Pixel plugin ${pluginId}`, 'ok');
+    return pluginStore.list();
+  });
+  registerHandler(CHANNELS.pluginsSetEnabled, (_event, pluginId: string, enabled: boolean): PluginView[] => {
+    if (typeof enabled !== 'boolean') throw new Error('Plugin enabled state must be true or false.');
+    const manifest = pluginStore.manifest(pluginId);
+    if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
+    if (enabled) {
+      const current = pluginStore.list().find((item) => item.id === pluginId);
+      if (current?.enabled) return pluginStore.list();
+      for (const tool of manifest.tools) {
+        const existing = toolRegistry.get(tool.name);
+        if (existing) {
+          throw new Error(`Plugin tool name conflicts with an existing Pixel capability: ${tool.name}`);
+        }
+      }
+    }
+    pluginStore.setEnabled(pluginId, enabled);
+    for (const tool of manifest.tools) {
+      if (enabled) toolRegistry.register(tool);
+      else toolRegistry.unregister(tool.name);
+    }
+    audit.record('system', `${enabled ? 'Enabled' : 'Disabled'} Pixel plugin ${pluginId}`, 'ok', `Registered tools: ${manifest.tools.map((tool) => tool.name).join(', ')}`);
+    return pluginStore.list();
   });
 
   /* -------------------------------- app ------------------------------ */

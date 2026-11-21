@@ -40,7 +40,7 @@ import { buildAgentMessages, clipToolResult, errorEvent } from './conversation';
 import type { RunTurnOptions } from './conversation';
 import type { ToolResult } from './executors';
 import type { AuditLog, PermissionBroker, TaskManager } from './runtime';
-import { ToolRegistry } from './tools';
+import { classifyInvocationRisk, riskAllowsGrantDuration, ToolRegistry } from './tools';
 import { describeScope, sessionGrantEligibility, standingGrantEligibility } from './scope';
 
 /** Hard ceiling on model turns per request. */
@@ -931,23 +931,26 @@ export function buildPermissionRequest(
   tool: ToolDefinition,
   args: Record<string, unknown>,
 ): PermissionRequest {
+  const risk = classifyInvocationRisk(tool, args);
   const eligibility = standingGrantEligibility(tool.name, args);
-  const sessionEligibility = sessionGrantEligibility(tool.name, args);
+  const sessionEligibility = !riskAllowsGrantDuration(risk, 'session')
+    ? { allowed: false, target: {}, reason: 'Sensitive actions require fresh approval every time.' }
+    : sessionGrantEligibility(tool.name, args);
   const scope = eligibility.target;
-  const allowPersistent = tool.risk !== 'high' && eligibility.allowed;
+  const allowPersistent = riskAllowsGrantDuration(risk, 'always') && eligibility.allowed;
   return {
     id: `perm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     toolName: tool.name,
     action: describeCall(tool.name, args),
     target: targetFor(tool.name, args),
     changesData: tool.changesState,
-    risk: tool.risk,
+    risk,
     duration: 'once',
     args: permissionArgsForDisplay(tool.name, args),
     createdAt: Date.now(),
     allowPersistent,
     alwaysAllowed: allowPersistent,
-    alwaysDisabledReason: allowPersistent ? undefined : tool.risk === 'high'
+    alwaysDisabledReason: allowPersistent ? undefined : !riskAllowsGrantDuration(risk, 'always')
       ? 'Sensitive actions always require fresh approval.'
       : eligibility.reason,
     scopeLabel: allowPersistent ? describeScope(scope) : 'this exact action, one time',

@@ -200,6 +200,17 @@ describe('ToolRegistry', () => {
     expect(registry.evaluate('get_current_time', 'agent').allowed).toBe(false);
   });
 
+  it('raises explicit browser submission to critical and refuses repeat grants', () => {
+    const registry = new ToolRegistry();
+    const args = { selector: '#send', text: 'hello', submit: true };
+    expect(registry.evaluate('browser_type', 'agent', args)).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.canGrantSession('browser_type', args).allowed).toBe(false);
+    expect(registry.canGrantAlways('browser_type', args).allowed).toBe(false);
+    expect(registry.grant({ id: 'critical-session', toolName: 'browser_type', scope: 'session', risk: 'critical', grantedAt: Date.now() })).toBe(false);
+    expect(registry.grant({ id: 'critical-always', toolName: 'browser_type', scope: 'always', risk: 'critical', policyVersion: 1, grantedAt: Date.now() })).toBe(false);
+    expect(registry.evaluate('browser_type', 'agent', { ...args, submit: false })).toMatchObject({ allowed: false, needsApproval: true });
+  });
+
   it('revokeAll clears every grant and reports the count', () => {
     const registry = new ToolRegistry();
     registry.grant({ id: 'a', toolName: 'open_application', scope: 'always', target: { app: 'notepad' }, risk: 'medium', policyVersion: 1, grantedAt: Date.now() });
@@ -228,5 +239,6 @@ describe('riskWeight', () => {
     expect(riskWeight('safe')).toBeLessThan(riskWeight('low'));
     expect(riskWeight('low')).toBeLessThan(riskWeight('medium'));
     expect(riskWeight('medium')).toBeLessThan(riskWeight('high'));
+    expect(riskWeight('high')).toBeLessThan(riskWeight('critical'));
   });
 });

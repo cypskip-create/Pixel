@@ -2,6 +2,39 @@
 
 Updated: 2026-11-21. Version: 0.2.1.
 
+## New-chat recovery and current local checkpoint
+
+- Recovery confirmed existing checkout at `e5ee482fd57ca666871e03be2dfc9b2be1b6de18`
+  on `main`, equal to `origin/main`; it was clean before this checkpoint's
+  edits. GitHub Windows CI run [44876889424](https://github.com/cypskip-create/Pixel/actions/runs/44876889424)
+  succeeded on that exact SHA.
+- REA `6.10.1` setup was applied after user approval. Codex registration and
+  shared skill identity are aligned per `rea doctor --client codex --skill`;
+  `codex mcp list` shows the server enabled. A direct stdio handshake returned
+  REA `6.10.1`; static analysis of a disposable Electron fixture completed and
+  produced Evidence `ev_b3e45b438b7ae1140294fdfcb2049c979b76eed98b054263901a3a5346b89e99`.
+  REA's tool schemas are not loaded in this active Codex process; restart Codex
+  before calling it through MCP.
+- Local source adds a centralized critical-risk policy, dynamic one-time risk
+  for explicit browser submission, a bundled-only plugin lifecycle and UI, and
+  a read-only public GitHub repository metadata tool. The plugin has fixture
+  integration coverage, not live provider verification.
+- Latest full suite: **901 passed, 28 skipped, 0 failed** (929 total; 65 files
+  passed, 1 skipped), with `PIXEL_TEST_HOME` isolated under the sandbox temp
+  directory. `npm run typecheck` and `npm run build` passed. The run includes
+  the critical broker recheck test. Skips require Chromium,
+  NSIS/makensis or an opt-in native foreground fixture.
+- The live GitHub adapter call for public `octocat/Hello-World` stopped before
+  connecting because `api.github.com` DNS returned `ENOTFOUND`. The plugin's
+  complete permission/executor path is fixture-tested, not live-provider
+  verified.
+- Core Tools 6.2 is not complete. Windows application launch, installed UI,
+  clipboard, UIA, voice/model, packaged acceptance and multiple listed tool
+  gaps remain blocked or unverified. See the maintained matrix and fresh
+  checkpoint report rather than treating earlier results as current.
+- Workspace visual redesign remains deferred until the user confirms the
+  reference direction. See `docs/research/REA_REFERENCE_WORKFLOW.md`.
+
 ## Core Completion 6.2 follow-on (local, uncommitted)
 
 Rechecked GitHub `main` at

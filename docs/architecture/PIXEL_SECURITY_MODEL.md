@@ -1,6 +1,6 @@
 # Pixel security model
 
-Updated: 2026-11-20 — Core Tools 6.2 local clipboard-tool follow-up on reviewed main `e57f11e`.
+Updated: 2026-11-21 — Core Tools 6.2 risk-policy follow-up and local 6.3 plugin foundation on reviewed main `e5ee482`.
 
 ## Trust boundaries
 
@@ -23,6 +23,14 @@ Updated: 2026-11-20 — Core Tools 6.2 local clipboard-tool follow-up on reviewe
 | Pixel Board | Main-process `PixelBoardService` validates and persists the active scene with revision checks; typed IPC synchronizes renderer and agent edits. Agent tools use the same schema/permission/executor path, and the tool result includes a read-back snapshot. File dialogs and overwrite confirmation are main-owned. | Agent export currently supports editable `.pixelboard` and SVG. PNG export remains renderer-only; PDF and screenshot import are unavailable. Windows dialog and GUI acceptance remain unverified here. |
 
 ## Approval behavior
+
+`CONSEQUENCE_POLICY` in `src/main/agent/tools.ts` defines risk floors for
+safe/low/medium/high/critical actions. Safe, low and medium retain the declared
+tool approval and narrow-grant behavior. High actions cannot receive session or
+persistent grants. Critical actions are one-call-only and cannot receive either
+kind of reusable grant. `browser_type` becomes critical when `submit: true`; the
+renderer receives that computed risk and the main-process registry and broker
+revalidate grant duration. This does not replace tool-specific scope checks.
 
 - **High risk:** an operation asks unless an existing eligible once/session grant matches it. The UI exposes Always Allow, Allow Once and Deny; Always Allow is disabled when policy disallows it, and main-process validation rejects forged/ineligible decisions.
 - **Always Allow:** allow-listed application launches (Notepad, Calculator, Paint), HTTPS navigation to the exact origin, and selected-window observation/passive guidance may persist. Screen grants are represented as a shared read-only grant scoped to exact process name and exact window title; HWND/PID are revalidated for every operation but are intentionally not persisted. UI invocation, typing, pointer input and application switching are excluded. All grants are versioned, independently revocable, and restored only after current-policy validation.

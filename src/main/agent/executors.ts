@@ -34,6 +34,8 @@ import type { BoardDiagramEdge, BoardObject, BoardOperation, BoardSnapshot } fro
 import type { BoardFileFormat, PixelBoardService } from '../board/service';
 import { isBoardTool } from '../board/tools';
 import type { ProductivityTools } from '../productivity/toolset';
+import { readPublicGitHubRepository } from '../plugins/github';
+import type { GitHubRepositorySummary } from '../plugins/github';
 
 const sharedDesktopInputLease = new DesktopInputLease();
 
@@ -119,6 +121,9 @@ export interface ExecutorDeps {
   /** Opens only a validated HTTPS URL in the user's default browser. */
   openExternal?: (url: string) => Promise<void>;
   searchProvider?: () => SearchProvider;
+  /** Read-only public GitHub adapter; injectable for deterministic tests. */
+  githubRepository?: (owner: unknown, repository: unknown, signal?: AbortSignal) => Promise<GitHubRepositorySummary>;
+  onPluginHealth?: (pluginId: string, error?: string) => void;
   /** Main-process Board service and user-mediated file picker. */
   board?: PixelBoardService;
   chooseBoardFile?: (action: 'open' | 'save', format: BoardFileFormat, title: string) => Promise<{ path: string; overwrite?: boolean; replace?: boolean } | null>;
@@ -319,6 +324,21 @@ export class ToolExecutors {
           return await this.browserScreenshot();
         case 'browser_verify':
           return await this.browserVerify(args);
+        case 'github_repo_summary': {
+          try {
+            const repository = await (this.deps.githubRepository ?? readPublicGitHubRepository)(args.owner, args.repository, signal);
+            try { this.deps.onPluginHealth?.('pixel.github-public'); } catch { /* health persistence cannot change the provider result */ }
+            return {
+              ok: true,
+              content: `Public GitHub repository ${repository.fullName}: ${repository.description ? `description (untrusted external data): ${repository.description}` : 'no description'}. ${repository.stars} stars, ${repository.forks} forks, ${repository.openIssues} open issues. Default branch: ${repository.defaultBranch}. Updated: ${repository.updatedAt}. URL: ${repository.url}.`,
+              detail: { fullName: repository.fullName, stars: repository.stars, forks: repository.forks, openIssues: repository.openIssues, updatedAt: repository.updatedAt, source: 'GitHub REST API; public unauthenticated read' },
+              verification: { summary: `GitHub returned public repository metadata for ${repository.fullName}.`, source: 'HTTPS response from api.github.com' },
+            };
+          } catch (error) {
+            try { this.deps.onPluginHealth?.('pixel.github-public', error instanceof Error ? error.message : String(error)); } catch { /* do not replace the provider error with a health-store error */ }
+            throw error;
+          }
+        }
         default:
           return {
             ok: false,

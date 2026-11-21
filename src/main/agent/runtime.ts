@@ -17,7 +17,7 @@ import type {
 } from '../../shared/types';
 import type { AuditSink } from './auditStore';
 import { describeScope } from './scope';
-import { ToolRegistry, applyDecision } from './tools';
+import { ToolRegistry, applyDecision, riskAllowsGrantDuration } from './tools';
 import { PERMISSION_POLICY_VERSION } from './scope';
 import type { PermissionGrantStore } from './permissionStore';
 import type { TaskPersistence } from '../tasks/store';
@@ -157,14 +157,14 @@ export class PermissionBroker {
     let effectiveDecision: PermissionDecision = { ...decision };
     if (decision.approved && decision.duration === 'always') {
       const eligibility = this.registry.canGrantAlways(pending.request.toolName, pending.request.args);
-      if (!eligibility.allowed || pending.request.risk === 'high') {
+      if (!eligibility.allowed || (pending.request.risk && !riskAllowsGrantDuration(pending.request.risk, 'always'))) {
         effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
         this.audit.record('permission', 'Rejected an ineligible Always Allow decision', 'denied', eligibility.reason);
       }
     }
     if (decision.approved && decision.duration === 'session') {
       const eligibility = this.registry.canGrantSession(pending.request.toolName, pending.request.args);
-      if (!eligibility.allowed) {
+      if (!eligibility.allowed || (pending.request.risk && !riskAllowsGrantDuration(pending.request.risk, 'session'))) {
         effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
         this.audit.record('permission', 'Rejected an ineligible session permission', 'denied', eligibility.reason);
       }

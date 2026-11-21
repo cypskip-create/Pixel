@@ -1,13 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import {
   Brain, Check, ChevronDown, ChevronRight, FileText, FolderKanban, ListTodo, MessagesSquare,
-  PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings, Sparkles, Trash2,
+  PanelLeftClose, PanelLeftOpen, Pencil, Plug, Plus, Search, Settings, Sparkles, Trash2,
   Wrench, X,
 } from 'lucide-react';
 import { PenLine } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
 
-export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'board' | 'settings';
+export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'plugins' | 'board' | 'settings';
 
 const LIBRARY_ITEMS: Array<{ id: Exclude<WorkspaceView, 'chat' | 'settings'>; label: string; icon: typeof FolderKanban }> = [
   { id: 'projects', label: 'Projects', icon: FolderKanban },
@@ -16,6 +16,7 @@ const LIBRARY_ITEMS: Array<{ id: Exclude<WorkspaceView, 'chat' | 'settings'>; la
   { id: 'skills', label: 'Skills & Routines', icon: Sparkles },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'tools', label: 'Tools', icon: Wrench },
+  { id: 'plugins', label: 'Plugins', icon: Plug },
   { id: 'board', label: 'Pixel Board', icon: PenLine },
 ];
 

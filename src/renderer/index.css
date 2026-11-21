@@ -536,6 +536,26 @@
 .workspace-tool-gap { border: 1px solid var(--color-border); border-radius: 11px; padding: 12px; background: var(--workspace-surface); }
 .workspace-tool-gap header { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--color-ink-soft); font-size: 12px; }
 .workspace-tool-gap p { margin-top: 7px; color: var(--color-ink-dim); font-size: 11px; line-height: 1.5; }
+.workspace-plugin-notice { display: grid; gap: 5px; margin-bottom: 20px; border: 1px solid var(--color-border); border-radius: 12px; padding: 13px 15px; background: var(--workspace-panel); color: var(--color-ink-dim); font-size: 11px; line-height: 1.5; }
+.workspace-plugin-notice strong { color: var(--color-ink); font-size: 12px; }
+.workspace-plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.workspace-plugin-card { border: 1px solid var(--color-border); border-radius: 13px; padding: 14px; background: var(--workspace-panel); }
+.workspace-plugin-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.workspace-plugin-card h2 { color: var(--color-ink); font-size: 13px; font-weight: 650; }
+.workspace-plugin-card header p, .workspace-plugin-description, .workspace-plugin-connection { color: var(--color-ink-dim); font-size: 10.5px; }
+.workspace-plugin-description { min-height: 34px; margin-top: 12px; line-height: 1.5; }
+.workspace-plugin-card section { margin-top: 12px; }
+.workspace-plugin-card section h3 { color: var(--color-ink-soft); font-size: 10px; font-weight: 600; }
+.workspace-plugin-card section ul { margin-top: 4px; padding-left: 15px; color: var(--color-ink-dim); font-size: 10px; line-height: 1.55; }
+.workspace-plugin-status { border: 1px solid var(--color-border); border-radius: 99px; padding: 3px 7px; color: var(--color-ink-dim); font-size: 9px; text-transform: capitalize; }
+.workspace-plugin-status.plugin-ready { border-color: rgb(167 167 167 / .35); color: #B8B8B8; }
+.workspace-plugin-status.plugin-error, .workspace-plugin-error { color: #B8B8B8; }
+.workspace-plugin-connection { margin-top: 10px; }
+.workspace-plugin-error { margin-top: 6px; font-size: 10px; }
+.workspace-plugin-card > footer { display: flex; gap: 7px; margin-top: 12px; }
+.workspace-plugin-card footer button { border: 1px solid var(--color-border-strong); border-radius: 8px; padding: 6px 10px; color: var(--color-ink); font-size: 10px; }
+.workspace-plugin-card footer button:hover { background: var(--workspace-hover); }
+.workspace-plugin-card footer .workspace-plugin-remove { margin-left: auto; color: var(--color-ink-dim); }
 .workspace-capability-status { flex: 0 0 auto; border-radius: 999px; padding: 3px 7px; background: var(--workspace-hover); color: var(--color-ink-dim); font-size: 10px; }
 .workspace-capability-status.status-unavailable { color: var(--color-danger, #d88b83); }
 .risk { border-radius: 999px; padding: 3px 6px; color: var(--color-ink-dim); background: var(--workspace-hover); font-size: 9px; text-transform: uppercase; }.risk-high { color: #B8B8B8; background: rgb(144 144 144 / .12); }.risk-medium { color: #C3C3C3; background: rgb(162 162 162 / .12); }

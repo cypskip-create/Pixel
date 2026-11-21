@@ -46,6 +46,24 @@ export type ExecutionDecision =
   | { allowed: true }
   | { allowed: false; reason: string; needsApproval: boolean };
 
+/** Central consequence matrix. Tool declarations may add approval, never lower these floors. */
+export const CONSEQUENCE_POLICY: Readonly<Record<RiskLevel, {
+  approvalFloor: 'declared' | 'fresh' | 'each-call';
+  sessionGrant: boolean;
+  persistentGrant: boolean;
+}>> = {
+  safe: { approvalFloor: 'declared', sessionGrant: true, persistentGrant: true },
+  low: { approvalFloor: 'declared', sessionGrant: true, persistentGrant: true },
+  medium: { approvalFloor: 'declared', sessionGrant: true, persistentGrant: true },
+  high: { approvalFloor: 'fresh', sessionGrant: false, persistentGrant: false },
+  critical: { approvalFloor: 'each-call', sessionGrant: false, persistentGrant: false },
+};
+
+export function riskAllowsGrantDuration(risk: RiskLevel, duration: 'once' | 'session' | 'always'): boolean {
+  if (duration === 'once') return true;
+  return duration === 'session' ? CONSEQUENCE_POLICY[risk].sessionGrant : CONSEQUENCE_POLICY[risk].persistentGrant;
+}
+
 /**
  * Decide whether a tool may run right now.
  *
@@ -76,15 +94,24 @@ export function evaluateInvocation(
     };
   }
 
-  if (tool.requiresApproval && !hasValidGrant(tool.name, context)) {
+  const risk = classifyInvocationRisk(tool, context.args ?? {});
+  if ((tool.requiresApproval || CONSEQUENCE_POLICY[risk].approvalFloor !== 'declared') && !hasValidGrant(tool.name, context)) {
     return {
       allowed: false,
-      reason: `"${tool.name}" needs your approval before it can run.`,
+      reason: risk === 'critical'
+        ? `"${tool.name}" submits information and needs your approval for this exact action.`
+        : `"${tool.name}" needs your approval before it can run.`,
       needsApproval: true,
     };
   }
 
   return { allowed: true };
+}
+
+/** Invocation policy can raise a tool's declared baseline risk based on intent. */
+export function classifyInvocationRisk(tool: ToolDefinition, args: Record<string, unknown>): RiskLevel {
+  if (tool.name === 'browser_type' && args.submit === true) return 'critical';
+  return tool.risk;
 }
 
 /** A grant is valid when it has not expired. 'always' grants never expire. */
@@ -649,6 +676,17 @@ export class ToolRegistry {
     this.onGrantUsed = onGrantUsed;
   }
 
+  register(tool: ToolDefinition): void {
+    this.tools.set(tool.name, tool);
+    this.argumentSchemas.delete(tool.name);
+  }
+
+  unregister(name: string): void {
+    this.tools.delete(name);
+    this.argumentSchemas.delete(name);
+    for (const [id, grant] of this.grants) if (grant.toolName === name) this.grants.delete(id);
+  }
+
   list(): ToolDefinition[] {
     return [...this.tools.values()];
   }
@@ -709,21 +747,28 @@ export class ToolRegistry {
 
   canGrantAlways(toolName: string, args: Record<string, unknown>): { allowed: boolean; target: ReturnType<typeof deriveGrantScope>; reason: string } {
     const tool = this.tools.get(toolName);
-    if (!tool || tool.risk === 'high') return { allowed: false, target: {}, reason: 'This action is sensitive and always requires fresh approval.' };
+    const risk = tool ? classifyInvocationRisk(tool, args) : 'critical';
+    if (!tool || !riskAllowsGrantDuration(risk, 'always')) return { allowed: false, target: {}, reason: 'This action is sensitive and always requires fresh approval.' };
     return standingGrantEligibility(toolName, args);
   }
 
   canGrantSession(toolName: string, args: Record<string, unknown>): { allowed: boolean; target: ReturnType<typeof deriveGrantScope>; reason: string } {
+    const tool = this.tools.get(toolName);
+    if (!tool || !riskAllowsGrantDuration(classifyInvocationRisk(tool, args), 'session')) {
+      return { allowed: false, target: deriveGrantScope(toolName, args), reason: 'Sensitive actions require fresh approval every time.' };
+    }
     return sessionGrantEligibility(toolName, args);
   }
 
   /** Add one exact grant. Persistent entries are rejected unless policy and scope match. */
   grant(grant: PermissionGrant): boolean {
+    const declaredRisk = this.tools.get(grant.toolName)?.risk;
     if (grant.scope === 'always' && (
-      grant.risk === 'high' ||
+      grant.risk === 'high' || grant.risk === 'critical' || declaredRisk === 'high' ||
       grant.policyVersion !== PERMISSION_POLICY_VERSION ||
       !validateStandingGrant(grant.toolName, grant.target)
     )) return false;
+    if (grant.scope === 'session' && (grant.risk === 'high' || grant.risk === 'critical' || declaredRisk === 'high')) return false;
     // Keep existing tool-specific session grants working. The new shared
     // screen-observation grant is the only session capability that needs the
     // stricter multi-field target validation below.
@@ -819,7 +864,7 @@ function jsonSchemaToZod(raw: unknown, depth = 0): ZodType {
 
 /** Risk ordering helper for sorting/coloring UI. */
 export function riskWeight(risk: RiskLevel): number {
-  return { safe: 0, low: 1, medium: 2, high: 3 }[risk];
+  return { safe: 0, low: 1, medium: 2, high: 3, critical: 4 }[risk];
 }
 
 export function toolCategoryLabel(category: ToolCategory): string {

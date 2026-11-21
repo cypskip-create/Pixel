@@ -8,15 +8,14 @@
 
 import { spawn } from 'node:child_process';
 
-const usePinned = process.argv.includes('--pinned');
-const pinnedRoot = `${process.env.LOCALAPPDATA}\\PixelTooling\\node-v24.22.1-win-x64`;
+const reaVersion = process.env.REA_VERSION ?? '6.10.1';
+if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(reaVersion)) throw new Error('REA_VERSION must be a semantic version.');
+const entryIndex = process.argv.indexOf('--entry');
+const entry = entryIndex >= 0 ? process.argv[entryIndex + 1] : undefined;
+const command = entry ? process.execPath : 'npx.cmd';
+const args = entry ? [entry, 'mcp'] : ['--yes', `rea-agents@${reaVersion}`, 'mcp'];
 
-const command = usePinned ? `${pinnedRoot}\\node.exe` : 'npx.cmd';
-const args = usePinned
-  ? [`${pinnedRoot}\\node_modules\\npm\\bin\\npx-cli.js`, '-y', 'rea-agents@6.8.0', 'mcp']
-  : ['-y', 'rea-agents@6.8.0', 'mcp'];
-
-const child = spawn(command, args, { shell: !usePinned, windowsHide: true });
+const child = spawn(command, args, { shell: !entry, windowsHide: true });
 
 let out = '';
 let err = '';
@@ -31,7 +30,7 @@ child.stdout.on('data', (chunk) => {
   if (out.includes('"result"')) {
     const line = out.split('\n').find((entry) => entry.includes('"result"'));
     clearTimeout(timer);
-    console.log(JSON.stringify({ ok: true, mode: usePinned ? 'pinned-node' : 'npx', response: line?.slice(0, 400) }));
+    console.log(JSON.stringify({ ok: true, package: `rea-agents@${reaVersion}`, response: line?.slice(0, 400) }));
     child.kill();
     process.exit(0);
   }

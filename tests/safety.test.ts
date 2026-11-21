@@ -164,6 +164,23 @@ describe('approval response correlation', () => {
     expect(registry.activeGrants()).toEqual([]);
   });
 
+  it('rejects a forged session grant for an explicitly submitted browser form', async () => {
+    const registry = new ToolRegistry();
+    const broker = new PermissionBroker(registry, new AuditLog(), () => undefined);
+    const args = { selector: '#send', text: 'fixture', submit: true };
+    const pending = broker.ask({
+      id: 'critical-submit', toolName: 'browser_type', action: 'Submit information to the page',
+      target: 'current page', args, risk: 'critical', changesData: true,
+      duration: 'once', createdAt: Date.now(),
+    });
+
+    broker.respond({ requestId: 'critical-submit', approved: true, duration: 'session' });
+
+    await expect(pending).resolves.toMatchObject({ approved: false, duration: 'once' });
+    expect(registry.activeGrants()).toEqual([]);
+    expect(registry.evaluate('browser_type', 'agent', args)).toMatchObject({ allowed: false, needsApproval: true });
+  });
+
   it('clears an approval prompt when its task signal is cancelled', async () => {
     const resolved = vi.fn();
     const broker = new PermissionBroker(new ToolRegistry(), new AuditLog(), () => undefined, resolved);

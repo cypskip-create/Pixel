@@ -68,7 +68,7 @@ external runtime, credential, desktop or network dependency prevents validation.
 | Deliverable | Initial status | Evidence / remaining work |
 |---|---|---|
 | Guide/Hybrid/Agent mode and scoped grants | Partially implemented | Main-process registry/broker, session and exact process/title persistent observation grants exist; full real workflow policy matrix still needs tests. |
-| Critical risk class and consistent risk policy | Missing | Types currently stop at `high`; explicit critical classification and centralized consequences matrix are absent. |
+| Critical risk class and consistent risk policy | Implemented locally; automated-only | Added a five-tier consequence matrix and dynamic `critical` classification for explicit `browser_type.submit`. Critical submissions require a one-action approval; main-process broker and registry reject session/Always grants. Focused tests pass, but real approval UI and browser submission acceptance remain unverified. |
 | Emergency stop and audit | Implemented, unverified | Unit coverage exists; verify with real pending approval, desktop work, voice and overlay on Windows. |
 
 ## Wave 7 — real Windows tasks
@@ -142,3 +142,23 @@ other capabilities above.
   The Workspace supports note/task browse, edit and create flows, Markdown
   import/export, task descriptions/due dates and checklist assignment. Local
   document links and real Windows acceptance remain open.
+
+## 2026-11-21 follow-on: critical-risk classification
+
+- Added `critical` to the shared risk type and a centralized consequence
+  matrix. Tool metadata may raise approval requirements but cannot lower the
+  matrix floor.
+- `browser_type` with `submit: true` is dynamically classified as critical;
+  the approval UI labels information submission and disallows session or
+  persistent authorization. Registry and broker recheck those restrictions in
+  the main process. High and critical session grants are refused.
+- Focused registry, permission-store, memory and plugin/browser suites passed
+  during initial checks. The latest full run passed **901 tests**, skipped
+  **28**, failed **0** (929 total; 65 files passed, 1 skipped). `npm run
+  typecheck` and `npm run build` passed. Chromium-dependent browser checks,
+  NSIS checks and the opt-in native foreground fixture remain skipped.
+- This does not finish the 6.2 acceptance matrix. It does not add desktop
+  drawing, document authoring, UIA installation verification, file restoration,
+  full browser form/session/network acceptance, local document links, persistent
+  agent recovery, voice inference, or installed-app acceptance.
+- Overall Core Tools status remains **in progress**.

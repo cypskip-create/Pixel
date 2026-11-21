@@ -132,6 +132,10 @@ export const CHANNELS = {
 
   auditList: 'audit:list',
   toolsList: 'tools:list',
+  pluginsList: 'plugins:list',
+  pluginsInstall: 'plugins:install',
+  pluginsUninstall: 'plugins:uninstall',
+  pluginsSetEnabled: 'plugins:setEnabled',
 
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',

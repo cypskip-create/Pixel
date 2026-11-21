@@ -776,7 +776,7 @@ export interface MemoryRevisionView {
  * Permission model
  * ------------------------------------------------------------------ */
 
-export const RISK_LEVELS = ['safe', 'low', 'medium', 'high'] as const;
+export const RISK_LEVELS = ['safe', 'low', 'medium', 'high', 'critical'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 
 export interface PermissionRequest {
@@ -852,6 +852,22 @@ export interface ToolCatalogEntry {
   availability?: 'ready' | 'conditional' | 'unavailable' | 'not_checked';
   dependency?: string;
   availabilityReason?: string;
+}
+
+export interface PluginView {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  publisher: string;
+  capabilities: string[];
+  permissions: string[];
+  installed: boolean;
+  enabled: boolean;
+  connection: 'not_required' | 'disconnected' | 'connected';
+  health: 'ready' | 'disabled' | 'unavailable' | 'error';
+  updatedAt?: number;
+  error?: string;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1057,6 +1073,12 @@ export interface CypsBridge {
   };
   tools: {
     list(): Promise<ToolCatalogEntry[]>;
+  };
+  plugins: {
+    list(): Promise<PluginView[]>;
+    install(pluginId: string): Promise<PluginView[]>;
+    uninstall(pluginId: string): Promise<PluginView[]>;
+    setEnabled(pluginId: string, enabled: boolean): Promise<PluginView[]>;
   };
   app: {
     getVersion(): Promise<string>;

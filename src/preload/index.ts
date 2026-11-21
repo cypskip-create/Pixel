@@ -44,6 +44,7 @@ import type {
   ProductivityNoteView,
   ProductivityTaskView,
   ProductivityChecklistView,
+  PluginView,
   WorkspaceWindowState,
   ToolCatalogEntry,
   ScreenWindowTarget,
@@ -277,6 +278,13 @@ const bridge: CypsBridge = {
 
   tools: {
     list: () => ipcRenderer.invoke(CH.toolsList) as Promise<ToolCatalogEntry[]>,
+  },
+
+  plugins: {
+    list: () => ipcRenderer.invoke(CH.pluginsList) as Promise<PluginView[]>,
+    install: (pluginId: string) => ipcRenderer.invoke(CH.pluginsInstall, pluginId) as Promise<PluginView[]>,
+    uninstall: (pluginId: string) => ipcRenderer.invoke(CH.pluginsUninstall, pluginId) as Promise<PluginView[]>,
+    setEnabled: (pluginId: string, enabled: boolean) => ipcRenderer.invoke(CH.pluginsSetEnabled, pluginId, enabled) as Promise<PluginView[]>,
   },
 
   app: {

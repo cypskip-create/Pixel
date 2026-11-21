@@ -22,6 +22,7 @@ const RISK_LABEL: Record<RiskLevel, string> = {
   low: 'Low risk',
   medium: 'Medium risk',
   high: 'High risk',
+  critical: 'Critical',
 };
 
 export function riskLabel(risk: RiskLevel): string {
@@ -34,6 +35,7 @@ export const RISK_CLASSES: Record<RiskLevel, string> = {
   low: 'border-neutral-400/30 bg-neutral-400/10 text-neutral-200',
   medium: 'border-neutral-400/40 bg-neutral-400/10 text-neutral-200',
   high: 'border-neutral-400/45 bg-neutral-400/10 text-neutral-200',
+  critical: 'border-neutral-300/55 bg-neutral-400/15 text-neutral-100',
 };
 
 /** Truncate for compact chips without breaking surrogate pairs. */

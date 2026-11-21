@@ -1,5 +1,45 @@
 # REA integration
 
+## Current Codex setup (2026-11-21)
+
+The setup-owned Codex configuration was added after the user approved the
+reviewed plan from `rea-agents@6.10.1 setup --client codex --dry-run --json`.
+Node `26.13.0` and npm `11.20.0` are compatible with this REA release. The
+installer added one stdio server to `C:\Users\cypri\.codex\config.toml`,
+retaining the existing `codex_app`, `cua_repl`, and `node_repl` entries, and
+updated the shared skill at
+`C:\Users\cypri\.agents\skills\reverse-engineer-anything` (identity 63).
+The command points to the exact cached Node/REA entry; do not delete or move
+that cache entry without updating/reapplying the registration. The setup did
+not install a provider or modify the Pixel package.
+
+Verification recorded so far:
+
+- `codex mcp list` shows `rea` enabled with the pinned executable and script.
+- Direct `rea doctor --client codex --skill --json` reports Node, Codex
+  registration and skill identity healthy; `environment_healthy` is false only
+  because optional analysis engines (Hopper, Ghidra, IDA, JADX and Kuna) are
+  not installed/configured. Those are unnecessary for static JS analysis.
+- A `rea doctor` attempt via `npx` was blocked because this sandbox's npm
+  registry DNS returned `ENOTFOUND`; direct invocation of the pinned installed
+  entry succeeds without contacting the registry.
+- `node scripts/probe-rea-mcp.mjs --entry <installed-rea.mjs>` completed an MCP
+  `initialize` handshake; the server identifies itself as REA 6.10.1 and
+  advertises MCP tool capabilities.
+- Safe static analysis completed on a two-file disposable Electron fixture in
+  the Codex sandbox temp directory. Evidence `ev_b3e45b438b7ae1140294fdfcb2049c979b76eed98b054263901a3a5346b89e99`
+  (parent analysis `ev_8fc0cd822be90fcadd1930d60d9550e7af8a880bb6055362f82d77e1f6b5a47e`)
+  was written outside the repository. REA parsed JavaScript and package
+  metadata without executing the fixture. The analysis reported static unknowns
+  and limitations; it is not a runtime safety verdict.
+- REA MCP tools are not present in the current agent tool list. Restart Codex
+  to reload the new registration and then verify an actual tool call. The
+  independent stdio handshake proves the server starts, not current-session
+  connectivity.
+
+The earlier DeepSeek client configuration and REA 6.8.0 history below remain
+as historical records. That registration was not changed by the Codex setup.
+
 ## What was done
 
 1. Environment: Node v24.16.0 / npm 11.13.0. REA (`rea-agents@6.8.0`) refuses to

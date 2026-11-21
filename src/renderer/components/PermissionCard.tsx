@@ -16,6 +16,7 @@ const RISK_ICON: Record<RiskLevel, typeof ShieldCheck> = {
   low: ShieldCheck,
   medium: ShieldHalf,
   high: ShieldAlert,
+  critical: ShieldAlert,
 };
 
 const RISK_SENTENCE: Record<RiskLevel, string> = {
@@ -23,6 +24,7 @@ const RISK_SENTENCE: Record<RiskLevel, string> = {
   low: 'Limited effect on this computer.',
   medium: 'This modifies something on your computer.',
   high: 'This can expose, change, or delete important data.',
+  critical: 'This sends or submits information. Pixel will ask again for every submission.',
 };
 
 /**
