@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import type { PluginView } from '@shared/types';
 
-export type PluginLifecycleAction = 'install' | 'update' | 'uninstall' | 'enable';
+export type PluginLifecycleAction = 'install' | 'update' | 'uninstall' | 'enable' | 'project-availability';
+export type PluginProjectAvailability = 'inherit' | 'enabled' | 'disabled';
 
 interface WorkspacePluginManagerProps {
   plugins: PluginView[];
-  onChange: (action: PluginLifecycleAction, pluginId: string, enabled?: boolean) => Promise<void>;
+  onChange: (action: PluginLifecycleAction, pluginId: string, enabled?: boolean, availability?: PluginProjectAvailability) => Promise<void>;
 }
 
 export function WorkspacePluginManager({ plugins, onChange }: WorkspacePluginManagerProps): React.JSX.Element {
@@ -15,12 +16,12 @@ export function WorkspacePluginManager({ plugins, onChange }: WorkspacePluginMan
   const available = plugins.filter((plugin) => !plugin.installed);
   const installed = plugins.filter((plugin) => plugin.installed);
 
-  const runAction = async (action: PluginLifecycleAction, plugin: PluginView, enabled?: boolean): Promise<void> => {
+  const runAction = async (action: PluginLifecycleAction, plugin: PluginView, enabled?: boolean, availability?: PluginProjectAvailability): Promise<void> => {
     if (pendingLock.current) return;
     pendingLock.current = true;
     setActionError(null);
     setPendingPluginId(plugin.id);
-    try { await onChange(action, plugin.id, enabled); }
+    try { await onChange(action, plugin.id, enabled, availability); }
     catch { setActionError(`Pixel could not ${action} ${plugin.name}.`); }
     finally { pendingLock.current = false; setPendingPluginId(null); }
   };
@@ -46,6 +47,26 @@ export function WorkspacePluginManager({ plugins, onChange }: WorkspacePluginMan
       </p>
       {plugin.updatedAt ? <p className="workspace-plugin-updated">Updated {new Date(plugin.updatedAt).toLocaleString()}</p> : null}
       {plugin.error ? <p className="workspace-plugin-error" role="status">{plugin.error}</p> : null}
+      {plugin.installed ? <div className="workspace-plugin-project-availability">
+        <label htmlFor={`plugin-project-availability-${plugin.id}`}>Available in this project</label>
+        <select
+          id={`plugin-project-availability-${plugin.id}`}
+          value={plugin.projectAvailability ?? 'inherit'}
+          disabled={pendingPluginId !== null}
+          onChange={(event) => void runAction('project-availability', plugin, undefined, event.currentTarget.value as PluginProjectAvailability)}
+        >
+          <option value="inherit">Follow global setting</option>
+          <option value="enabled">Enable for this project</option>
+          <option value="disabled">Disable for this project</option>
+        </select>
+        <p role="status">{!plugin.enabled
+          ? 'The plugin is disabled globally, so it is unavailable in every project.'
+          : plugin.availableInProject === false
+            ? 'Disabled for this project.'
+            : plugin.projectAvailability === 'enabled'
+              ? 'Enabled for this project; the global plugin switch still applies.'
+              : 'Available through the global plugin setting.'}</p>
+      </div> : null}
       <footer>
         {!plugin.installed ? <button type="button" disabled={pendingPluginId !== null} onClick={() => void runAction('install', plugin)}>{pending ? 'Installing…' : 'Install'}</button> : null}
         {plugin.installed && plugin.compatibility === 'update_available' ? <button type="button" disabled={pendingPluginId !== null} onClick={() => void runAction('update', plugin)}>{pending ? 'Updating…' : 'Update'}</button> : null}

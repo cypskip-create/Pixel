@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import {
-  Activity, Brain, Check, FileText, FolderKanban, MessagesSquare,
+  Activity, Brain, Check, FileText, FolderKanban, FolderOpen, MessagesSquare,
   PanelLeftClose, PanelLeftOpen, Pencil, Plug, Plus, Search, Settings, Sparkles, Trash2,
   Wrench, X,
 } from 'lucide-react';
@@ -8,11 +8,12 @@ import { PenLine } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
 import { PixelMark } from '@/components/PixelMark';
 
-export type WorkspaceView = 'chat' | 'projects' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'plugins' | 'board' | 'settings';
+export type WorkspaceView = 'chat' | 'projects' | 'library' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'plugins' | 'board' | 'settings';
 
 const NAV_ITEMS: Array<{ id: Exclude<WorkspaceView, 'settings'>; label: string; icon: typeof FolderKanban; group: 'workspace' | 'library' | 'tools' }> = [
   { id: 'chat', label: 'Conversations', icon: MessagesSquare, group: 'workspace' },
   { id: 'projects', label: 'Projects', icon: FolderKanban, group: 'workspace' },
+  { id: 'library', label: 'Library', icon: FolderOpen, group: 'workspace' },
   { id: 'notes', label: 'Notes & Planning', icon: FileText, group: 'library' },
   { id: 'tasks', label: 'Activity', icon: Activity, group: 'library' },
   { id: 'memory', label: 'Memory', icon: Brain, group: 'library' },
@@ -81,7 +82,7 @@ export function WorkspaceSidebar({
         <nav className="workspace-sidebar-nav" aria-label="Workspace navigation">
           {(['workspace', 'library', 'tools'] as const).map((group) => (
             <div className="workspace-nav-group" key={group}>
-              <span className="workspace-nav-group-label">{group === 'workspace' ? 'Workspace' : group === 'tools' ? 'Integrations' : 'Library'}</span>
+              <span className="workspace-nav-group-label">{group === 'workspace' ? 'Workspace' : group === 'tools' ? 'Integrations' : 'Personal'}</span>
               {NAV_ITEMS.filter((item) => item.group === group).map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}

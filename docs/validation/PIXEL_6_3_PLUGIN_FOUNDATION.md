@@ -6,9 +6,18 @@ Updated: 2026-11-21. Status: foundation implemented; first plugin is fixture-tes
 
 - Versioned, bundled-only `PixelPluginManifest` and strict catalog ID checks.
 - Migration 10 and global SQLite install/enable/config lifecycle state.
+- Migration 12 and project availability overrides. No override follows the
+  global setting; a project override cannot enable an uninstalled, globally
+  disabled or incompatible plugin.
 - Exact manifest version and plugin API compatibility checks.
 - Enable/disable registration with the live `ToolRegistry`; disable/uninstall
   removes tool registration and volatile grants.
+- Active-project availability is enforced by ToolRegistry listing, lookup,
+  schema validation and permission evaluation. Changing scope revokes one-shot,
+  session and persisted grants and cancels a pending approval for that tool.
+  Global disable, update and uninstall now use the same revocation path before
+  removing tool registrations. Workspace plugin/tool state refreshes after
+  project switches.
 - Renderer-safe typed IPC plus Workspace Browse/Installed manager, capability
   and permission disclosure, connection distinction, health/error state, and
   lifecycle controls.
@@ -41,19 +50,20 @@ not treated as a general credential vault.
 
 This is a local first-party catalog, not a remote marketplace. The current app
 supports explicit updates only from its bundled reviewed manifest; remote
-packages are not fetched. Project-specific availability, dependency/conflict
-resolution for third-party plugins, OAuth/account connections and external MCP
+packages are not fetched. Dependency/conflict resolution for third-party
+plugins, OAuth/account connections and external MCP
 server lifecycle are not implemented. GitHub plugin health is the result of
 its latest actual tool call, not a fabricated background connection status.
 
 ## Validation
 
-- 2026-11-21 continuation: latest full `npm run verify` **949 passed, 33 skipped, 0 failed**
-  (982 total; default browser, NSIS, and native foreground prerequisites account for skips).
+- 2026-11-21 continuation: latest full `npm run verify` **991 passed, 4 skipped, 0 failed**
+  (995 total; three native foreground scenarios and the symlink-fixture prerequisite account for skips).
   Focused Workspace and theme suite passed **22/22**; TypeScript check, renderer
   production build, native helper compile and voice worker boundary suite
-  (12/12) passed. This does not constitute Windows UI or voice inference
-  acceptance.
+  (12/12) passed. Pixel Windows System.Speech playback also passed directly;
+  Windows has no installed speech recognizer, and offline model inference was
+  not run. This does not constitute Windows UI or STT acceptance.
 - The production public GitHub adapter and a direct unauthenticated request for
   `octocat/Hello-World` both failed before HTTP because this shell cannot resolve
   `api.github.com` (`ENOTFOUND`). A retry in this checkpoint had the same DNS
@@ -61,18 +71,22 @@ its latest actual tool call, not a fabricated background connection status.
   rechecks task cancellation after DNS and rejects invalid address families or
   private addresses before opening the TLS socket.
 
-- `tests/plugin-system.test.ts`: **9/9** deterministic tests cover fixture-backed
+- `tests/plugin-system.test.ts`: **10/10** deterministic tests cover fixture-backed
   lifecycle, approval-to-executor flow, cancellation after DNS, private address
   refusal, unsupported API fail-closed behavior and rejection of install-as-update
   bypass (no live GitHub API call).
+- `tests/permission-store.test.ts`: **7/7** tests include persistent permission
+  revocation across restart and cancellation of a pending approval when plugin
+  access is removed.
 - Earlier plugin checkpoint run: **901 passed, 28 skipped, 0 failed** (929
   total; 65 files passed, 1 skipped), with `PIXEL_TEST_HOME` isolated under the
-  sandbox temp directory. The current full run is **949 passed, 33 skipped, 0
-  failed** (982 total; 73 files passed, 1 skipped); it includes note-document
-  storage, renderer bridge, Plugin Manager interaction, binary text-write
-  refusal and dynamic dev-port tests. Chromium,
-  NSIS/makensis, or an opt-in native
-  foreground fixture account for skips. Typecheck and production build passed.
+  sandbox temp directory. The current full run is **991 passed, 4 skipped, 0
+  failed** (995 total; 74 files passed, 1 skipped); it includes note-document
+  storage, renderer bridge, project-scoped Plugin Manager availability, the
+  project-scoped indexed-document Library, binary text-write
+  refusal, the indexed-document Library, and dynamic dev-port tests. Three
+  native foreground scenarios and the symlink-creation test account for skips.
+  Typecheck and production build passed.
 - Browser suite skips its Chromium-dependent checks when the Playwright browser
   is not installed. Real Workspace display/toggling remains unverified until a
   working Pixel window launches.

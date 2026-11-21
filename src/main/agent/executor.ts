@@ -53,7 +53,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'screen_draw_arrow', 'verify_ui_state', 'clipboard_paste', 'browser_inspect', 'browser_verify', 'browser_upload', 'browser_download', 'file_list', 'file_read', 'file_search', 'file_metadata', 'file_find_duplicates', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'screen_draw_arrow', 'verify_ui_state', 'clipboard_paste', 'browser_inspect', 'browser_verify', 'browser_upload', 'browser_download', 'file_list', 'file_read', 'file_search', 'file_metadata', 'file_find_duplicates', 'documents_search', 'documents_list', 'documents_read']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {

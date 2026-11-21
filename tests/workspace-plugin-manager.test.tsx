@@ -4,11 +4,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginView } from '../src/shared/types';
 import { WorkspacePluginManager } from '../src/renderer/components/WorkspacePluginManager';
+import type { PluginLifecycleAction, PluginProjectAvailability } from '../src/renderer/components/WorkspacePluginManager';
 
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
-function mount(plugins: PluginView[], onChange: (action: 'install' | 'update' | 'uninstall' | 'enable', id: string, enabled?: boolean) => Promise<void>): HTMLDivElement {
+function mount(plugins: PluginView[], onChange: (action: PluginLifecycleAction, id: string, enabled?: boolean, availability?: PluginProjectAvailability) => Promise<void>): HTMLDivElement {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   act(() => root?.render(<WorkspacePluginManager plugins={plugins} onChange={onChange} />));
   return host;
@@ -20,7 +21,7 @@ const catalogPlugin: PluginView = {
   id: 'pixel.github-public', name: 'GitHub public repositories', description: 'Read public metadata.',
   version: '1.0.0', publisher: 'Pixel', capabilities: ['Read repository metadata'],
   permissions: ['HTTPS requests to api.github.com'], installed: false, enabled: false,
-  connection: 'not_required', health: 'disabled',
+  connection: 'not_required', health: 'disabled', availableInProject: false, projectAvailability: 'inherit',
 };
 
 describe('Workspace plugin manager', () => {
@@ -67,7 +68,7 @@ describe('Workspace plugin manager', () => {
     expect(rendered.textContent).toContain('Updating disables this plugin');
     const update = [...rendered.querySelectorAll('button')].find((button) => button.textContent === 'Update');
     await act(async () => { update?.click(); await Promise.resolve(); });
-    expect(onChange).toHaveBeenCalledWith('update', outdated.id, undefined);
+    expect(onChange).toHaveBeenCalledWith('update', outdated.id, undefined, undefined);
   });
 
   it('does not offer a catalog update for an unsupported Pixel API version', () => {
@@ -77,5 +78,21 @@ describe('Workspace plugin manager', () => {
     const rendered = mount([incompatible], vi.fn(async () => undefined));
     expect(rendered.textContent).toContain('unsupported Pixel plugin API version');
     expect([...rendered.querySelectorAll('button')].some((button) => button.textContent === 'Update')).toBe(false);
+  });
+
+  it('writes project availability overrides through the connected lifecycle callback', async () => {
+    const installed = { ...catalogPlugin, installed: true, enabled: true, availableInProject: true, projectAvailability: 'inherit' as const, health: 'ready' as const };
+    const onChange = vi.fn(async () => undefined);
+    const rendered = mount([installed], onChange);
+    const availability = rendered.querySelector<HTMLSelectElement>(`[id="plugin-project-availability-${installed.id}"]`);
+    expect(availability?.value).toBe('inherit');
+    expect(rendered.textContent).toContain('Available through the global plugin setting.');
+    await act(async () => {
+      if (!availability) throw new Error('Project availability selector was not rendered.');
+      availability.value = 'disabled';
+      availability.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(onChange).toHaveBeenCalledWith('project-availability', installed.id, undefined, 'disabled');
   });
 });

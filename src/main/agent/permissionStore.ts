@@ -61,6 +61,13 @@ export class PermissionGrantStore {
     return this.db.execute('UPDATE permission_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL', [at, id]) > 0;
   }
 
+  revokeForTool(toolName: string, at = Date.now()): number {
+    return this.db.execute(
+      'UPDATE permission_grants SET revoked_at = ? WHERE tool_name = ? AND revoked_at IS NULL',
+      [at, toolName],
+    );
+  }
+
   revokeAll(at = Date.now()): number {
     return this.db.execute('UPDATE permission_grants SET revoked_at = ? WHERE revoked_at IS NULL', [at]);
   }

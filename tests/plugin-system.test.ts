@@ -83,6 +83,42 @@ describe('Pixel plugin foundation', () => {
     expect(registry.validateArgs('github_repo_summary', { owner: 'octocat', repository: 'Hello-World' })).toMatchObject({ ok: false });
   });
 
+  it('applies project availability overrides to model schemas, validation, and execution lookup', () => {
+    const db = database();
+    db.execute('INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?, ?, NULL, 1, 1)', ['project_alpha', 'Alpha']);
+    db.execute('INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?, ?, NULL, 1, 1)', ['project_beta', 'Beta']);
+    const store = new PluginStore(db);
+    store.install(GITHUB_PUBLIC_PLUGIN.id);
+    store.setEnabled(GITHUB_PUBLIC_PLUGIN.id, true);
+    let activeProject = 'project_alpha';
+    const registry = new ToolRegistry(store.installedTools(), undefined, (name) => store.isToolAvailable(activeProject, name));
+    expect(store.list('project_alpha')[0]).toMatchObject({ enabled: true, availableInProject: true, projectAvailability: 'inherit' });
+    expect(registry.schemasFor('agent').some((tool) => tool.name === 'github_repo_summary')).toBe(true);
+
+    store.setProjectAvailability(GITHUB_PUBLIC_PLUGIN.id, 'project_alpha', 'disabled');
+    expect(store.list('project_alpha')[0]).toMatchObject({ enabled: true, availableInProject: false, projectAvailability: 'disabled' });
+    expect(store.list('project_beta')[0]).toMatchObject({ availableInProject: true, projectAvailability: 'inherit' });
+    expect(registry.schemasFor('agent').some((tool) => tool.name === 'github_repo_summary')).toBe(false);
+    expect(registry.get('github_repo_summary')).toBeUndefined();
+    expect(registry.validateArgs('github_repo_summary', { owner: 'octocat', repository: 'Hello-World' })).toMatchObject({ ok: false });
+    expect(registry.evaluate('github_repo_summary', 'agent', { owner: 'octocat', repository: 'Hello-World' }).allowed).toBe(false);
+    activeProject = 'project_beta';
+    expect(registry.get('github_repo_summary')).toBeDefined();
+    expect(registry.schemasFor('agent').some((tool) => tool.name === 'github_repo_summary')).toBe(true);
+    activeProject = 'project_alpha';
+
+    store.setProjectAvailability(GITHUB_PUBLIC_PLUGIN.id, 'project_alpha', 'enabled');
+    expect(registry.get('github_repo_summary')).toBeDefined();
+    store.setProjectAvailability(GITHUB_PUBLIC_PLUGIN.id, 'project_alpha', 'inherit');
+    expect(registry.get('github_repo_summary')).toBeDefined();
+
+    store.setEnabled(GITHUB_PUBLIC_PLUGIN.id, false);
+    store.setProjectAvailability(GITHUB_PUBLIC_PLUGIN.id, 'project_alpha', 'enabled');
+    expect(store.list('project_alpha')[0]).toMatchObject({ enabled: false, availableInProject: false, projectAvailability: 'enabled' });
+    expect(registry.get('github_repo_summary')).toBeUndefined();
+    expect(() => store.setProjectAvailability(GITHUB_PUBLIC_PLUGIN.id, 'missing_project', 'enabled')).toThrow();
+  });
+
   it('rejects malformed GitHub path components before performing network access', async () => {
     await expect(readPublicGitHubRepository('../private', 'repo')).rejects.toThrow(/valid public GitHub/i);
     await expect(readPublicGitHubRepository('owner', 'repo/../../admin')).rejects.toThrow(/valid public GitHub/i);
@@ -133,7 +169,7 @@ describe('Pixel plugin foundation', () => {
     expect(githubRepository).toHaveBeenCalledWith('octocat', 'Hello-World', undefined);
     expect(result).toMatchObject({ ok: true, detail: { fullName: 'octocat/Hello-World', source: 'GitHub REST API; public unauthenticated read' } });
     expect(result.content).toContain('42 stars');
-    broker.revoke('github_repo_summary');
+    expect(broker.revokeForTool('github_repo_summary')).toBeGreaterThan(0);
     expect(registry.evaluate('github_repo_summary', 'agent', args).allowed).toBe(false);
   });
 });

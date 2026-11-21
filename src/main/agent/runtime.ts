@@ -242,6 +242,16 @@ export class PermissionBroker {
     return true;
   }
 
+  /** Revoke every approval and standing grant when a plugin's project scope changes. */
+  revokeForTool(toolName: string): number {
+    if (this.pending?.request.toolName === toolName) this.rejectPending();
+    const persistentCount = this.grantStore?.revokeForTool(toolName) ?? 0;
+    const activeCount = this.registry.revokeForTool(toolName);
+    const count = Math.max(persistentCount, activeCount);
+    if (count > 0) this.audit.record('permission', 'Revoked plugin tool permissions', 'ok', 'Project plugin availability changed.');
+    return count;
+  }
+
   revokeAll(): number {
     this.rejectPending();
     const count = this.registry.revokeAll();

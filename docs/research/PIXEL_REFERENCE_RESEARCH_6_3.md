@@ -22,9 +22,11 @@ The top bar aligns project/context, search, date/status and one primary action.
 **Adaptation:** Pixel uses a 190 px section rail and a 258 px conversation
 history pane at standard desktop widths, with the chat as the primary canvas.
 Project browsing uses the second-column/list pattern only on its own screen;
-chat history is not duplicated elsewhere. Colors in `index.css` are estimated
-visual tokens, not sampled source values. Ostrand’s name, labels, data,
-photography and workflows are not reused.
+chat history is not duplicated elsewhere. The attached JPEG was raster-sampled
+at representative points: outer background (60,104) `#0C0B09`, raised card
+(800,450) `#191410`, and orange chart bar (845,536) `#F18A4F`. The rounded CSS
+tokens adapt those observations; original source design tokens remain unknown.
+Ostrand’s name, labels, data, photography and workflows are not reused.
 
 **Unknown:** original design tokens, responsive breakpoints, hover/animation
 rules, actual typography files and behavior outside this screenshot cannot be
@@ -50,10 +52,14 @@ continues to use its actual notes/tasks and file flows rather than mock rows.
 
 ## Target C — ASCII Sharks
 
-**Evidence:** public upstream README, package metadata, license, `src/engine.ts`
-and `src/renderer.ts` were inspected at
-https://github.com/stackedlol/ascii-sharks and the raw `main` sources. The
-repository declares MIT. `OceanEngine` composes `World`, `AsciiRenderer`, and
+**Evidence:** public upstream README, package metadata, license, `src/engine.ts`,
+`src/renderer.ts`, and `src/world.ts` were inspected at the
+[repository](https://github.com/stackedlol/ascii-sharks) and its
+[engine](https://raw.githubusercontent.com/stackedlol/ascii-sharks/main/src/engine.ts),
+[renderer](https://raw.githubusercontent.com/stackedlol/ascii-sharks/main/src/renderer.ts),
+[world](https://raw.githubusercontent.com/stackedlol/ascii-sharks/main/src/world.ts),
+and [MIT license](https://github.com/stackedlol/ascii-sharks/blob/main/LICENSE).
+The repository declares MIT. `OceanEngine` composes `World`, `AsciiRenderer`, and
 optional `Life`; the engine uses a fixed 1/60 second simulation step, a capped
 four-step accumulator and `requestAnimationFrame`. It observes canvas size and
 intersection visibility, handles reduced motion, bounds device pixel ratio to
@@ -91,18 +97,26 @@ scheduler. Existing project switching is through the local memory bridge.
 **Changes in this checkpoint:** a warm matte semantic palette, a two-pane
 sidebar (section rail plus existing chat history), compact dense navigation,
 centered chat/composer sizing, and a searchable project grid/list over the
-existing local project records. A reduced-motion/visibility-aware decorative
-glyph accent sits beside Pix. Shared focus styles and responsive sidebar
-breakpoints are in `src/renderer/workspace-design-system.css`.
+existing local project records. The new Library route groups the active
+project's already-indexed documents into real folder cards and file rows;
+search, refresh, folder selection and bounded preview read from the SQLite
+index. Its narrow IPC exposes display metadata rather than absolute source
+paths, and preview reads recheck active-project scope and source freshness.
+An empty Library explains how user-approved indexing populates it. A
+reduced-motion/visibility-aware decorative glyph accent sits beside Pix.
+Shared focus styles and responsive sidebar/library rules are in
+`src/renderer/workspace-design-system.css`.
 
 **Visual limitation:** after the user accepted native UI access, the running
 Pixel window was captured at `http://localhost:5199`. Its process path was
 `C:\dev\Pixel\node_modules\electron\dist\electron.exe`, so it belongs to a
 separate checkout and was left untouched. Its accessibility tree showed the
 older Chats/Library navigation, recent conversations, Agent mode and the chat
-composer. It does not run the source changes in this repository. A diagnostic
-launch attempt from this checkout exited without opening a targetable window;
-the cause was not established. Therefore no current-tree before/after
+composer. It does not run the source changes in this repository. A later
+current-session check found two windows from that same separate checkout, but
+`getApp` returned `Accessibility state unavailable` for both; they were left
+untouched. A diagnostic launch attempt from this checkout exited without
+opening a targetable window; the cause was not established. Therefore no current-tree before/after
 comparison, visual parity claim, or UI acceptance is made. Required screenshots
 at standard, narrow and minimum window sizes remain open.
 
@@ -132,7 +146,8 @@ analyses through the exposed tool surface.
   minimum supported dimensions.
 - Whether the conversations pane should collapse automatically at narrow
   desktop width without hiding history controls.
-- Library’s real file/folder navigation and file metadata/filter needs; the
-  reference alone is insufficient to add speculative file operations.
+- Actual screenshot and interaction review of the new Library at standard,
+  narrow and minimum supported window sizes; tests cover its data flow but do
+  not replace desktop visual acceptance.
 - Plugin Manager cards/details/permissions in the actual running application.
 - Pixel Board and secondary panels at minimum supported dimensions.

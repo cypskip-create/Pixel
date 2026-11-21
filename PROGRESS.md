@@ -4,10 +4,11 @@ Updated: 2026-11-21. Version: 0.2.1.
 
 ## New-chat recovery and current local checkpoint
 
-- Recovery confirmed existing checkout at `8288850ac825d5b5c1b79656f1432622a8129bf7`
-  on `main`, equal to `origin/main`; it was clean before this checkpoint's
-  edits. GitHub Windows CI run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282)
-  succeeded on that exact SHA.
+- Recovery began at `8288850ac825d5b5c1b79656f1432622a8129bf7`; current
+  committed HEAD and `origin/main` are `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`.
+  Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724)
+  succeeded on that committed SHA. Current local edits are uncommitted and are
+  not covered by that run.
 - REA `6.10.1` remains registered and its Codex config/skill identity checks are
   healthy. `codex mcp list` labels it **enabled / Unsupported** and this session
   has no native REA namespace. A standalone stdio MCP fallback negotiated
@@ -18,18 +19,45 @@ Updated: 2026-11-21. Version: 0.2.1.
   no retained resources. The PID was absent on follow-up. No no-sandbox override
   was applied. Reference pages therefore remain direct visual/browser-researched,
   not REA-analyzed.
+- The latest Windows app inventory found two `Pixel` windows, both from the
+  separate `C:\dev\Pixel` checkout. Computer Use could not read either
+  accessibility tree; the windows were left untouched. No running window from
+  this repository was identified, so its GUI acceptance remains open.
+- Visual-preview follow-up: Vite started on `0.0.0.0:5200`, but local browser
+  requests from the host sandbox were denied (`ERR_NETWORK_ACCESS_DENIED`) and
+  the in-app browser timed out. A `file:` preview of the production renderer
+  had blocked module assets and yielded a blank page; that capture was removed.
+  The test server was stopped. No current-checkout UI evidence was produced.
 - Local source adds a centralized critical-risk policy, dynamic one-time risk
   for explicit browser submission, a bundled-only plugin lifecycle and UI, and
-  a read-only public GitHub repository metadata tool. The plugin has fixture
+  a read-only public GitHub repository metadata tool. This uncommitted
+  continuation adds migration-backed per-project plugin availability with a
+  global enable ceiling, filtered tool registration, project-switch refresh,
+  and revocation of persisted and in-memory grants plus pending approvals on
+  scope changes, disable, update and uninstall. The plugin has fixture
   integration coverage, not live provider verification.
+- Document indexing now uses `lstat` at the selected root and discovered
+  entries, refusing symlink/junction traversal and filtering credential-like
+  filenames. The regression test is skipped locally because this Windows
+  sandbox denies symlink creation (`EPERM`).
+- Added `documents_read`: the model can request bounded passage pages by an ID
+  from the active project's document list. Results carry title/path/location,
+  millisecond size/mtime signature checks reject ordinary detected stale files,
+  and the system prompt requires citations to title and passage. A regression
+  test detects same-size edits inside one second; metadata-restoring edits still
+  require re-indexing to detect. Integration tests cover bounded pages, project
+  isolation, untrusted-content labeling and stale-source refusal.
 - Latest `npm run verify`: typecheck and production build passed; the full
-  default suite reports **949 passed, 33 skipped, 0 failed** (982 total; 73
-  files passed, 1 skipped), with `PIXEL_TEST_HOME` isolated under the sandbox
-  temp directory. Default Vitest skips browser-dependent tests; a separate
-  cached-Chromium run passes **30/30** browser tests and **29/29** policy tests
+  suite reports **991 passed, 4 skipped, 0 failed** (995 total; 74 files
+  passed, 1 skipped). The sandbox-only run hit `EPERM` because file and task
+  tests create disposable fixtures under user home; the approved retry passed.
+  Four skips are the symlink-creation regression and three native foreground
+  integration scenarios. Cached Chromium tests pass **30/30** browser tests
+  and **29/29** policy tests
   against disposable local HTML/file fixtures. This includes actual file-input
   selection and a browser download saved to a new file with SHA-256 read-back.
-  NSIS/makensis and opt-in native foreground scenarios remain skipped.
+  Lazy-loaded secondary Workspace views reduce the renderer entry to 457.54
+  kB, below Vite's 500 kB advisory threshold.
 - Agent `get_system_info` now consumes the same main-process diagnostics
   snapshot as Pixel's diagnostics view for uptime, load average, system-volume
   capacity through Node `statfs`, primary display dimensions/scale and battery
@@ -37,10 +65,28 @@ Updated: 2026-11-21. Version: 0.2.1.
   C# compile/protocol smoke returned a real response; no battery percentage was
   retained. The maintained native build script now validates the command too.
   Process and audio-device details remain open.
-- The renderer production bundle currently emits a 502.74 kB minified entry
-  chunk, 2.74 kB over Vite's advisory 500 kB threshold; the build remains
-  successful. Revisit route-level code splitting after measuring actual
-  Workspace startup and interaction performance.
+- Voice recheck: `VoiceService.capability()` reports `stt=false`, `tts=true`;
+  direct System.Speech recognition failed because Windows has no recognizer
+  installed. A temporary generated WAV and real Pixel Windows System.Speech
+  playback succeeded (5,542 ms). The existing `small.en` weight file matches
+  its pinned catalog SHA-256, but the host exposes Python 3.15.2 only, without
+  `faster-whisper`, `kokoro_onnx` or `onnxruntime`; the inspected unpacked
+  artifact has no packaged worker or Kokoro assets. Offline inference remains
+  blocked.
+- The renderer production bundle currently emits a 457.54 kB minified entry
+  chunk, below Vite's advisory 500 kB threshold. Library, Plugins, Projects,
+  Tasks, Notes and Board are emitted as dedicated lazy-loaded chunks. Actual
+  Workspace startup remains unverified because this checkout's Electron launch
+  exits before the app window appears.
+- The supplied Ostrand screenshot was sampled at representative background,
+  raised-surface and warm-orange chart pixels. The rounded palette is applied
+  in shared CSS tokens; theme tests check token values and text contrast.
+  Sample coordinates and chosen values are in
+  `docs/architecture/PIXEL_DESIGN_TOKENS.md`.
+- The standalone reviewed-skill replay path now applies the same input count,
+  length and credential checks as the live IPC path. One-time values are
+  redacted from observed results, callbacks, returned failures and propagated
+  errors; focused skill/routine tests pass 17/17.
 - The live GitHub adapter call for public `octocat/Hello-World` was retried and
   again stopped before HTTP because `api.github.com` DNS returned `ENOTFOUND`.
   The adapter now rechecks cancellation after DNS and validates every returned

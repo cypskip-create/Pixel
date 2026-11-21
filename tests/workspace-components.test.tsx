@@ -134,6 +134,8 @@ describe('conversation-first Workspace controls', () => {
     expect(onViewChange).toHaveBeenCalledWith('tasks');
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Notes & Planning'))?.click());
     expect(onViewChange).toHaveBeenCalledWith('notes');
+    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Library'))?.click());
+    expect(onViewChange).toHaveBeenCalledWith('library');
     expect(rendered.querySelector('.workspace-history-open[aria-current="page"]')?.textContent).toContain('A saved conversation');
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('A saved conversation'))?.click());
     expect(onOpenConversation).toHaveBeenCalledWith(item.id);

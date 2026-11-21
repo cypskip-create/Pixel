@@ -18,9 +18,9 @@
     "Inter", "Helvetica Neue", Arial, sans-serif;
 
   /* Warm matte system: orange marks action; surfaces stay near-black. */
-  --color-app-bg: #0C0B0A;
-  --color-sidebar: #11100F;
-  --color-surface: #1B1816;
+  --color-app-bg: #0B0A09;
+  --color-sidebar: #0D0B0C;
+  --color-surface: #171410;
   --color-surface-raised: #211D1A;
   --color-hover: #28221E;
   --color-selected: #30231B;
@@ -31,7 +31,7 @@
   --color-ink-soft: #C9C1B8;
   --color-ink-dim: #96908A;
   --color-icon: #D8D8D8;
-  --color-accent: #F28A43;
+  --color-accent: #F18A4F;
   --color-accent-hover: #FFA262;
   --color-accent-foreground: #1A100A;
   --color-warning: #D96A2B;

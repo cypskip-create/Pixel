@@ -871,6 +871,10 @@ export interface PluginView {
   installedVersion?: string;
   updatedAt?: number;
   error?: string;
+  /** Effective project-specific capability state, constrained by global enablement. */
+  availableInProject?: boolean;
+  /** Whether this project inherits the global setting or has a local override. */
+  projectAvailability?: 'inherit' | 'enabled' | 'disabled';
 }
 
 /* ------------------------------------------------------------------ *
@@ -1077,6 +1081,10 @@ export interface CypsBridge {
     createTask(title: string, description?: string, dueAt?: string, checklistId?: string): Promise<ProductivityTaskView>;
     updateTask(id: string, patch: { title?: string; description?: string; status?: ProductivityTaskView['status']; dueAt?: string | null; checklistId?: string | null }): Promise<ProductivityTaskView | null>;
   };
+  documents: {
+    listLibrary(): Promise<DocumentLibraryItem[]>;
+    readLibraryDocument(documentId: string, startChunk?: number): Promise<DocumentLibraryRead | null>;
+  };
   audit: {
     list(limit?: number): Promise<AuditEntry[]>;
   };
@@ -1089,6 +1097,7 @@ export interface CypsBridge {
     update(pluginId: string): Promise<PluginView[]>;
     uninstall(pluginId: string): Promise<PluginView[]>;
     setEnabled(pluginId: string, enabled: boolean): Promise<PluginView[]>;
+    setProjectAvailability(pluginId: string, availability: 'inherit' | 'enabled' | 'disabled'): Promise<PluginView[]>;
   };
   app: {
     getVersion(): Promise<string>;
@@ -1205,6 +1214,8 @@ export interface ProductivityNoteView { id: string; projectId: string; title: st
 export interface ProductivityDocumentLinkView { id: string; noteId: string; displayName: string; byteSize: number; createdAt: number }
 export interface ProductivityChecklistView { id: string; projectId: string; title: string; createdAt: number; updatedAt: number }
 export interface ProductivityTaskView { id: string; projectId: string; title: string; description: string; status: 'open' | 'in_progress' | 'completed'; dueAt: number | null; checklistId: string | null; createdAt: number; updatedAt: number }
+export interface DocumentLibraryItem { id: string; folderId: string; folderName: string; fileName: string; title: string; kind: string; sizeBytes: number; modifiedAt: number; indexedAt: number; chunks: number }
+export interface DocumentLibraryRead { state: 'ready' | 'stale' | 'unavailable'; title: string; kind: string; startChunk: number; chunkCount: number; hasMore: boolean; passages: Array<{ ordinal: number; content: string; location: string | null }> }
 
 export interface WorkspaceWindowState {
   maximized: boolean;

@@ -152,6 +152,50 @@ describe('reviewed skills', () => {
     expect(seen).toEqual(['service health']);
     expect(() => store.createDraft(definition({ name: 'Bad tool', steps: [{ ordinal: 0, kind: 'tool', locator: 'missing_tool', action: 'missing_tool', params: {}, expectation: {}, approvalRequired: false }] }))).toThrow(/requiredTools/);
   });
+
+  it('rejects oversized or credential-like direct replay inputs and redacts echoed values', async () => {
+    const db = database();
+    const store = new SkillStore(db);
+    const active = store.activate(store.createDraft(definition({
+      inputs: [{ name: 'query', description: 'Search phrase', required: true }],
+      steps: [{ ordinal: 0, kind: 'tool', locator: 'browser_inspect', action: 'browser_inspect', params: { query: '${input.query}' }, expectation: {}, approvalRequired: false }],
+      requiredTools: ['browser_inspect'],
+    })).id);
+    const authorize = () => ({ allowed: true, needsApproval: false, reason: 'read only' });
+    const runner: StepRunner = { run: async (step) => ({ ok: true, observed: `Observed ${String(step.params['query']).toLowerCase()}` }) };
+
+    const oversized = await replaySkill(store, active.id, runner, { mode: 'hybrid', inputs: { query: 'x'.repeat(2_001) }, authorize });
+    expect(oversized.status).toBe('failed');
+    expect(oversized.failure).toMatch(/2,000 characters/);
+    const credential = await replaySkill(store, active.id, runner, { mode: 'hybrid', inputs: { query: 'Bearer abcdefghijklmnop' }, authorize });
+    expect(credential.status).toBe('failed');
+    expect(credential.failure).toMatch(/credential material/);
+
+    const secretLike = 'Customer-Lookup-483920';
+    const observedByCallback: string[] = [];
+    const echoed = await replaySkill(store, active.id, runner, {
+      mode: 'hybrid', inputs: { query: secretLike }, authorize,
+      onStep: (step) => observedByCallback.push(step.detail),
+    });
+    expect(echoed.status).toBe('completed');
+    expect(echoed.steps[0]?.detail).toBe('Observed [redacted input]');
+    expect(observedByCallback).toEqual(['Observed [redacted input]']);
+    expect(JSON.stringify(echoed)).not.toContain(secretLike);
+
+    await expect(replaySkill(store, active.id, {
+      run: async () => { throw new Error(`provider echoed ${secretLike}`); },
+    }, { mode: 'hybrid', inputs: { query: secretLike }, authorize })).rejects.toThrow('provider echoed [redacted input]');
+
+    const rejected = await replaySkill(store, active.id, {
+      run: async () => ({ ok: false, observed: `Could not query ${secretLike.toLowerCase()}` }),
+    }, { mode: 'hybrid', inputs: { query: secretLike }, authorize });
+    expect(rejected.failure).toBe('Could not query [redacted input]');
+    const persistedFailure = db.queryOne<{ failure: string | null }>(
+      "SELECT failure FROM skill_runs WHERE skill_id = ? AND status = 'failed' ORDER BY rowid DESC LIMIT 1",
+      [active.id],
+    );
+    expect(persistedFailure?.failure).toBe('Could not query [redacted input]');
+  });
 });
 
 describe('durable local routines', () => {

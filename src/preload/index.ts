@@ -45,6 +45,8 @@ import type {
   ProductivityDocumentLinkView,
   ProductivityTaskView,
   ProductivityChecklistView,
+  DocumentLibraryItem,
+  DocumentLibraryRead,
   PluginView,
   WorkspaceWindowState,
   ToolCatalogEntry,
@@ -279,6 +281,12 @@ const bridge: CypsBridge = {
     updateTask: (id: string, patch: { title?: string; description?: string; status?: ProductivityTaskView['status']; dueAt?: string | null; checklistId?: string | null }) => ipcRenderer.invoke(CH.productivityTasksUpdate, id, patch) as Promise<ProductivityTaskView | null>,
   },
 
+  documents: {
+    listLibrary: () => ipcRenderer.invoke(CH.documentsLibraryList) as Promise<DocumentLibraryItem[]>,
+    readLibraryDocument: (documentId: string, startChunk = 0) =>
+      ipcRenderer.invoke(CH.documentsLibraryRead, documentId, startChunk) as Promise<DocumentLibraryRead | null>,
+  },
+
   audit: {
     list: (limit?: number) => ipcRenderer.invoke(CH.auditList, limit) as Promise<AuditEntry[]>,
   },
@@ -293,6 +301,8 @@ const bridge: CypsBridge = {
     update: (pluginId: string) => ipcRenderer.invoke(CH.pluginsUpdate, pluginId) as Promise<PluginView[]>,
     uninstall: (pluginId: string) => ipcRenderer.invoke(CH.pluginsUninstall, pluginId) as Promise<PluginView[]>,
     setEnabled: (pluginId: string, enabled: boolean) => ipcRenderer.invoke(CH.pluginsSetEnabled, pluginId, enabled) as Promise<PluginView[]>,
+    setProjectAvailability: (pluginId: string, availability: 'inherit' | 'enabled' | 'disabled') =>
+      ipcRenderer.invoke(CH.pluginsSetProjectAvailability, pluginId, availability) as Promise<PluginView[]>,
   },
 
   app: {

@@ -75,6 +75,25 @@ describe('persistent permission grants', () => {
     expect(restarted.evaluate('open_application', 'agent', { name: 'notepad' }).allowed).toBe(false);
   });
 
+  it('revokes a tool grant and cancels a pending approval when plugin access changes', async () => {
+    const first = setup();
+    const standing = first.broker.ask(request('open_application', { name: 'Notepad' }));
+    first.broker.respond({ requestId: 'request-open_application', approved: true, duration: 'always' });
+    await expect(standing).resolves.toMatchObject({ approved: true, duration: 'always' });
+    expect(first.store.listActive()).toHaveLength(1);
+
+    const pendingRequest = { ...request('open_application', { name: 'Calculator' }), id: 'pending-plugin-action' };
+    const pending = first.broker.ask(pendingRequest);
+    expect(first.broker.revokeForTool('open_application')).toBeGreaterThan(0);
+    await expect(pending).resolves.toMatchObject({ approved: false });
+    expect(first.store.listActive()).toEqual([]);
+    expect(first.registry.activeGrants()).toEqual([]);
+
+    const restarted = new ToolRegistry();
+    new PermissionBroker(restarted, new AuditLog(), () => undefined, () => undefined, first.store);
+    expect(restarted.evaluate('open_application', 'agent', { name: 'notepad' }).allowed).toBe(false);
+  });
+
   it('rejects Always Allow for high-risk input without silently approving once', async () => {
     const { broker, registry } = setup();
     const pending = broker.ask(request('type_text', { text: 'hello' }, 'high'));

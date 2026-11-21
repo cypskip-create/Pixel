@@ -484,7 +484,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     ...pluginStore.installedTools(),
   ], (grant) => {
     try { permissionGrantStore.markUsed(grant); } catch { /* persistence failure must not change the authorization decision */ }
-  });
+  }, (toolName) => pluginStore.isToolAvailable(projectId(), toolName));
   const taskStore = new TaskStore(database);
   const skillStore = new SkillStore(database);
   const routineStore = new RoutineStore(database, skillStore);
@@ -1104,6 +1104,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     const { dueAt: _rawDueAt, ...taskPatch } = patch;
     return productivityStore.updateTask(projectId(), id, { ...taskPatch, ...(dueAt === undefined ? {} : { dueAt }) });
   });
+
+  registerHandler(CHANNELS.documentsLibraryList, () => documentTools.listForWorkspace());
+  registerHandler(CHANNELS.documentsLibraryRead, (_event, documentId: string, startChunk = 0) =>
+    documentTools.readForWorkspace(documentId, startChunk),
+  );
 
   /* ----------------------------- settings ---------------------------- */
 
@@ -1791,34 +1796,41 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       return entry;
     });
   });
-  registerHandler(CHANNELS.pluginsList, (): PluginView[] => pluginStore.list());
+  registerHandler(CHANNELS.pluginsList, (): PluginView[] => pluginStore.list(projectId()));
+  const revokePluginPermissions = (pluginId: string, manifest: ReturnType<typeof pluginStore.manifest>): void => {
+    if (!manifest) return;
+    for (const tool of manifest.tools) permissions.revokeForTool(tool.name);
+    audit.record('system', `Cleared permissions for Pixel plugin ${pluginId}`, 'ok', 'Pending approvals and stored grants were revoked.');
+  };
   registerHandler(CHANNELS.pluginsInstall, (_event, pluginId: string): PluginView[] => {
     pluginStore.install(pluginId);
     audit.record('system', `Installed Pixel plugin ${pluginId}`, 'ok', 'Bundled, declarative plugin; no external code was executed.');
-    return pluginStore.list();
+    return pluginStore.list(projectId());
   });
   registerHandler(CHANNELS.pluginsUpdate, (_event, pluginId: string): PluginView[] => {
     const manifest = pluginStore.manifest(pluginId);
     if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
     pluginStore.update(pluginId);
+    revokePluginPermissions(pluginId, manifest);
     for (const tool of manifest.tools) toolRegistry.unregister(tool.name);
     audit.record('system', `Updated Pixel plugin ${pluginId}`, 'ok', 'Updated from the bundled reviewed manifest; plugin remains disabled pending explicit re-enable.');
-    return pluginStore.list();
+    return pluginStore.list(projectId());
   });
   registerHandler(CHANNELS.pluginsUninstall, (_event, pluginId: string): PluginView[] => {
     const manifest = pluginStore.manifest(pluginId);
+    revokePluginPermissions(pluginId, manifest);
     pluginStore.uninstall(pluginId);
     if (manifest) for (const tool of manifest.tools) toolRegistry.unregister(tool.name);
     audit.record('system', `Uninstalled Pixel plugin ${pluginId}`, 'ok');
-    return pluginStore.list();
+    return pluginStore.list(projectId());
   });
   registerHandler(CHANNELS.pluginsSetEnabled, (_event, pluginId: string, enabled: boolean): PluginView[] => {
     if (typeof enabled !== 'boolean') throw new Error('Plugin enabled state must be true or false.');
     const manifest = pluginStore.manifest(pluginId);
     if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
     if (enabled) {
-      const current = pluginStore.list().find((item) => item.id === pluginId);
-      if (current?.enabled) return pluginStore.list();
+      const current = pluginStore.list(projectId()).find((item) => item.id === pluginId);
+      if (current?.enabled) return pluginStore.list(projectId());
       for (const tool of manifest.tools) {
         const existing = toolRegistry.get(tool.name);
         if (existing) {
@@ -1826,13 +1838,22 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
         }
       }
     }
+    if (!enabled) revokePluginPermissions(pluginId, manifest);
     pluginStore.setEnabled(pluginId, enabled);
     for (const tool of manifest.tools) {
       if (enabled) toolRegistry.register(tool);
       else toolRegistry.unregister(tool.name);
     }
     audit.record('system', `${enabled ? 'Enabled' : 'Disabled'} Pixel plugin ${pluginId}`, 'ok', `Registered tools: ${manifest.tools.map((tool) => tool.name).join(', ')}`);
-    return pluginStore.list();
+    return pluginStore.list(projectId());
+  });
+  registerHandler(CHANNELS.pluginsSetProjectAvailability, (_event, pluginId: string, availability: 'inherit' | 'enabled' | 'disabled'): PluginView[] => {
+    const manifest = pluginStore.manifest(pluginId);
+    if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
+    pluginStore.setProjectAvailability(pluginId, projectId(), availability);
+    revokePluginPermissions(pluginId, manifest);
+    audit.record('system', `Changed project plugin availability for ${pluginId}`, 'ok', `Project ${projectId()}; setting ${availability}; existing grants cleared.`);
+    return pluginStore.list(projectId());
   });
 
   /* -------------------------------- app ------------------------------ */

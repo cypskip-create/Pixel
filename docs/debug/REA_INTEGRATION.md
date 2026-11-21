@@ -72,12 +72,16 @@ Verification recorded so far:
   `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`.
 - 2026-11-21 current-session recheck: `codex mcp list` still reports `rea`
   **enabled / Unsupported**. The live tool catalog contains no REA namespace,
-  and `list_mcp_resources({server:"rea"})` returns `unknown MCP server`. This
-  confirms that Codex restart/reconnect is still required before an in-session
-  REA call can be tested; no such call is claimed for this session. The
-  approved Electron permission prompt was accepted by the user, but Windows
-  app inventory still exposed no Pixel window, so no live Workspace screenshot
-  was available either.
+  and the current `ALL_TOOLS` inventory contains no REA tool names. The CLI
+  reports `codex-cli 0.169.0`; Node `26.13.0` and npm `11.20.0` remain
+  compatible with the installed package. Codex still requires a restart or
+  reconnect before an in-session REA call can be tested; no such call is
+  claimed for this session.
+- 2026-11-21 desktop recheck: Windows inventory now reports two `Pixel` windows,
+  both owned by the separate `C:\dev\Pixel` checkout. `cua.getApp` returned
+  `Accessibility state unavailable` for both window IDs. They were left
+  untouched. No window from `C:\Users\cypri\OneDrive\Desktop\cyps` was
+  identified, and no usable current-checkout Workspace screenshot was obtained.
 
 The earlier DeepSeek client configuration and REA 6.8.0 history below remain
 as historical records. That registration was not changed by the Codex setup.

@@ -31,6 +31,24 @@ function expandHex(hex: string): string[] {
   return [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)];
 }
 
+function readDarkToken(token: string): string {
+  const match = new RegExp(`${token}:\\s*(#[\\da-f]{6})`, 'i').exec(readFileSync(join(rendererRoot, 'index.css'), 'utf8'));
+  if (!match?.[1]) throw new Error(`Missing color token ${token}`);
+  return match[1];
+}
+
+function relativeLuminance(hex: string): number {
+  const channels = expandHex(hex.slice(1)).map((channel) => Number.parseInt(channel, 16) / 255);
+  const linear = channels.map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * (linear[0] ?? 0) + 0.7152 * (linear[1] ?? 0) + 0.0722 * (linear[2] ?? 0);
+}
+
+function contrastRatio(first: string, second: string): number {
+  const a = relativeLuminance(first);
+  const b = relativeLuminance(second);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
 describe('Pixel warm matte design system', () => {
   const files = sourceFiles(rendererRoot);
   const allRendererSource = files.map((file) => readFileSync(file, 'utf8')).join('\n');
@@ -38,9 +56,9 @@ describe('Pixel warm matte design system', () => {
 
   it('defines warm matte surfaces, orange interactive accents, and independent Pix/status colors', () => {
     for (const [token, value] of [
-      ['--color-app-bg', '#0C0B0A'],
-      ['--color-sidebar', '#11100F'],
-      ['--color-surface', '#1B1816'],
+      ['--color-app-bg', '#0B0A09'],
+      ['--color-sidebar', '#0D0B0C'],
+      ['--color-surface', '#171410'],
       ['--color-surface-raised', '#211D1A'],
       ['--color-hover', '#28221E'],
       ['--color-selected', '#30231B'],
@@ -49,7 +67,7 @@ describe('Pixel warm matte design system', () => {
       ['--color-ink', '#E9E4DD'],
       ['--color-ink-soft', '#C9C1B8'],
       ['--color-ink-dim', '#96908A'],
-      ['--color-accent', '#F28A43'],
+      ['--color-accent', '#F18A4F'],
       ['--color-accent-hover', '#FFA262'],
       ['--color-warning', '#D96A2B'],
       ['--color-destructive', '#D56D61'],
@@ -63,13 +81,19 @@ describe('Pixel warm matte design system', () => {
     expect(css).toContain('--color-brand-foreground: var(--color-icon)');
   });
 
+  it('keeps small metadata text and accent labels above WCAG AA contrast on dark surfaces', () => {
+    expect(contrastRatio(readDarkToken('--color-ink-dim'), readDarkToken('--color-surface-raised'))).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(readDarkToken('--color-ink-soft'), readDarkToken('--color-surface'))).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(readDarkToken('--color-accent-foreground'), readDarkToken('--color-accent'))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('limits chromatic color values to the approved palette', () => {
     expect(allRendererSource).not.toMatch(/(?:sky|blue|cyan|teal|emerald|green|yellow|rose|orange|violet|purple|indigo)-\d{2,3}/i);
     const approvedTints = new Set([
       '0e1013', '101113', '1a1e23', '20252a', '2a3138', '333a40', '394147', '3a4147', '515a61',
       'e6e9ed', 'c6cacd', '9aa1a6', 'd2d7db', 'a7d7c2', 'd6ede3', 'd5ab72', 'd88b83',
       '4299f5', '60a9fa', '1d70c9', '185ea9', '214d90', '181818', '1b1b1b', '232323', '303030', '353535', '505050', '171717', '252525', '343434', '202020', '414141', '494949', '444444', '595959', 'f3f3f3', 'd3d3d3', 'ababab', 'd8d8d8',
-      '0c0b0a', '11100f', '1b1816', '211d1a', '28221e', '30231b', '332b26', '51443b', '191613', 'e9e4dd', 'c9c1b8', '96908a', 'f28a43', 'ffa262', '1a100a', 'd96a2b', 'd56d61', '79b58a', '0f0e0d', '211913', '211e1b', 'c88e68', 'e0a16f', '604735', '3a291f', '2b201a', 'e7a16d', 'bd825b', 'f3d5bd', '8c4d25', 'd8a47e', 'f6e4d6', '29211c',
+      '0b0a09', '0d0b0c', '171410', '211d1a', '28221e', '30231b', '332b26', '51443b', '191613', 'e9e4dd', 'c9c1b8', '96908a', 'f18a4f', 'ffa262', '1a100a', 'd96a2b', 'd56d61', '79b58a', '0f0e0d', '211913', '211e1b', 'c88e68', 'e0a16f', '604735', '3a291f', '2b201a', 'e7a16d', 'bd825b', 'f3d5bd', '8c4d25', 'd8a47e', 'f6e4d6', '29211c',
       'f6f2ed', 'efe8e0', 'fbf8f4', 'eee5dc', 'f6dcc7', 'd8cbbf', 'b7a494', 'b85b20', '964414', '9a4e24', 'a3443a', '39794c',
       '090909', '050505', '2b2b2b', 'e4e4e4', '111111', '555555', 'f0f0f0', 'bfbfbf',
       '9be5c7', '8cb8a5', '557765', '476653', 'a85049', '8c6330', '181b1e', 'aeb5bc', 'b8bec2', 'c7cdd2', '8cbca5', 'f3f4f5', '777e82', '353a3f', 'd1d5d8',

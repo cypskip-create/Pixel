@@ -5,8 +5,8 @@ Updated: 2026-11-21. This file is the short recovery point for future Codex sess
 ## Repository state
 
 - Existing checkout: `C:\Users\cypri\OneDrive\Desktop\cyps`, branch `main`.
-- Committed baseline for this continuation: `8288850ac825d5b5c1b79656f1432622a8129bf7`, branch `main` (initially equal to `origin/main`, clean before this work).
-- GitHub Windows CI run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on that exact baseline. It built and tested the source and packages; it did not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by that run.
+- Current committed HEAD and `origin/main`: `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed test additions.
+- Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed against current HEAD, including typecheck, automated tests, native helper compile, package build and artifact upload. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by run 44916016724.
 - Do not commit or push for the user.
 
 ## Current checkpoint
@@ -21,12 +21,39 @@ source and tests are currently uncommitted. See
 `docs/architecture/PIXEL_DESIGN_TOKENS.md`.
 
 This continuation's latest `npm run verify` passes typecheck, the production
-build and the full default suite: **949 passed, 33 skipped, 0 failed** (982
-total; 73 files passed, 1 skipped), using `PIXEL_TEST_HOME=%TEMP%`. The
-Chromium-dependent tests are skipped by that default run; a separate
-`PLAYWRIGHT_BROWSERS_PATH=.pw-browsers` run passes all **30** browser tests and
-29 policy tests against real Chromium and disposable local-file fixtures.
+build and the suite: **991 passed, 4 skipped, 0 failed** (995 total; 74 files
+passed, 1 skipped). The sandbox-only attempt first failed because file/task
+tests create disposable fixtures under the user home (`EPERM`); the approved
+retry passed and cleaned those fixtures. Three native foreground acceptance
+tests and one symlink-creation regression remain skipped. Lazy-loaded secondary
+Workspace panels reduce the renderer entry chunk to 457.54 kB; the build is
+below Vite's 500 kB advisory threshold. The project-indexed Library now groups
+actual indexed files into matte folder cards and provides bounded previews over
+typed, path-redacted IPC. The
+latest additions include project-scoped
+plugin availability with a global enable ceiling and revocation of persisted,
+volatile and pending tool permissions on scope changes, disable, update and
+uninstall. The
+The approved full run included the cached-Chromium browser tests and NSIS
+checks; a separate `PLAYWRIGHT_BROWSERS_PATH=.pw-browsers` run also passed all
+**30** browser tests and 29 policy tests against real Chromium and disposable
+local-file fixtures.
+Document discovery now rejects symlinked roots/entries and credential-like
+filenames; the Windows sandbox denied the symlink fixture (`EPERM`), so that
+specific regression test skipped locally. The agent can now read bounded,
+source-located passages from project-indexed documents and refuses cached text
+when its file size/mtime signature has changed. The signature retains
+millisecond timestamp precision, with a regression test for same-size edits in
+one second; a rewrite that restores both size and mtime remains outside this
+metadata-only freshness check.
 Native helper compilation passes and voice-worker boundary tests pass 12/12.
+`VoiceService.capability()` reports `stt=false`, `tts=true`; the host has no
+Windows recognizer installed. A short real playback through Pixel's Windows
+System.Speech backend passed (5,542 ms). User data holds the `small.en` model
+whose main-weight SHA-256 matches the pinned catalog digest, but the host has
+Python 3.15.2 only; faster-whisper, Kokoro ONNX and ONNX Runtime are not
+importable there, and the inspected unpacked build has no packaged voice
+worker. Offline inference and Kokoro playback remain unverified.
 Automated plugin tests use a fixture adapter; they do not establish live GitHub
 success. A direct public request remains blocked by DNS `ENOTFOUND
 api.github.com`. Note-to-document links now store project-scoped references to
@@ -40,6 +67,16 @@ now displays both versions and offers a reviewed bundled-catalog update; the
 update disables the plugin until the user explicitly enables it again. Install
 now refuses to upgrade mismatched versions, keeping update audit and lifecycle
 semantics distinct.
+The supplied Ostrand screenshot was sampled at the outer background, a raised
+surface, and the orange chart bar. Rounded warm tokens are recorded in
+`docs/architecture/PIXEL_DESIGN_TOKENS.md`; companion and theme tests now
+assert the revised values and WCAG AA text contrast. The current renderer build
+emits a 457.54 kB entry chunk with route chunks for Library, Plugins, Projects,
+Tasks, Notes and Board.
+The direct `replaySkill` path was also hardened: it enforces the live runner's
+input count/length and credential checks, redacts input echoes from replay
+results and callbacks, and sanitizes thrown error text. Focused skill/routine
+tests pass 17/17.
 The approved text-file path also rejects known binary PDF/Office/media/archive
 formats; Markdown, CSV and JSON round-trip tests verify read-back. Rich PDF and
 Office authoring remain unsupported; see
@@ -120,6 +157,19 @@ logger. Existing `%APPDATA%\Pixel\pixel-startup.log`
 entries identify only prior launches from `C:\dev\Pixel`; no current-checkout
 boot marker was written. Querying the Windows Application event log was denied
 by the host, leaving the pre-main Electron failure without an OS fault module.
+An additional isolated Electron probe using a temporary, data-only app folder
+also produced no targetable window; because its process returned exit code 0
+without a logged startup result, it does not isolate a cause. A direct Vite
+renderer preview on port 5200 started, but the in-app browser timed out and a
+local HTTP request was denied by sandbox networking. Playwright Chromium also
+returned `ERR_NETWORK_ACCESS_DENIED` for the local Vite URL. Opening the
+production bundle as a `file:` URL produced a blank page because its external
+module assets could not load under the production CSP; that blank capture was
+discarded and is not visual acceptance. The existing listener on port 5199
+was left untouched. A fresh Computer Use inventory still lists only two
+`C:\dev\Pixel` windows, and the Edge accessibility connection failed, so no
+third-party Pixel windows were opened or changed. The preview server and probe
+files were cleaned up afterward.
 An unpacked packaging attempt stopped before completion because the packaging
 helper download could not resolve `github.com`; pre-existing ignored release
 artifacts were left intact.

@@ -1,29 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Maximize2, Minimize2, ShieldAlert, Wrench, X,
 } from 'lucide-react';
 import type {
-  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, ImageAttachment, Mode, PermissionDecision,
+  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
   PermissionRequest, PluginView, ProjectView, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
 } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { deriveAssistantState } from '@shared/companion-state';
-import { AutomationPanel } from '@/components/AutomationPanel';
 import { WorkspaceConversationHeader } from '@/components/WorkspaceConversationHeader';
 import { WorkspaceComposer } from '@/components/WorkspaceComposer';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
-import { MemoryPanel } from '@/components/MemoryPanel';
-import { ProductivityPanel } from '@/components/ProductivityPanel';
 import { PermissionCard } from '@/components/PermissionCard';
-import { PixelBoard } from '@/components/PixelBoard';
 import { PixelMark } from '@/components/PixelMark';
 import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
-import { WorkspaceProjects } from '@/components/WorkspaceProjects';
-import { WorkspacePluginManager } from '@/components/WorkspacePluginManager';
+import { AutomationPanel } from '@/components/AutomationPanel';
+import { MemoryPanel } from '@/components/MemoryPanel';
 import { SettingsPanel } from '@/components/SettingsPanel';
+import type { PluginLifecycleAction, PluginProjectAvailability } from '@/components/WorkspacePluginManager';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
-import { WorkspaceTasks } from '@/components/WorkspaceTasks';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
@@ -31,6 +27,13 @@ import { useVoicePlaybackState } from '@/hooks/useVoicePlaybackState';
 import { safeSubscribe } from '@/lib/bridge';
 import { taskDisplayState, selectActiveTask, isTaskActive } from '@/lib/task-presentation';
 import { MicrophoneCapture } from '@/lib/audioCapture';
+
+const WorkspaceProjects = lazy(() => import('@/components/WorkspaceProjects').then((module) => ({ default: module.WorkspaceProjects })));
+const WorkspaceLibrary = lazy(() => import('@/components/WorkspaceLibrary').then((module) => ({ default: module.WorkspaceLibrary })));
+const WorkspaceTasks = lazy(() => import('@/components/WorkspaceTasks').then((module) => ({ default: module.WorkspaceTasks })));
+const ProductivityPanel = lazy(() => import('@/components/ProductivityPanel').then((module) => ({ default: module.ProductivityPanel })));
+const WorkspacePluginManager = lazy(() => import('@/components/WorkspacePluginManager').then((module) => ({ default: module.WorkspacePluginManager })));
+const PixelBoard = lazy(() => import('@/components/PixelBoard').then((module) => ({ default: module.PixelBoard })));
 
 export function Workspace(): React.JSX.Element {
   const bridge = useBridge();
@@ -52,6 +55,8 @@ export function Workspace(): React.JSX.Element {
   const [history, setHistory] = useState<ConversationSummary[]>([]);
   const [historySearch, setHistorySearch] = useState('');
   const [projects, setProjects] = useState<ProjectView[]>([]);
+  const [libraryDocuments, setLibraryDocuments] = useState<DocumentLibraryItem[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
   const [projectDraft, setProjectDraft] = useState('');
   const [tools, setTools] = useState<ToolCatalogEntry[]>([]);
   const [plugins, setPlugins] = useState<PluginView[]>([]);
@@ -227,7 +232,12 @@ export function Workspace(): React.JSX.Element {
     if (bridge.kind !== 'ready') return;
     let alive = true;
     const api = bridge.bridge.memory;
-    const load = (): void => { void api.listProjects().then((items) => { if (alive) setProjects(items); }).catch(() => undefined); };
+    const load = (): void => {
+      void api.listProjects().then((items) => { if (alive) setProjects(items); }).catch(() => undefined);
+      void Promise.all([bridge.bridge.plugins.list(), bridge.bridge.tools.list()]).then(([nextPlugins, nextTools]) => {
+        if (alive) { setPlugins(nextPlugins); setTools(nextTools); }
+      }).catch(() => undefined);
+    };
     load();
     const unsubscribe = safeSubscribe(api.onProjectChanged, load);
     return () => { alive = false; unsubscribe(); };
@@ -417,8 +427,30 @@ export function Workspace(): React.JSX.Element {
 
   const currentProject = projects.find((project) => project.active);
 
+  const refreshLibrary = useCallback(async (): Promise<void> => {
+    if (bridge.kind !== 'ready') return;
+    setLibraryLoading(true);
+    try {
+      setLibraryDocuments(await bridge.bridge.documents.listLibrary());
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Pixel could not load this project’s Library.');
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, [bridge]);
+
+  const readLibraryDocument = useCallback(async (documentId: string, startChunk: number): Promise<DocumentLibraryRead | null> => {
+    if (bridge.kind !== 'ready') return null;
+    return bridge.bridge.documents.readLibraryDocument(documentId, startChunk);
+  }, [bridge]);
+
+  useEffect(() => {
+    if (view !== 'library' || bridge.kind !== 'ready') return;
+    void refreshLibrary();
+  }, [bridge, currentProject?.id, refreshLibrary, view]);
+
   const viewTitle: Record<WorkspaceView, string> = {
-    chat: 'Workspace', projects: 'Projects', tasks: 'Tasks & Activity', notes: 'Notes & Planning', skills: 'Skills & Routines',
+    chat: 'Workspace', projects: 'Projects', library: 'Library', tasks: 'Tasks & Activity', notes: 'Notes & Planning', skills: 'Skills & Routines',
     memory: 'Memory', tools: 'Tools', plugins: 'Plugins', board: 'Pixel Board', settings: 'Settings',
   };
   const pendingApproval = permission ? (
@@ -521,27 +553,34 @@ export function Workspace(): React.JSX.Element {
             />
           </section> : null}
 
-          {view === 'projects' ? <WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /> : null}
-          {view === 'tasks' ? <WorkspaceTasks tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setView('skills'); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /> : null}
-          {view === 'notes' ? <ProductivityPanel /> : null}
-          {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
-          {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></div> : null}
+          {view === 'projects' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /></Suspense> : null}
+          {view === 'library' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceLibrary documents={libraryDocuments} loading={libraryLoading} onRefresh={() => void refreshLibrary()} onRead={readLibraryDocument} /></Suspense> : null}
+          {view === 'tasks' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceTasks tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setView('skills'); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /></Suspense> : null}
+          {view === 'notes' ? <Suspense fallback={<WorkspacePanelLoading />}><ProductivityPanel /></Suspense> : null}
+          {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><Suspense fallback={<WorkspacePanelLoading />}><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></Suspense></div> : null}
+          {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><Suspense fallback={<WorkspacePanelLoading />}><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></Suspense></div> : null}
           {view === 'tools' ? <ToolsView tools={tools} /> : null}
-          {view === 'plugins' ? <WorkspacePluginManager plugins={plugins} onChange={async (action, pluginId, enabled) => {
+          {view === 'plugins' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspacePluginManager plugins={plugins} onChange={async (
+            action: PluginLifecycleAction,
+            pluginId: string,
+            enabled?: boolean,
+            availability?: PluginProjectAvailability,
+          ) => {
             if (bridge.kind !== 'ready') return;
             try {
               const next = action === 'install' ? await bridge.bridge.plugins.install(pluginId)
                 : action === 'update' ? await bridge.bridge.plugins.update(pluginId)
                 : action === 'uninstall' ? await bridge.bridge.plugins.uninstall(pluginId)
-                  : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
+                  : action === 'project-availability' ? await bridge.bridge.plugins.setProjectAvailability(pluginId, availability ?? 'inherit')
+                    : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
               setPlugins(next);
               setTools(await bridge.bridge.tools.list());
             } catch (error) {
               setNotice(error instanceof Error ? error.message : 'Pixel could not update that plugin.');
             }
-          }} /> : null}
-          {view === 'board' ? <PixelBoard emergencyStopped={stopped} /> : null}
-          {view === 'settings' ? <div className="workspace-settings"><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></div> : null}
+          }} /></Suspense> : null}
+          {view === 'board' ? <Suspense fallback={<WorkspacePanelLoading />}><PixelBoard emergencyStopped={stopped} /></Suspense> : null}
+          {view === 'settings' ? <div className="workspace-settings"><Suspense fallback={<WorkspacePanelLoading />}><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></Suspense></div> : null}
         </main>
 
         {contextOpen ? <WorkspaceTaskDetails
@@ -614,4 +653,8 @@ function mergeTask(current: TaskRecord[], next: TaskRecord): TaskRecord[] {
 
 function taskTimestamp(task: TaskRecord): number {
   return task.updatedAt ?? task.createdAt;
+}
+
+function WorkspacePanelLoading(): React.JSX.Element {
+  return <div className="workspace-panel-loading" role="status" aria-live="polite">Loading this view…</div>;
 }

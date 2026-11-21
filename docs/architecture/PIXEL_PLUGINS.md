@@ -67,12 +67,21 @@ remote package update mechanism.
 
 Migration 10 creates the global `plugin_installations` table. Install starts
 disabled. Enable registers the manifest's tools in the live model-facing
-registry; disable unregisters the tools and their volatile grants. Uninstall
-removes installation state and registration. The lifecycle records are global
-to the user profile, not project-specific. Lifecycle events go to Pixel's
-existing audit store. The Workspace Plugins view separates Browse from
-Installed, displays version, capabilities, permissions, connection state and
-last execution health, and provides Install, Enable/Disable and Uninstall. If
+registry; disable unregisters the tools. Disable, update, uninstall and
+project-scope changes cancel pending approvals and revoke volatile and
+persistent grants before changing registration. Uninstall removes installation
+state and registration. Migration 12 adds
+`plugin_project_availability`, a cascading per-project enabled/disabled
+override; no row means inherit the global setting. A project override can
+narrow availability but cannot turn on a globally disabled, incompatible, or
+uninstalled plugin. The ToolRegistry checks the active project at model-schema
+construction, lookup, argument validation and permission evaluation, so an old
+model call cannot bypass a project switch. Changing an override revokes the
+plugin tool's pending approval, session/one-shot grants and persistent grants.
+Lifecycle and scope changes go to Pixel's existing audit store. The Workspace
+Plugins view separates Browse from Installed, displays version, capabilities,
+permissions, connection state and last execution health, and provides Install,
+Enable/Disable, per-project availability and Uninstall. If
 the installed manifest version differs from the currently bundled manifest
 while the Pixel API version is supported, the manager reports both versions
 and offers Update through the same reviewed bundled catalog. Updating replaces
@@ -107,10 +116,10 @@ vault.
 - The adapter records latest execution error/success in plugin state. This is
   operational status from the latest call, not a background availability
   probe.
-- Project availability, dependency conflict resolution across third-party
-  extensions, remote/community updates, OAuth/account lifecycle, encrypted
-  generic credentials, and dynamic third-party MCP connections are future
-  work. There is no marketplace downloader or unreviewed package installer.
+- Dependency conflict resolution across third-party plugins, remote/community
+  updates, OAuth/account lifecycle, encrypted generic credentials, and dynamic
+  third-party MCP connections are future work. There is no marketplace downloader
+  or unreviewed package installer.
 
 ## First integration: GitHub public repository reader
 

@@ -136,6 +136,9 @@ export const CHANNELS = {
   productivityTasksCreate: 'productivity:tasks:create',
   productivityTasksUpdate: 'productivity:tasks:update',
 
+  documentsLibraryList: 'documents:library:list',
+  documentsLibraryRead: 'documents:library:read',
+
   auditList: 'audit:list',
   toolsList: 'tools:list',
   pluginsList: 'plugins:list',
@@ -143,6 +146,7 @@ export const CHANNELS = {
   pluginsUpdate: 'plugins:update',
   pluginsUninstall: 'plugins:uninstall',
   pluginsSetEnabled: 'plugins:setEnabled',
+  pluginsSetProjectAvailability: 'plugins:setProjectAvailability',
 
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',

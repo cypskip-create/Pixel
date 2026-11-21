@@ -10,9 +10,9 @@ image, not sampled from the original application source.
 
 | Token | Dark | Light | Use |
 | --- | --- | --- | --- |
-| `--color-app-bg` | `#0C0B0A` | `#F6F2ED` | Main conversation canvas |
-| `--color-sidebar` | `#11100F` | `#EFE8E0` | Navigation and list panels |
-| `--color-surface` | `#1B1816` | `#FFFFFF` | Opaque grouped surfaces |
+| `--color-app-bg` | `#0B0A09` | `#F6F2ED` | Main conversation canvas |
+| `--color-sidebar` | `#0D0B0C` | `#EFE8E0` | Navigation and list panels |
+| `--color-surface` | `#171410` | `#FFFFFF` | Opaque grouped surfaces |
 | `--color-surface-raised` | `#211D1A` | `#FBF8F4` | Raised cards and controls |
 | `--color-hover` | `#28221E` | `#EEE5DC` | Hover surface |
 | `--color-selected` | `#30231B` | `#F6DCC7` | Selected navigation and mode |
@@ -22,7 +22,7 @@ image, not sampled from the original application source.
 | `--color-ink` | `#E9E4DD` | `#161B1A` | Primary text |
 | `--color-ink-soft` | `#C9C1B8` | `#414947` | Secondary text |
 | `--color-ink-dim` | `#96908A` | `#68716E` | Metadata and quiet labels |
-| `--color-accent` | `#F28A43` | `#B85B20` | Focus, primary action, active cue |
+| `--color-accent` | `#F18A4F` | `#B85B20` | Focus, primary action, active cue |
 | `--color-accent-hover` | `#FFA262` | `#964414` | Accent hover |
 | `--color-accent-foreground` | `#1A100A` | `#FFFFFF` | Text/icons on accent |
 | `--color-success` | `#79B58A` | `#39794C` | Verified success |
@@ -53,6 +53,10 @@ Mint remains scoped to Pix; it is not the Workspace interaction accent.
   readable column. Keep Pix beside the composer and non-interactive.
 - Projects use real local project records, with searchable grid/list views and
   matte folder illustrations. No sample project records are injected.
+- The Library groups only the active project's indexed documents into folder
+  cards and compact file rows. Search, refresh and passage preview use the
+  project-scoped document index; renderer metadata omits absolute paths, and
+  preview reads recheck source freshness.
 - Contextual secondary panels remain on demand. Do not duplicate the main
   navigation in individual screens.
 - At narrower window widths, reduce the rail to icons and constrain or collapse
@@ -74,7 +78,12 @@ Mint remains scoped to Pix; it is not the Workspace interaction accent.
 
 ## Reference adaptation and evidence limits
 
-The Ostrand reference image supplied on 2026-11-21 is 1170×789. Its visible
+The Ostrand reference image supplied on 2026-11-21 is 1170×789. Raster samples
+from the app canvas at (60,104) and a representative card at (800,450) were
+`#0C0B09` and `#191410`; a saturated chart bar at (845,536) was `#F18A4F`.
+Because the source is a JPEG, the selected tokens use nearby rounded values
+(`--color-app-bg #0B0A09`, `--color-surface #171410`) to avoid encoding local
+compression noise as a design rule. Its visible
 content area has three columns: approximately 188 px navigation, 302 px
 matching-results list and 586 px primary panel, plus a 49 px toolbar. Those are
 image measurements and visual observations, not CSS values extracted from the

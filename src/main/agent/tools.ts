@@ -770,10 +770,16 @@ export class ToolRegistry {
   private stopped = false;
   private readonly grants = new Map<string, PermissionGrant>();
   private readonly onGrantUsed?: (grant: PermissionGrant) => void;
+  private readonly isAvailable?: (toolName: string) => boolean;
 
-  constructor(tools: readonly ToolDefinition[] = BUILTIN_TOOLS, onGrantUsed?: (grant: PermissionGrant) => void) {
+  constructor(
+    tools: readonly ToolDefinition[] = BUILTIN_TOOLS,
+    onGrantUsed?: (grant: PermissionGrant) => void,
+    isAvailable?: (toolName: string) => boolean,
+  ) {
     for (const t of tools) this.tools.set(t.name, t);
     this.onGrantUsed = onGrantUsed;
+    this.isAvailable = isAvailable;
   }
 
   register(tool: ToolDefinition): void {
@@ -788,16 +794,17 @@ export class ToolRegistry {
   }
 
   list(): ToolDefinition[] {
-    return [...this.tools.values()];
+    return [...this.tools.values()].filter((tool) => this.isToolAvailable(tool.name));
   }
 
   get(name: string): ToolDefinition | undefined {
-    return this.tools.get(name);
+    const tool = this.tools.get(name);
+    return tool && this.isToolAvailable(name) ? tool : undefined;
   }
 
   /** Validate model supplied arguments against the tool's declared JSON schema. */
   validateArgs(name: string, args: unknown): { ok: true } | { ok: false; message: string } {
-    const tool = this.tools.get(name);
+    const tool = this.get(name);
     if (!tool) return { ok: false, message: 'The requested capability is not registered.' };
     let schema = this.argumentSchemas.get(name);
     if (!schema) {
@@ -857,14 +864,14 @@ export class ToolRegistry {
   }
 
   canGrantAlways(toolName: string, args: Record<string, unknown>): { allowed: boolean; target: ReturnType<typeof deriveGrantScope>; reason: string } {
-    const tool = this.tools.get(toolName);
+    const tool = this.get(toolName);
     const risk = tool ? classifyInvocationRisk(tool, args) : 'critical';
     if (!tool || !riskAllowsGrantDuration(risk, 'always')) return { allowed: false, target: {}, reason: 'This action is sensitive and always requires fresh approval.' };
     return standingGrantEligibility(toolName, args);
   }
 
   canGrantSession(toolName: string, args: Record<string, unknown>): { allowed: boolean; target: ReturnType<typeof deriveGrantScope>; reason: string } {
-    const tool = this.tools.get(toolName);
+    const tool = this.get(toolName);
     if (!tool || !riskAllowsGrantDuration(classifyInvocationRisk(tool, args), 'session')) {
       return { allowed: false, target: deriveGrantScope(toolName, args), reason: 'Sensitive actions require fresh approval every time.' };
     }
@@ -873,7 +880,14 @@ export class ToolRegistry {
 
   /** Add one exact grant. Persistent entries are rejected unless policy and scope match. */
   grant(grant: PermissionGrant): boolean {
-    const declaredRisk = this.tools.get(grant.toolName)?.risk;
+    // Screen grants use dedicated synthetic names so their narrower scope can
+    // never be confused with a general tool grant. They inherit the declared
+    // risk from the observation tool that created them.
+    const grantTool = grant.toolName === SCREEN_STANDING_GRANT_TOOL || grant.toolName === SCREEN_SESSION_GRANT_TOOL
+      ? this.get('analyze_screen')
+      : this.get(grant.toolName);
+    const declaredRisk = grantTool?.risk;
+    if (!declaredRisk) return false;
     if (grant.scope === 'always' && (
       grant.risk === 'high' || grant.risk === 'critical' || declaredRisk === 'high' ||
       grant.policyVersion !== PERMISSION_POLICY_VERSION ||
@@ -907,6 +921,22 @@ export class ToolRegistry {
     return [...this.grants.values()].filter(
       (g) => !g.revokedAt && (g.scope === 'always' || g.expiresAt === undefined || g.expiresAt > now),
     );
+  }
+
+  /** Clear all permission grants tied to a capability whose scope changed. */
+  revokeForTool(toolName: string): number {
+    let count = 0;
+    for (const [id, grant] of this.grants) {
+      if (grant.toolName !== toolName) continue;
+      this.grants.delete(id);
+      count += 1;
+    }
+    return count;
+  }
+
+  private isToolAvailable(toolName: string): boolean {
+    try { return this.isAvailable?.(toolName) ?? true; }
+    catch { return false; }
   }
 }
 

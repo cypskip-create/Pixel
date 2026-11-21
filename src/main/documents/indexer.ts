@@ -11,8 +11,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdirSync, statSync } from 'node:fs';
-import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { lstatSync, readdirSync } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import type { Database, SqlValue } from '../data/database';
 import type { PythonWorker } from '../services/python-worker';
 import type { ExtractedDocument } from '../services/python-worker';
@@ -86,16 +86,16 @@ export function hashContent(text: string): string {
 }
 
 /**
- * Change-detection signature: size plus whole-second mtime.
+ * Change-detection signature: size plus modification time rounded to milliseconds.
  *
  * Deliberately not a content hash: hashing would mean reading every file on every
- * scan, which is the cost this exists to avoid. A same-size edit within the same
- * second is missed, which is an acceptable trade for a document index that also
- * records the text hash of what it actually extracted.
+ * scan, which is the cost this exists to avoid. This catches same-size edits
+ * within a second on filesystems that report sub-second timestamps. As with any
+ * metadata signature, an edit that restores both size and mtime is not detected.
  */
 export function signatureOf(sizeBytes: number, modifiedAt: number): string {
   return createHash('sha256')
-    .update(`${String(sizeBytes)}:${String(Math.floor(modifiedAt / 1000))}`)
+    .update(`${String(sizeBytes)}:${String(Math.floor(modifiedAt))}`)
     .digest('hex')
     .slice(0, 16);
 }
@@ -114,8 +114,9 @@ export interface DirectoryEntry {
 /**
  * Walk a directory for indexable files.
  *
- * Deterministic order, bounded depth, skip hidden and node_modules-style trees so a
- * careless selection cannot turn into indexing the whole profile.
+ * Deterministic order, bounded depth, no symlink traversal, and skip hidden,
+ * sensitive-name and node_modules-style trees so a broad selection cannot
+ * index unrelated or credential-bearing material.
  */
 interface DiscoveryResult {
   entries: DirectoryEntry[];
@@ -134,6 +135,7 @@ function discoverDocumentsWithStatus(
   root: string,
   options: { maxFiles?: number; maxDepth?: number; maxBytes?: number } = {},
 ): DiscoveryResult {
+  const resolvedRoot = resolve(root);
   const maxFiles = options.maxFiles ?? MAX_FILES_PER_RUN;
   const maxDepth = options.maxDepth ?? MAX_WALK_DEPTH;
   const maxBytes = options.maxBytes ?? 32 * 1024 * 1024;
@@ -141,6 +143,14 @@ function discoverDocumentsWithStatus(
 
   const results: DirectoryEntry[] = [];
   let complete = true;
+
+  try {
+    if (hasSymlinkPathComponent(resolvedRoot) || !lstatSync(resolvedRoot).isDirectory()) {
+      return { entries: results, complete: false };
+    }
+  } catch {
+    return { entries: results, complete: false };
+  }
 
   const walk = (dir: string, depth: number): void => {
     if (depth > maxDepth || results.length >= maxFiles) {
@@ -160,15 +170,18 @@ function discoverDocumentsWithStatus(
         complete = false;
         return;
       }
-      if (entry.startsWith('.')) continue;
+      if (entry.startsWith('.') || isSensitiveDocumentName(entry)) continue;
       const full = join(dir, entry);
       let stats;
       try {
-        stats = statSync(full);
+        // lstat is intentional: stat follows a link and could index files
+        // outside the directory the user approved.
+        stats = lstatSync(full);
       } catch {
         complete = false;
         continue;
       }
+      if (stats.isSymbolicLink()) continue;
       if (stats.isDirectory()) {
         if (skip.has(entry.toLowerCase())) continue;
         walk(full, depth + 1);
@@ -186,8 +199,28 @@ function discoverDocumentsWithStatus(
     }
   };
 
-  walk(resolve(root), 0);
+  walk(resolvedRoot, 0);
   return { entries: results, complete };
+}
+
+function isSensitiveDocumentName(name: string): boolean {
+  const lower = basename(name).toLowerCase();
+  return lower === '.env' || (lower.startsWith('.env.') && !['.env.example', '.env.sample', '.env.template'].includes(lower))
+    || /^id_(rsa|dsa|ed25519|ecdsa)(\.pub)?$/.test(lower)
+    || /(^|[._-])(credential|credentials|secret|secrets|password|token)([._-]|$)/.test(lower)
+    || /\.(pem|p12|pfx|key)$/.test(lower)
+    || lower === '.npmrc';
+}
+
+/** Refuse a selected root reached through a symbolic link or junction. */
+function hasSymlinkPathComponent(path: string): boolean {
+  const volumeRoot = parse(path).root;
+  let current = volumeRoot;
+  for (const component of path.slice(volumeRoot.length).split(sep).filter(Boolean)) {
+    current = join(current, component);
+    if (lstatSync(current).isSymbolicLink()) return true;
+  }
+  return false;
 }
 
 export interface IndexProgress {
@@ -206,6 +239,25 @@ export interface IndexResult {
   errors: Array<{ path: string; message: string }>;
   /** Existing entries were retained because the scan was partial or cancelled. */
   cleanupSkipped: boolean;
+}
+
+export interface IndexedDocumentPassage {
+  ordinal: number;
+  content: string;
+  location: string | null;
+}
+
+export interface IndexedDocumentRead {
+  state: 'ready' | 'stale' | 'unavailable';
+  documentId: string;
+  title: string;
+  path: string;
+  kind: string;
+  indexedAt: number;
+  chunkCount: number;
+  startChunk: number;
+  hasMore: boolean;
+  passages: IndexedDocumentPassage[];
 }
 
 export class DocumentIndex {
@@ -411,17 +463,98 @@ export class DocumentIndex {
     }
   }
 
-  listDocuments(projectId: string): Array<{ id: string; path: string; chunks: number }> {
+  listDocuments(projectId: string): Array<{
+    id: string; path: string; title: string; kind: string; sizeBytes: number;
+    modifiedAt: number; indexedAt: number; chunks: number; folderId: string;
+    folderName: string; fileName: string;
+  }> {
     return this.db
-      .query<{ id: string; path: string; chunk_count: number }>(
-        'SELECT id, path, chunk_count FROM documents WHERE project_id = ? ORDER BY indexed_at DESC',
+      .query<{ id: string; path: string; title: string; kind: string; size_bytes: number; modified_at: number; indexed_at: number; chunk_count: number }>(
+        'SELECT id, path, title, kind, size_bytes, modified_at, indexed_at, chunk_count FROM documents WHERE project_id = ? ORDER BY indexed_at DESC',
         [projectId],
       )
-      .map((row) => ({
-        id: String(row.id),
-        path: String(row.path),
-        chunks: Number(row.chunk_count),
-      }));
+      .map((row) => {
+        const path = String(row.path);
+        const parent = dirname(path);
+        return {
+          id: String(row.id),
+          path,
+          title: String(row.title),
+          kind: String(row.kind),
+          sizeBytes: Number(row.size_bytes),
+          modifiedAt: Number(row.modified_at),
+          indexedAt: Number(row.indexed_at),
+          chunks: Number(row.chunk_count),
+          folderId: hashContent(resolve(parent).toLocaleLowerCase()).slice(0, 16),
+          folderName: basename(parent) || 'Documents',
+          fileName: basename(path),
+        };
+      });
+  }
+
+  /** Read a bounded page from the active project's indexed copy of one document. */
+  readDocument(projectId: string, documentId: string, startChunk = 0, limit = 6): IndexedDocumentRead | null {
+    if (!/^[a-zA-Z0-9_-]{1,120}$/.test(documentId)) return null;
+    const start = Number.isFinite(startChunk) ? Math.max(0, Math.trunc(startChunk)) : 0;
+    const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 6;
+    const safeLimit = Math.min(10, Math.max(1, requestedLimit));
+    const row = this.db.queryOne<{
+      id: string;
+      path: string;
+      kind: string;
+      title: string;
+      size_bytes: number;
+      modified_at: number;
+      indexed_at: number;
+      chunk_count: number;
+      error: string | null;
+    }>(
+      `SELECT id, path, kind, title, size_bytes, modified_at, indexed_at, chunk_count, error
+         FROM documents WHERE project_id = ? AND id = ?`,
+      [projectId, documentId],
+    );
+    if (!row || row.error) return null;
+
+    const base = {
+      documentId: String(row.id),
+      title: String(row.title),
+      path: String(row.path),
+      kind: String(row.kind),
+      indexedAt: Number(row.indexed_at),
+      chunkCount: Number(row.chunk_count),
+      startChunk: start,
+    };
+    let state: IndexedDocumentRead['state'] = 'ready';
+    try {
+      const path = resolve(String(row.path));
+      if (hasSymlinkPathComponent(path)) state = 'unavailable';
+      else {
+        const source = lstatSync(path);
+        if (source.isSymbolicLink() || !source.isFile()) state = 'unavailable';
+        else if (signatureOf(source.size, source.mtimeMs) !== signatureOf(Number(row.size_bytes), Number(row.modified_at))) state = 'stale';
+      }
+    } catch {
+      state = 'unavailable';
+    }
+
+    if (state !== 'ready') {
+      return { ...base, state, hasMore: false, passages: [] };
+    }
+    const rows = this.db.query<{ ordinal: number; content: string; location: string | null }>(
+      `SELECT ordinal, content, location FROM document_chunks
+        WHERE document_id = ? ORDER BY ordinal LIMIT ? OFFSET ?`,
+      [documentId, safeLimit, start],
+    );
+    return {
+      ...base,
+      state,
+      hasMore: start + rows.length < base.chunkCount,
+      passages: rows.map((passage) => ({
+        ordinal: Number(passage.ordinal),
+        content: String(passage.content),
+        location: passage.location === null ? null : String(passage.location),
+      })),
+    };
   }
 
   stats(projectId: string): { documents: number; chunks: number; failed: number } {

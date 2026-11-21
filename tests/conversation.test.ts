@@ -391,6 +391,7 @@ describe('system prompt safety rules', () => {
 
   it('treats page and document content as untrusted data', () => {
     expect(SYSTEM_PROMPT).toMatch(/untrusted data/i);
+    expect(SYSTEM_PROMPT).toMatch(/cite the document title and passage location/i);
   });
 
   it('forbids asking for secrets', () => {

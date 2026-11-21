@@ -437,6 +437,21 @@ export const MIGRATIONS: readonly Migration[] = [
         ON productivity_note_documents(project_id, note_id, created_at);
     `,
   },
+  {
+    version: 12,
+    name: 'project-scoped-plugin-availability',
+    sql: `
+      CREATE TABLE plugin_project_availability (
+        plugin_id TEXT NOT NULL REFERENCES plugin_installations(plugin_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        availability TEXT NOT NULL CHECK (availability IN ('enabled', 'disabled')),
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (plugin_id, project_id)
+      );
+      CREATE INDEX idx_plugin_project_availability_project
+        ON plugin_project_availability(project_id, plugin_id);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

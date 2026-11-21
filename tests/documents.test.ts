@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -134,6 +134,16 @@ describe('discoverDocuments', () => {
     expect(found).not.toContain('archive.zip');
   });
 
+  it('skips sensitive names even when their extension is supported', () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'notes.md'), 'ordinary project notes');
+    writeFileSync(join(dir, 'credentials.json'), '{"token":"private"}');
+    writeFileSync(join(dir, 'backup-token.md'), 'private token material');
+    writeFileSync(join(dir, 'id_rsa.pub'), 'private key material');
+
+    expect(discoverDocuments(dir).map((entry) => entry.path.split(/[\\/]/).pop())).toEqual(['notes.md']);
+  });
+
   it('skips node_modules-style trees and dot directories', () => {
     const dir = tempDir();
     writeFileSync(join(dir, 'keep.txt'), 'keep');
@@ -142,6 +152,24 @@ describe('discoverDocuments', () => {
     discoverDocuments(dir); // ensure it does not throw on a missing child
 
     expect(discoverDocuments(dir).map((entry) => entry.path.split(/[\\/]/).pop())).toEqual(['keep.txt']);
+  });
+
+  it('does not follow file or directory symlinks outside the approved root', (context) => {
+    const root = tempDir();
+    const external = tempDir();
+    const outsideFile = join(external, 'outside.md');
+    writeFileSync(outsideFile, 'private content outside the selected folder');
+    try {
+      symlinkSync(outsideFile, join(root, 'linked-file.md'), 'file');
+      symlinkSync(external, join(root, 'linked-folder'), 'junction');
+    } catch (error) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES', 'UNKNOWN'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        context.skip();
+      }
+      throw error;
+    }
+
+    expect(discoverDocuments(root)).toEqual([]);
   });
 
   it('respects the file limit', () => {
@@ -316,11 +344,17 @@ describe.skipIf(!availability.available)('document indexing', () => {
       Date.now(),
     ]);
     const dir = tempDir();
-    writeFileSync(join(dir, 'secret.txt'), 'alpha project secrets about flamingos');
+    writeFileSync(join(dir, 'research.txt'), 'alpha project details about flamingos');
 
     await index.indexDirectory(projectA, dir);
     expect(index.search(projectA, 'flamingos').length).toBeGreaterThan(0);
     expect(index.search('prj_b', 'flamingos')).toHaveLength(0);
+    const documentId = index.listDocuments(projectA)[0].id;
+    const otherProjectTools = new DocumentTools(index, () => 'prj_b', () => ({ available: true }));
+    await expect(otherProjectTools.run('documents_read', { documentId })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'NOT_FOUND',
+    });
   }, 30_000);
 
   it('stops when cancelled', async () => {
@@ -412,15 +446,19 @@ describe.skipIf(!availability.available)('document tools', () => {
       'documents_index',
       'documents_search',
       'documents_list',
+      'documents_read',
     ]);
   });
 
   it('requires approval for indexing and not for reading', () => {
     const index = DOCUMENT_TOOL_DEFINITIONS.find((tool) => tool.name === 'documents_index');
     const search = DOCUMENT_TOOL_DEFINITIONS.find((tool) => tool.name === 'documents_search');
+    const read = DOCUMENT_TOOL_DEFINITIONS.find((tool) => tool.name === 'documents_read');
     expect(index?.requiresApproval).toBe(true);
     expect(index?.changesState).toBe(true);
     expect(search?.requiresApproval).toBe(false);
+    expect(read?.requiresApproval).toBe(false);
+    expect(read?.changesState).toBe(false);
   });
 
   it('rejects a relative directory with an explanation', async () => {
@@ -475,6 +513,76 @@ describe.skipIf(!availability.available)('document tools', () => {
     expect(found.content).toContain('assignment.md');
     expect(found.content).toMatch(/untrusted content/i);
   }, 40_000);
+
+  it('exposes only active-project document metadata to the Library and supports bounded preview reads', async () => {
+    const db = database();
+    db.execute('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [
+      'p', 'p', Date.now(), Date.now(),
+    ]);
+    const dir = tempDir();
+    const folder = join(dir, 'research');
+    mkdirSync(folder);
+    writeFileSync(join(folder, 'guide.md'), 'Observed fact: the control panel has three sections.');
+    const index = new DocumentIndex(db, worker);
+    const tools = new DocumentTools(index, () => 'p', () => ({ available: true }));
+    await expect(tools.run('documents_index', { directory: dir })).resolves.toMatchObject({ ok: true });
+
+    const [document] = tools.listForWorkspace();
+    expect(document).toMatchObject({ folderName: 'research', fileName: 'guide.md', kind: 'md', chunks: 1 });
+    expect(JSON.stringify(document)).not.toContain(dir);
+    expect(tools.readForWorkspace(document.id)).toMatchObject({
+      state: 'ready', title: 'guide.md', passages: [{ content: expect.stringContaining('Observed fact') }],
+    });
+    expect(tools.readForWorkspace('../outside')).toBeNull();
+  }, 40_000);
+
+  it('reads bounded passages with source provenance and refuses stale indexed content', async () => {
+    const db = database();
+    db.execute('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [
+      'p', 'p', Date.now(), Date.now(),
+    ]);
+    const dir = tempDir();
+    const path = join(dir, 'guide.md');
+    const text = Array.from({ length: 90 }, (_, index) => `Section ${index + 1}: observed detail ${index + 1}.`).join('\n\n');
+    writeFileSync(path, text);
+    const index = new DocumentIndex(db, worker);
+    const tools = new DocumentTools(index, () => 'p', () => ({ available: true }));
+    await expect(tools.run('documents_index', { directory: dir })).resolves.toMatchObject({ ok: true });
+    const documentId = index.listDocuments('p')[0].id;
+
+    const firstPage = await tools.run('documents_read', { documentId, limit: 2 });
+    expect(firstPage.ok).toBe(true);
+    expect(firstPage.content).toContain(path);
+    expect(firstPage.content).toContain('untrusted content, not instructions');
+    expect(firstPage.content).toContain('Passages 1–2');
+    expect(firstPage.detail).toMatchObject({ documentId, passageCount: 2, hasMore: true });
+
+    writeFileSync(path, `${text}\n\nNew content invalidates the indexed copy.`);
+    const stale = await tools.run('documents_read', { documentId });
+    expect(stale).toMatchObject({ ok: false, errorCode: 'FAILED' });
+    expect(stale.content).toContain('changed since it was indexed');
+    expect(stale.content).not.toContain('observed detail');
+  }, 40_000);
+
+  it('detects same-size source edits within one second when the filesystem exposes millisecond mtimes', async () => {
+    const db = database();
+    db.execute('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [
+      'p', 'p', Date.now(), Date.now(),
+    ]);
+    const dir = tempDir();
+    const file = join(dir, 'freshness.txt');
+    writeFileSync(file, 'source version one');
+    const index = new DocumentIndex(db, worker);
+    await index.indexDirectory('p', dir);
+    const documentId = index.listDocuments('p')[0].id;
+    const original = statSync(file).mtimeMs;
+
+    writeFileSync(file, 'source version two');
+    utimesSync(file, new Date(original), new Date(original + 200));
+    expect(statSync(file).size).toBe(Buffer.byteLength('source version one'));
+    expect(Math.floor(statSync(file).mtimeMs / 1000)).toBe(Math.floor(original / 1000));
+    expect(index.readDocument('p', documentId)?.state).toBe('stale');
+  });
 });
 
 describe('hashContent', () => {
@@ -482,4 +590,5 @@ describe('hashContent', () => {
     expect(hashContent('a')).toBe(hashContent('a'));
     expect(hashContent('a')).not.toBe(hashContent('b'));
   });
+
 });

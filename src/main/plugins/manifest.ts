@@ -46,7 +46,16 @@ export const GITHUB_PUBLIC_PLUGIN: PixelPluginManifest = {
 
 export const BUNDLED_PLUGINS: readonly PixelPluginManifest[] = [GITHUB_PUBLIC_PLUGIN];
 
-export function pluginView(manifest: PixelPluginManifest, state?: { installed: boolean; enabled: boolean; compatibility?: PluginView['compatibility']; installedVersion?: string; updatedAt?: number; error?: string }): PluginView {
+export function pluginView(manifest: PixelPluginManifest, state?: {
+  installed: boolean;
+  enabled: boolean;
+  compatibility?: PluginView['compatibility'];
+  installedVersion?: string;
+  updatedAt?: number;
+  error?: string;
+  availableInProject?: boolean;
+  projectAvailability?: PluginView['projectAvailability'];
+}): PluginView {
   const installed = state?.installed ?? false;
   const enabled = state?.enabled ?? false;
   return {
@@ -65,5 +74,7 @@ export function pluginView(manifest: PixelPluginManifest, state?: { installed: b
     ...(state?.installedVersion ? { installedVersion: state.installedVersion } : {}),
     ...(state?.updatedAt ? { updatedAt: state.updatedAt } : {}),
     ...(state?.error ? { error: state.error } : {}),
+    ...(state?.availableInProject !== undefined ? { availableInProject: state.availableInProject } : {}),
+    ...(state?.projectAvailability ? { projectAvailability: state.projectAvailability } : {}),
   };
 }

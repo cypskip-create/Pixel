@@ -13,20 +13,30 @@ interface PluginInstallationRow {
   last_error: string | null;
 }
 
+interface ProjectAvailabilityRow {
+  availability: 'enabled' | 'disabled';
+}
+
 /** Durable global lifecycle state for bundled, reviewed Pixel plugins. */
 export class PluginStore {
   constructor(private readonly db: Database, private readonly manifests: readonly PixelPluginManifest[] = BUNDLED_PLUGINS) {}
 
-  list(): PluginView[] {
+  list(projectId?: string): PluginView[] {
     const rows = this.db.query<PluginInstallationRow>('SELECT * FROM plugin_installations');
     const byId = new Map(rows.map((row) => [String(row.plugin_id), row]));
     return this.manifests.map((manifest) => {
       const row = byId.get(manifest.id);
       const apiCompatible = manifest.pixelApiVersion === 1;
       const versionMatches = !row || row.manifest_version === manifest.version;
+      const globallyEnabled = Boolean(row?.enabled) && apiCompatible && versionMatches;
+      const override = projectId
+        ? this.projectAvailability(manifest.id, projectId)
+        : 'inherit';
       return pluginView(manifest, {
         installed: Boolean(row),
-        enabled: Boolean(row?.enabled) && apiCompatible && versionMatches,
+        enabled: globallyEnabled,
+        availableInProject: globallyEnabled && override !== 'disabled',
+        projectAvailability: override,
         compatibility: !row ? 'not_installed' : !apiCompatible ? 'unsupported_api' : !versionMatches ? 'update_available' : 'compatible',
         installedVersion: row?.manifest_version,
         updatedAt: row ? Number(row.updated_at) : undefined,
@@ -42,6 +52,49 @@ export class PluginStore {
   installedTools(): PixelPluginManifest['tools'] {
     const enabled = new Set(this.list().filter((item) => item.enabled).map((item) => item.id));
     return this.manifests.filter((manifest) => enabled.has(manifest.id)).flatMap((manifest) => manifest.tools);
+  }
+
+  /** Whether a registered plugin tool is available in one project. Core tools are unaffected. */
+  isToolAvailable(projectId: string, toolName: string): boolean {
+    const manifest = this.manifests.find((candidate) => candidate.tools.some((tool) => tool.name === toolName));
+    if (!manifest) return true;
+    const row = this.db.queryOne<PluginInstallationRow>('SELECT * FROM plugin_installations WHERE plugin_id = ?', [manifest.id]);
+    if (!row || row.enabled !== 1 || row.manifest_version !== manifest.version || manifest.pixelApiVersion !== 1) return false;
+    return this.projectAvailability(manifest.id, projectId) !== 'disabled';
+  }
+
+  setProjectAvailability(pluginId: string, projectId: string, availability: 'inherit' | 'enabled' | 'disabled'): void {
+    this.requireManifest(pluginId);
+    if (typeof projectId !== 'string' || projectId.length === 0 || projectId.length > 200) {
+      throw new Error('A valid Pixel project is required.');
+    }
+    if (!['inherit', 'enabled', 'disabled'].includes(availability)) {
+      throw new Error('Project plugin availability must be inherit, enabled, or disabled.');
+    }
+    const installed = this.db.queryOne<{ plugin_id: string }>(
+      'SELECT plugin_id FROM plugin_installations WHERE plugin_id = ?', [pluginId],
+    );
+    if (!installed) throw new Error('Install this plugin before changing project availability.');
+    if (availability === 'inherit') {
+      this.db.execute('DELETE FROM plugin_project_availability WHERE plugin_id = ? AND project_id = ?', [pluginId, projectId]);
+      return;
+    }
+    const now = Date.now();
+    this.db.execute(
+      `INSERT INTO plugin_project_availability (plugin_id, project_id, availability, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(plugin_id, project_id) DO UPDATE SET availability = excluded.availability, updated_at = excluded.updated_at`,
+      [pluginId, projectId, availability, now],
+    );
+  }
+
+  private projectAvailability(pluginId: string, projectId: string): 'inherit' | 'enabled' | 'disabled' {
+    if (!projectId) return 'inherit';
+    const row = this.db.queryOne<ProjectAvailabilityRow>(
+      'SELECT availability FROM plugin_project_availability WHERE plugin_id = ? AND project_id = ?',
+      [pluginId, projectId],
+    );
+    return row?.availability ?? 'inherit';
   }
 
   install(id: string): void {

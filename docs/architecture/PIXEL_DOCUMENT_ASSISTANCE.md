@@ -3,12 +3,25 @@
 ## Reading, extraction and provenance
 
 `DocumentIndex` walks only a user-selected directory, with limits on depth,
-file count and file size. It skips symbolic links and extracts supported PDF,
+file count and file size. It refuses roots reached through symlinks or junctions,
+skips linked entries and credential-like filenames, and extracts supported PDF,
 Office, CSV/TSV, text, structured-text, HTML and source formats through the
 Python worker. Extracted text is chunked and indexed in the active project;
 search results retain the original path and chunk location. The agent receives
 retrieved excerpts inside an untrusted-content frame. Index/search/list are
 registered in the shared tool registry and execute through `ToolExecutors`.
+
+`documents_list` returns project-scoped document IDs. `documents_read` accepts
+one of those IDs and returns at most ten indexed passages per call with the
+document title, path and passage locations. It checks that the original regular
+file still matches the indexed size/mtime signature and refuses to return cached
+text when the source has changed or disappeared. Reads remain project-isolated;
+the system prompt asks Pixel to cite document title and passage location when
+summarizing retrieved evidence. Freshness uses the indexer's size/mtime
+signature with millisecond timestamp precision, catching ordinary same-size
+edits within a second on filesystems that expose it. Since this metadata-only
+check avoids rereading and hashing the whole file, rewriting a source while
+restoring both size and mtime can evade detection.
 
 ## Authoring and exports
 
