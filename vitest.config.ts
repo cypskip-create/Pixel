@@ -23,9 +23,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    setupFiles: [resolve(here, 'tests/setup.ts')],
     globals: false,
     reporters: ['default'],
-    // Main-process code under test is dependency-injected, so no setup file
-    // is needed and no real network or API key is ever touched.
+    // Main-process code under test is dependency-injected; setup only supports
+    // an isolated test home when PIXEL_TEST_HOME is explicitly provided.
   },
 });

@@ -1,5 +1,69 @@
 # Pixel Windows acceptance procedure
 
+## Core Completion 6.2 — current local verification boundary
+
+Source base reviewed: `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`. The cited
+Windows workflow [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339)
+passed on that base commit and built unpacked, portable and NSIS artifacts;
+the new clipboard changes below are local and have not been covered by that
+run. No commit, push, release, install, upgrade or uninstall was performed.
+
+The current local checks are: TypeScript passed; Vitest **877 passed, 27
+skipped, 0 failed (904 total; 62 files passed, 1 skipped)**; production build passed; native helper
+compilation passed; Python worker tests **12/12 passed**. Skips are the 17
+Chromium-dependent browser cases, 7 local NSIS cases (`makensis` absent), and 3
+opt-in foreground integration cases. The local sandboxed preload test rebuilt
+the bundled preload but Electron exited `2147483651` (`0x80000003`) before its
+report; the hosted run's preload smoke passed on the base SHA. This is an
+environment difference, not evidence that local bridge behavior passed.
+
+### Clipboard tool laptop acceptance
+
+After the user pushes the local changes and the resulting Windows Actions run
+passes, use that run's artifact or build the same checkout. With harmless test
+text only:
+
+1. In Agent mode ask Pixel to read the clipboard. Approve once. Verify the
+   response can use the text, then restart Pixel and confirm the response is
+   not in persistent chat history or task result history.
+2. Ask Pixel to copy a harmless sentence. Approve once. Paste it manually into
+   Notepad and confirm it matches. Ask Pixel to restore the previous clipboard
+   and confirm restoration works only if the clipboard has not changed since
+   Pixel copied.
+3. Change the clipboard manually, then attempt the restore token. Confirm Pixel
+   leaves the new clipboard untouched.
+4. Put a disposable non-secret text value on the clipboard and ask Pixel to
+   place it in a uniquely named Notepad edit control. Approve once. Confirm the
+   text appears and the UIA read-back verifies it. This tool replaces the
+   control's value; it does not perform caret-position Ctrl+V.
+5. Confirm credential-like samples are refused without exposing their value in
+   approval cards, audit summaries, task args or durable task results. Verify
+   Emergency Stop cancels queued tool work and clears in-memory restore
+   snapshots.
+
+Do not use real credentials to test pattern refusal. Pattern matching is not a
+secret detector and may not recognize every sensitive string. The current
+clipboard implementation handles plain text only.
+
+### Installed-app procedure after a new hosted build
+
+1. Run `npm ci`, `npx playwright install chromium`, `npm run typecheck`,
+   `npm test -- --reporter=dot`, `npm run test:voice-worker`,
+   `npm run build:native`, `npm run build`, `npm run test:preload-sandbox`,
+   `npm run build:voice-worker`, `npm run pack`, and `npm run dist` in the
+   exact pushed checkout. Preserve the console output.
+2. Install the generated NSIS installer normally. Verify Pixel starts and the
+   preload bridge, Settings return navigation and clipboard approval flow work.
+3. Upgrade the existing installation while preserving user data; verify
+   conversations, settings, projects, encrypted API key, task history and
+   downloaded voice models remain present. Do not inspect or print key/model
+   contents.
+4. Uninstall Pixel and confirm the user-data directory remains intact. Reinstall
+   and verify the same profile can be reopened.
+5. Record the pushed commit SHA, workflow URL, installer file hash, OS build,
+   display scale, test totals and observed failures. Do not call an installer
+   step passed unless it was actually run interactively.
+
 ## Experience 5.2 — Board agent and workspace follow-up
 
 The current local change is based on latest GitHub `main`

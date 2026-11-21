@@ -22,7 +22,8 @@ describe('local file tools', () => {
   it('exposes bounded file operations as high-risk approved operations', () => {
     expect(FILE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([
       'file_list', 'file_read', 'file_search', 'file_metadata', 'file_write',
-      'directory_create', 'file_copy', 'file_rename',
+      'directory_create', 'file_copy', 'file_rename', 'file_batch_copy',
+      'file_batch_rename', 'file_find_duplicates',
     ]);
     expect(FILE_TOOL_DEFINITIONS.every((tool) => tool.requiresApproval && tool.risk === 'high')).toBe(true);
     expect(FILE_TOOL_DEFINITIONS.find((tool) => tool.name === 'file_write')?.changesState).toBe(true);
@@ -167,6 +168,54 @@ describe('local file tools', () => {
     expect(existsSync(copy)).toBe(false);
     expect(readFileSync(renamed, 'utf8')).toBe('harmless fixture');
     expect(tools.run('file_rename', { source, destination: renamed }).errorCode).toBe('DENIED');
+  });
+
+  it('runs bounded copy/move batches and finds duplicates by size plus SHA-256', () => {
+    const root = tempHome();
+    const first = join(root, 'one.txt');
+    const second = join(root, 'two.txt');
+    const firstCopy = join(root, 'copy-one.txt');
+    const secondCopy = join(root, 'copy-two.txt');
+    writeFileSync(first, 'same fixture');
+    writeFileSync(second, 'same fixture');
+    const tools = new FileTools();
+
+    const duplicates = tools.run('file_find_duplicates', { directory: root });
+    expect(duplicates.ok).toBe(true);
+    expect(duplicates.detail?.groups).toHaveLength(1);
+    expect((duplicates.detail?.groups as Array<{ paths: string[] }>)[0]?.paths).toEqual(expect.arrayContaining([first, second]));
+
+    const copied = tools.run('file_batch_copy', { operations: [
+      { source: first, destination: firstCopy },
+      { source: second, destination: secondCopy },
+    ] });
+    expect(copied).toMatchObject({ ok: true, verification: { source: 'bounded filesystem batch postconditions' } });
+    expect(readFileSync(firstCopy, 'utf8')).toBe('same fixture');
+    expect(readFileSync(secondCopy, 'utf8')).toBe('same fixture');
+
+    const moved = tools.run('file_batch_rename', { operations: [
+      { source: firstCopy, destination: join(root, 'moved-one.txt') },
+      { source: secondCopy, destination: join(root, 'moved-two.txt') },
+    ] });
+    expect(moved.ok).toBe(true);
+    expect(existsSync(firstCopy)).toBe(false);
+    expect(existsSync(secondCopy)).toBe(false);
+  });
+
+  it('refuses a batch before mutation when a destination exists or an item is secret-like', () => {
+    const root = tempHome();
+    const source = join(root, 'ordinary.txt');
+    const existing = join(root, 'existing.txt');
+    const secret = join(root, 'access-token.txt');
+    writeFileSync(source, 'ordinary');
+    writeFileSync(existing, 'keep');
+    writeFileSync(secret, 'private');
+    const tools = new FileTools();
+    expect(tools.run('file_batch_copy', { operations: [{ source, destination: existing }] }).ok).toBe(false);
+    expect(tools.run('file_batch_copy', { operations: [{ source: secret, destination: join(root, 'copy.txt') }] }).errorCode).toBe('DENIED');
+    expect(existsSync(source)).toBe(true);
+    expect(readFileSync(existing, 'utf8')).toBe('keep');
+    expect(existsSync(join(root, 'copy.txt'))).toBe(false);
   });
 
   it('refuses sensitive file names for search, metadata, copy and rename', () => {

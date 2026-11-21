@@ -147,6 +147,24 @@ describe('agent loop - direct answer', () => {
   });
 });
 
+describe('clipboard privacy in durable task records', () => {
+  it('does not persist clipboard text or the model response derived from it', async () => {
+    const privateClipboardValue = 'copied private note 7654321';
+    const tools = fakeTools({ clipboard_read: { ok: true, content: `Clipboard text: ${privateClipboardValue}` } });
+    const h = harness({
+      outcomes: [toolStep('clipboard_read', {}), plainAnswer(`The note says ${privateClipboardValue}.`)],
+      tools,
+      approve: true,
+    });
+    const result = await run(h.agent);
+
+    expect(result.finalContent).toContain(privateClipboardValue);
+    expect(result.task.result).toBe('Clipboard text was used for this session and is not retained in task history.');
+    expect(JSON.stringify(result.task)).not.toContain(privateClipboardValue);
+    expect(JSON.stringify(h.audit.list())).not.toContain(privateClipboardValue);
+  });
+});
+
 describe('agent loop - tool execution', () => {
   it('executes a permitted read-only tool and feeds the result back', async () => {
     const tools = fakeTools({ get_current_time: { ok: true, content: '09:41' } });

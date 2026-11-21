@@ -51,7 +51,7 @@ export const TURN_TIMEOUT_MS = 5 * 60_000;
 
 /** Per-tool execution ceiling. */
 export const TOOL_TIMEOUT_MS = 30_000;
-const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'screen_draw_arrow', 'verify_ui_state', 'browser_inspect', 'browser_verify', 'file_list', 'file_read', 'file_search', 'file_metadata', 'documents_search', 'documents_list']);
+const REOBSERVATION_TOOLS = new Set(['analyze_screen', 'get_foreground_window', 'get_last_external_foreground_window', 'list_external_windows', 'find_ui_elements', 'screen_highlight_control', 'screen_draw_arrow', 'verify_ui_state', 'clipboard_paste', 'browser_inspect', 'browser_verify', 'file_list', 'file_read', 'file_search', 'file_metadata', 'file_find_duplicates', 'documents_search', 'documents_list']);
 
 /** The one thing the agent needs from the conversation engine. */
 export interface TurnRunner {
@@ -717,7 +717,9 @@ export class AgentExecutor {
     const finished: TaskRecord = {
       ...task,
       status: finalStatus,
-      result: redactTaskText(finalContent),
+      result: task.steps.some((step) => step.toolName === 'clipboard_read')
+        ? 'Clipboard text was used for this session and is not retained in task history.'
+        : redactTaskText(finalContent),
       endedAt: Date.now(),
       steps: [...task.steps],
     };
@@ -788,6 +790,14 @@ export function parseArgs(call: ToolCall): Record<string, unknown> {
 /** Human sentence for the task rail: what Pixel is about to do. */
 export function describeCall(name: string, args: Record<string, unknown>): string {
   switch (name) {
+    case 'clipboard_read':
+      return 'Read the current text clipboard';
+    case 'clipboard_copy':
+      return `Copy ${typeof args.text === 'string' ? args.text.length : 0} approved characters to the clipboard`;
+    case 'clipboard_restore':
+      return 'Restore the prior clipboard text if Pixel still owns the clipboard contents';
+    case 'clipboard_paste':
+      return `Set the exact selected editable field to the current clipboard text in ${typeof args.expectedWindowTitle === 'string' ? args.expectedWindowTitle : 'the selected window'}`;
     case 'board_get_state':
       return 'Read the active Pixel Board';
     case 'board_create':
@@ -876,6 +886,12 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
       return `Copy ${typeof args.source === 'string' ? args.source : '(unknown source)'} to ${typeof args.destination === 'string' ? args.destination : '(unknown destination)'}`;
     case 'file_rename':
       return `Rename ${typeof args.source === 'string' ? args.source : '(unknown source)'} to ${typeof args.destination === 'string' ? args.destination : '(unknown destination)'}`;
+    case 'file_batch_copy':
+      return `Copy ${Array.isArray(args.operations) ? args.operations.length : 0} approved file(s) as one batch`;
+    case 'file_batch_rename':
+      return `Move or rename ${Array.isArray(args.operations) ? args.operations.length : 0} approved file(s) as one batch`;
+    case 'file_find_duplicates':
+      return `Find duplicate files under ${typeof args.directory === 'string' ? args.directory : 'the selected folder'}`;
     default:
       return name;
   }
@@ -919,6 +935,7 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'documents_index' && typeof args.directory === 'string') return args.directory;
   if (name === 'open_application' && typeof args.name === 'string') return args.name;
   if (name === 'get_last_external_foreground_window') return 'the last observed non-Pixel foreground window';
+  if (name.startsWith('clipboard_')) return name === 'clipboard_paste' ? describeWindowTarget(args) : 'the Windows text clipboard';
   if (name === 'list_external_windows') return 'visible non-Pixel windows on this desktop';
   if (name === 'type_text' || name === 'control_ui_element') return describeWindowTarget(args);
   if (name === 'get_foreground_window') return 'the foreground window';
@@ -926,6 +943,8 @@ function targetFor(name: string, args: Record<string, unknown>): string {
   if (name === 'invoke_ui_element' || name === 'verify_ui_state') return describeWindowTarget(args);
   if (name === 'file_list' && typeof args.directory === 'string') return args.directory;
   if (name === 'file_search' && typeof args.directory === 'string') return `${args.directory} (name: ${typeof args.query === 'string' ? args.query.trim().slice(0, 120) : ''})`;
+  if (name === 'file_find_duplicates' && typeof args.directory === 'string') return args.directory;
+  if (name === 'file_batch_copy' || name === 'file_batch_rename') return `${Array.isArray(args.operations) ? args.operations.length : 0} explicitly selected file path(s) in the user home folder`;
   if ((name === 'file_metadata' || name === 'directory_create') && typeof args.path === 'string') return args.path;
   if ((name === 'file_copy' || name === 'file_rename') && typeof args.source === 'string' && typeof args.destination === 'string') return `${args.source} → ${args.destination}`;
   if ((name === 'file_read' || name === 'file_write') && typeof args.path === 'string') return args.path;
@@ -942,7 +961,7 @@ function describeWindowTarget(args: Record<string, unknown>): string {
 
 function permissionArgsForDisplay(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
   const displayed = { ...args };
-  if (toolName === 'type_text' && typeof displayed.text === 'string') {
+  if ((toolName === 'type_text' || toolName === 'clipboard_copy') && typeof displayed.text === 'string') {
     displayed.text = `[hidden for privacy; ${displayed.text.length} characters]`;
   }
   for (const key of Object.keys(displayed)) {
@@ -982,7 +1001,7 @@ function safeTaskArgs(name: string, args: Record<string, unknown>): Record<strin
       safe[key] = '[redacted]';
       continue;
     }
-    if ((name === 'type_text' || name === 'browser_type') && key === 'text') {
+    if ((name === 'type_text' || name === 'browser_type' || name === 'clipboard_copy') && key === 'text') {
       safe[key] = '[not stored]';
       continue;
     }

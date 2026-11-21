@@ -1,6 +1,6 @@
 # Pixel security model
 
-Updated: 2026-11-20 — Core Tools 6.1 scoped-observation follow-up on reviewed main `69106e8`.
+Updated: 2026-11-20 — Core Tools 6.2 local clipboard-tool follow-up on reviewed main `e57f11e`.
 
 ## Trust boundaries
 
@@ -18,7 +18,8 @@ Updated: 2026-11-20 — Core Tools 6.1 scoped-observation follow-up on reviewed 
 | Task state to disk | Zod validates snapshots; common credential patterns and sensitive argument fields are redacted; typed text and file-write bodies are not stored in task args. | SQLite task text is not application-layer encrypted, and redaction is pattern-based. Windows account/file permissions remain important. |
 | Provider key | Electron `safeStorage` encrypts the DeepSeek key (DPAPI on Windows); if encryption is unavailable, Pixel refuses to persist it. The renderer never receives the plaintext key. | This is a provider API-key store, not a general-purpose credential vault. |
 | Screen capture and guidance | Capture requires explicit approval or a matching volatile session / persistent exact-process-and-title observation grant. Window IDs remain opaque in the renderer; native capture revalidates exact window/process identity. The visual overlay accepts a revalidated unique UIA control, remains passive/click-through, expires, and clears on stale target, lock or emergency stop. | Vision output is model interpretation. Native capture and the visible overlay have not passed target-laptop acceptance; current native integration fails before producing a screenshot in this host. |
-| New everyday file operations | Experience Polish 5.0 search, metadata, directory creation, copy and rename are main-process tools in the existing registry. New paths are constrained to home scope; search is bounded and skips hidden, sensitive-name and symlink entries. Mutations avoid overwrite and verify destination postconditions. | No new clipboard read/write workflow was added. Real Pixel approval-card interaction and multi-step daily task UI remain unverified. |
+| Clipboard tools | `clipboard_read`, `clipboard_copy`, `clipboard_restore`, and `clipboard_paste` are main-process registered tools. Reads/writes require fresh approval. Read/copy values are not stored in task arguments or audit summaries; a chat turn that reads clipboard content is session-only, and task result is a fixed privacy note. Copy keeps only a bounded five-minute volatile plain-text snapshot and restore is conditional on Pixel's last clipboard write still being present. | Credential matching is pattern-based and cannot detect every secret. `clipboard_paste` uses ValuePattern replacement semantics, not insertion at the caret. Windows installed-app/approval UX is not verified. |
+| New everyday file operations | Experience Polish 5.0 search, metadata, directory creation, copy and rename are main-process tools in the existing registry. Local 6.2 code adds fresh-approved batch copy/move with 20-operation and total-size ceilings, no-overwrite destinations, staged SHA-256 verification, plus a read-only bounded duplicate scan. Paths stay in the user home scope; hidden, sensitive-name and symlink entries are skipped/refused. | Date/size filters, open file/folder, Recycle Bin restore and real Pixel approval-card interaction remain unavailable/unverified. Batch movement is staged and reports partial source removals; it is not a filesystem-wide atomic transaction. |
 | Pixel Board | Main-process `PixelBoardService` validates and persists the active scene with revision checks; typed IPC synchronizes renderer and agent edits. Agent tools use the same schema/permission/executor path, and the tool result includes a read-back snapshot. File dialogs and overwrite confirmation are main-owned. | Agent export currently supports editable `.pixelboard` and SVG. PNG export remains renderer-only; PDF and screenshot import are unavailable. Windows dialog and GUI acceptance remain unverified here. |
 
 ## Approval behavior
@@ -51,7 +52,7 @@ coordinate-based pointer fallback are not exposed.
 
 ## Secret handling
 
-The DeepSeek key is held by the main process and encrypted at rest with Electron `safeStorage`. File tools reject obvious credential/key filenames. Memory save and task persistence reject or redact common credential patterns. The task log does not store text passed to `type_text`/`browser_type` or the body passed to `file_write`.
+The DeepSeek key is held by the main process and encrypted at rest with Electron `safeStorage`. File tools reject obvious credential/key filenames. Memory save and task persistence reject or redact common credential patterns. The task log does not store text passed to `type_text`/`browser_type`/`clipboard_copy` or the body passed to `file_write`. Clipboard reads are explicit and approval-gated; when used, the assistant answer is retained only in the current session rather than persistent conversation history. The task result contains a fixed non-content note.
 
 There is no isolated secret broker for site logins. Pixel must not claim to fill a password without exposing it to model context. Skills reject common secret patterns, but this is not a credential vault. MFA, CAPTCHA, passkey and payment confirmation remain human tasks; there is no bypass flow.
 

@@ -2,6 +2,65 @@
 
 Updated: 2026-11-20. Version: 0.2.1.
 
+## Core Completion 6.2 follow-up (local, uncommitted)
+
+Reviewed the latest source at `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`.
+The worktree was clean before this task. The user will commit and push; no
+commit, push, or release was created here.
+
+- **Hosted Windows CI:** the latest cited run
+  [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339)
+  is green on that exact base SHA. TypeScript checks, worker tests, sandboxed
+  preload smoke, full test step, native helper compilation, unpacked/portable/
+  NSIS packaging, and artifact upload all completed. The uploaded artifact is
+  [pixel-windows-ci-36.zip](https://github.com/cypskip-create/Pixel/actions/runs/44786311339/artifacts/14653789646).
+  This is not interactive install or user-laptop acceptance, and it does not
+  include the local uncommitted changes below.
+- **Clipboard agent tools:** added strict main-process tools `clipboard_read`,
+  `clipboard_copy`, `clipboard_restore`, and `clipboard_paste` to the existing
+  registry and dispatcher. Reads/writes request explicit approval. Common
+  credential-like strings are refused. Copy snapshots only a non-secret prior
+  text value up to 20,000 characters in memory for five minutes; timed cleanup
+  removes expired snapshots, and restore only occurs if clipboard still matches
+  Pixel's last write. Emergency stop clears snapshots. `clipboard_paste` uses
+  UI Automation `ValuePattern` on a specific verified control, so it replaces
+  the field value and does not claim caret-position Ctrl+V. Read-triggered chat
+  turns become session-only, and durable task output stores a generic summary
+  rather than clipboard contents.
+- **Batch file operations:** added `file_batch_copy`, `file_batch_rename` and
+  `file_find_duplicates` to the existing home-scoped FileTools registry. Batches
+  are limited to 20 explicit path pairs, no overwrite, credential-like paths
+  are refused, copies are staged and hash-verified before move sources are
+  removed, and partial removal failures report actual completed paths.
+  Duplicate scans are bounded by entry, depth, file size and aggregate bytes;
+  they never delete anything. Focused tests cover copy/move, hash duplicate
+  matches and pre-mutation refusal.
+- **Tests/build:** current-worktree typecheck passed; full Vitest result is
+  **877 passed, 27 skipped, 0 failed (904 total; 62 files passed, 1 skipped)**. Production renderer/main
+  build passed. Native helper compiled. Python worker tests passed **12/12**.
+  Skips are still Chromium-dependent browser cases, unavailable local NSIS
+  integration cases, and opt-in foreground integration. The clipboard code has
+  not yet run on a Windows clipboard through an installed Pixel GUI.
+- **Local environment blockers:** `npm run setup:voice-dev` correctly refused
+  because only Python 3.15 x64 is installed; Pixel's pinned worker requires
+  Python 3.12 x64. It did not create a venv or modify model files. The local
+  `npm run test:preload-sandbox` rebuilt the bundled preload/renderer but
+  Electron exited `2147483651` (`0x80000003`) before the smoke report. Hosted
+  preload smoke passed on the base SHA; this local launch failure is still
+  unresolved and does not count as a successful local preload test.
+- **Unfinished 6.1/6.2 scope:** offline STT inference and neural TTS playback
+  with downloaded models, comparative speech benchmarks, document authoring,
+  date/size file filters, file/folder opening, recycle/restore, browser tabs/uploads/downloads, editable
+  desktop drawing, complete Pixel Board model workflows, richer diagnostics,
+  user notes/checklists, live semantic workflow recording, live specialist
+  delegation, generalized critical-risk policy, and real multi-step Windows
+  acceptance remain partial, missing, or unverified. External plugins remain
+  deferred. See the tracked [6.2 implementation checklist](docs/validation/PIXEL_CORE_TOOLS_6_2_CHECKLIST.md).
+- **Windows GUI boundary:** this checkout did not get a successful interactive
+  Pixel launch. The CUA inventory found Pixel windows only from a separate
+  `C:\dev\Pixel` checkout. Settings navigation and current clipboard behavior
+  therefore remain unverified on the user laptop.
+
 ## Core Tools 6.1 reliability audit and fixes
 
 Reviewed latest GitHub `main` and local `HEAD`: `69106e8d9a40cacd49d2f2b2d228b06ca80585d3`.

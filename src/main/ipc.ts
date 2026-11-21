@@ -12,7 +12,7 @@
  *  - Emergency stop is enforced in the agent runtime, not in the UI.
  */
 
-import { app, dialog, ipcMain, screen, shell } from 'electron';
+import { app, clipboard, dialog, ipcMain, screen, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -306,6 +306,15 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const emitChatEvent = (event: StreamEvent): void => {
     const conversationId = streamConversations.get(event.requestId)?.conversationId;
+    if (event.type === 'tool_calls' && event.toolCalls.some((call) => call.name === 'clipboard_read')) {
+      const record = conversationId ? getConversation(conversationId) : null;
+      if (record) {
+        // The model needs the clipboard value for this turn, but neither that
+        // value nor a derived answer should become durable chat history.
+        record.persistence = 'session';
+        sessionConversations.set(record.id, record);
+      }
+    }
     recordConversationStreamEvent(streamConversations, event, getConversation, addTranscriptMessage);
     const coordinatedEvent = { ...event, ...(conversationId ? { conversationId } : {}) } as StreamEvent;
     if ((event.type === 'done' || event.type === 'aborted' || event.type === 'error') && conversationId) {
@@ -518,6 +527,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const browser = new BrowserSession({ headless: true });
 
   const executors = new ToolExecutors({
+    clipboard,
     browser,
     openExternal: (url) => {
       const safeUrl = safeExternalHttpUrl(url);

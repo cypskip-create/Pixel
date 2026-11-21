@@ -1,5 +1,47 @@
 # Pixel implementation handoff
 
+## Core Completion 6.2 local follow-up
+
+Base source reviewed: `e57f11ef4ec2e4b03c436ca68e6488459a2b6eee`.
+The worktree was clean before edits. This work remains uncommitted and unpushed,
+as requested; no release was published.
+
+- Latest cited Windows Actions run
+  [44786311339](https://github.com/cypskip-create/Pixel/actions/runs/44786311339)
+  passed on the base SHA, including typecheck, tests, preload sandbox smoke,
+  helper compilation, unpacked/portable/NSIS builds and artifact upload. Artifact:
+  [pixel-windows-ci-36.zip](https://github.com/cypskip-create/Pixel/actions/runs/44786311339/artifacts/14653789646).
+  It is not acceptance evidence for the local edits or an interactive install.
+- Added registered `clipboard_read`, `clipboard_copy`, `clipboard_restore`, and
+  `clipboard_paste` operations. The main process owns access. Reads/writes are
+  approval-gated; common credential-like values are blocked; copies are
+  read-back verified; a prior non-secret text value up to 20,000 characters
+  can be conditionally restored from an in-memory five-minute snapshot with
+  timed expiry. Clipboard-reading turns are
+  session-only in chat history, and durable task results are replaced with a
+  content-free privacy note. The “paste” tool sets a selected UIA ValuePattern
+  field (replacement semantics) and verifies read-back; it is not raw Ctrl+V.
+- Focused clipboard/file/agent tests passed **56/56**. After adding a
+  test-only `PIXEL_TEST_HOME` fixture root, the full local suite passed **877**,
+  skipped **27**, failed **0** (904 total; 62 files passed, 1 skipped).
+  Typecheck, production build, native helper compilation and Python worker tests
+  (**12/12**) passed.
+- The local GUI could not be launched in this checkout. CUA found a separate
+  Pixel session at `C:\dev\Pixel`; no interaction was performed with it.
+  Thus actual Settings Back navigation, clipboard operation, model tool calls,
+  local speech inference/playback, installer install/upgrade/uninstall, and
+  laptop acceptance remain unverified.
+- The local preload smoke rebuilt the current bundle but Electron exited
+  `2147483651` (`0x80000003`) before writing its smoke report. The local
+  `setup:voice-dev` probe found only Python 3.15 x64 and refused because the
+  pinned speech runtime requires Python 3.12 x64; neither a venv nor model
+  assets were changed.
+- A tracked wave-by-wave status matrix is in
+  [`PIXEL_CORE_TOOLS_6_2_CHECKLIST.md`](docs/validation/PIXEL_CORE_TOOLS_6_2_CHECKLIST.md).
+  Most 6.1 deliverables remain incomplete; this follow-up does not mark the
+  overall Core Tools checkpoint complete, and external account integrations
+  remain deferred.
+
 ## Core Tools 6.1 local reliability checkpoint
 
 Latest GitHub `main`/local base reviewed: `69106e8d9a40cacd49d2f2b2d228b06ca80585d3`.

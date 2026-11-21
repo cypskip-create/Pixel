@@ -21,6 +21,8 @@ export const MAX_DIRECTORY_OFFSET = 10_000;
 export const MAX_SEARCH_DEPTH = 8;
 export const MAX_SEARCH_VISITS = 1_200;
 export const MAX_COPY_FILE_BYTES = 50_000_000;
+export const MAX_BATCH_FILES = 20;
+export const MAX_DUPLICATE_SCAN_BYTES = 500_000_000;
 
 export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
@@ -124,6 +126,24 @@ export const FILE_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
       }, required: ['source', 'destination'], additionalProperties: false,
     },
   },
+  {
+    name: 'file_batch_copy',
+    description: `Copies 1 to ${MAX_BATCH_FILES} explicitly listed regular files under the user home folder. Every destination must be new; the complete batch is approved as one exact operation and all copied files are verified by SHA-256.`,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { operations: { type: 'array', maxItems: MAX_BATCH_FILES, items: { type: 'object', properties: { source: { type: 'string' }, destination: { type: 'string' } }, required: ['source', 'destination'], additionalProperties: false } } }, required: ['operations'], additionalProperties: false },
+  },
+  {
+    name: 'file_batch_rename',
+    description: `Moves or renames 1 to ${MAX_BATCH_FILES} explicitly listed regular files under the user home folder. All destinations must be new. Pixel stages and verifies all copies before removing any source; on failure it reports completed paths and preserves recoverable copies.`,
+    category: 'files', risk: 'high', requiresApproval: true, changesState: true,
+    parameters: { type: 'object', properties: { operations: { type: 'array', maxItems: MAX_BATCH_FILES, items: { type: 'object', properties: { source: { type: 'string' }, destination: { type: 'string' } }, required: ['source', 'destination'], additionalProperties: false } } }, required: ['operations'], additionalProperties: false },
+  },
+  {
+    name: 'file_find_duplicates',
+    description: 'Finds duplicate regular files under one user-selected folder by matching both size and SHA-256. The scan skips hidden, symlink and credential-like paths and is bounded to 1,200 entries, 8 directory levels, 500 MB total hashed content and 50 MB per file. It never deletes files.',
+    category: 'files', risk: 'high', requiresApproval: true, changesState: false,
+    parameters: { type: 'object', properties: { directory: { type: 'string' }, maxResults: { type: 'integer', minimum: 1, maximum: 50 } }, required: ['directory'], additionalProperties: false },
+  },
 ] as const;
 
 export interface FileToolResult {
@@ -150,6 +170,9 @@ export class FileTools {
         case 'directory_create': return this.createDirectory(args);
         case 'file_copy': return this.copy(args);
         case 'file_rename': return this.rename(args);
+        case 'file_batch_copy': return this.batch(args, false);
+        case 'file_batch_rename': return this.batch(args, true);
+        case 'file_find_duplicates': return this.findDuplicates(args);
         default: return { ok: false, content: `Unknown file tool "${name}".`, errorCode: 'NOT_FOUND' };
       }
     } catch (error) {
@@ -346,6 +369,106 @@ export class FileTools {
     unlinkSync(source);
     if (pathExists(source) || !pathExists(target.path) || sha256ForFile(target.path) !== sourceHash) return { ok: false, content: 'The move/rename operation did not meet its postcondition. Inspect the source and destination before retrying.', errorCode: 'FAILED' };
     return { ok: true, content: `Renamed ${source} to ${target.path}; the destination content hash matches.`, detail: { source, path: target.path, sha256: sourceHash }, verification: { summary: 'Confirmed the original path is gone and the new path has matching SHA-256.', source: 'filesystem path and content postconditions' } };
+  }
+
+  private batch(args: Record<string, unknown>, move: boolean): FileToolResult {
+    const raw = Array.isArray(args.operations) ? args.operations : [];
+    if (raw.length < 1 || raw.length > MAX_BATCH_FILES) return { ok: false, content: `Provide 1 to ${MAX_BATCH_FILES} file operations.`, errorCode: 'FAILED' };
+    const sourceSet = new Set<string>();
+    const destinationSet = new Set<string>();
+    let totalBytes = 0;
+    const jobs = raw.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new FileToolsError('Each batch item must contain one source and destination.', 'FAILED');
+      const item = entry as Record<string, unknown>;
+      const source = resolveExistingFile(item.source);
+      const target = resolveNewTarget(item.destination);
+      const key = (path: string): string => process.platform === 'win32' ? path.toLocaleLowerCase() : path;
+      if (sourceSet.has(key(source)) || destinationSet.has(key(target.path))) throw new FileToolsError('Batch sources and destinations must be unique.', 'FAILED');
+      if (isSensitiveName(basename(source)) || isSensitiveName(basename(target.path))) throw new FileToolsError('Pixel will not batch-copy or rename credential-like files.', 'DENIED');
+      const stats = statSync(source);
+      if (!stats.isFile() || stats.size > MAX_COPY_FILE_BYTES) throw new FileToolsError(`Each source must be a regular file no larger than ${MAX_COPY_FILE_BYTES} bytes.`, 'FAILED');
+      if (pathExists(target.path) || sourceSet.has(key(target.path))) throw new FileToolsError('Every destination must be new and must not be another source in the batch.', 'DENIED');
+      sourceSet.add(key(source));
+      destinationSet.add(key(target.path));
+      totalBytes += stats.size;
+      if (totalBytes > MAX_COPY_FILE_BYTES * 2) throw new FileToolsError('The batch exceeds the 100 MB total limit.', 'FAILED');
+      return { source, destination: target.path, size: stats.size, hash: sha256ForFile(source) };
+    });
+
+    const staged: typeof jobs = [];
+    try {
+      for (const job of jobs) {
+        copyFileSync(job.source, job.destination, fsConstants.COPYFILE_EXCL);
+        staged.push(job);
+        if (statSync(job.destination).size !== job.size || sha256ForFile(job.destination) !== job.hash) throw new FileToolsError(`Copy verification failed at ${job.destination}; inspect it before retrying.`, 'FAILED');
+      }
+    } catch (error) {
+      for (const job of staged) {
+        try { if (pathExists(job.destination) && statSync(job.destination).size === job.size && sha256ForFile(job.destination) === job.hash) unlinkSync(job.destination); } catch { /* preserve uncertain data */ }
+      }
+      throw error;
+    }
+
+    if (move) {
+      for (const job of jobs) {
+        if (statSync(job.source).size !== job.size || sha256ForFile(job.source) !== job.hash) {
+          return { ok: false, content: `All ${jobs.length} destination copies were verified, but source ${job.source} changed before removal. No changed source was deleted; inspect the completed destinations.`, detail: { completed: jobs.map(({ source, destination }) => ({ source, destination })), removedSources: [] }, errorCode: 'FAILED' };
+        }
+      }
+      const removed: string[] = [];
+      for (const job of jobs) {
+        try { unlinkSync(job.source); removed.push(job.source); }
+        catch { return { ok: false, content: `The batch is partially complete: ${removed.length} source(s) were removed and every destination copy was verified. Remaining sources were preserved; inspect before retrying.`, detail: { completed: jobs.map(({ source, destination }) => ({ source, destination })), removedSources: removed }, errorCode: 'FAILED' }; }
+      }
+      for (const job of jobs) {
+        if (pathExists(job.source) || !pathExists(job.destination) || statSync(job.destination).size !== job.size || sha256ForFile(job.destination) !== job.hash) {
+          return { ok: false, content: `The move reported complete but its final path/hash check failed for ${job.source}. Inspect both paths before retrying.`, detail: { completed: jobs.map(({ source, destination }) => ({ source, destination })), removedSources: removed }, errorCode: 'FAILED' };
+        }
+      }
+    }
+    const action = move ? 'renamed/moved' : 'copied';
+    return { ok: true, content: `${action} ${jobs.length} file(s) under the user home folder; all destination sizes and SHA-256 values were verified.`, detail: { operationCount: jobs.length, totalBytes, operations: jobs.map(({ source, destination, hash }) => ({ source, destination, sha256: hash })) }, verification: { summary: `Verified ${jobs.length} destination file(s) against their source SHA-256 values${move ? ' and confirmed all source paths were removed' : ''}.`, source: 'bounded filesystem batch postconditions' } };
+  }
+
+  private findDuplicates(args: Record<string, unknown>): FileToolResult {
+    const raw = typeof args.directory === 'string' ? args.directory.trim() : '';
+    if (!raw || !isAbsolute(raw)) return invalidPath();
+    const root = realpathSync(raw);
+    assertWithinHome(root);
+    if (!statSync(root).isDirectory()) return { ok: false, content: 'The requested path is not a directory.', errorCode: 'FAILED' };
+    const maxResults = typeof args.maxResults === 'number' ? args.maxResults : 25;
+    if (!Number.isSafeInteger(maxResults) || maxResults < 1 || maxResults > 50) return { ok: false, content: 'maxResults must be an integer from 1 to 50.', errorCode: 'FAILED' };
+    const pending: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
+    const hashes = new Map<string, string[]>();
+    let visited = 0;
+    let hashedBytes = 0;
+    let byteCapped = false;
+    while (pending.length && visited < MAX_SEARCH_VISITS) {
+      const current = pending.pop();
+      if (!current) break;
+      const handle = opendirSync(current.path);
+      try {
+        while (visited < MAX_SEARCH_VISITS) {
+          const entry = handle.readSync();
+          if (!entry) break;
+          visited += 1;
+          if (entry.name.startsWith('.') || entry.isSymbolicLink() || isSensitiveName(entry.name)) continue;
+          const path = join(current.path, entry.name);
+          if (entry.isDirectory()) { if (current.depth < MAX_SEARCH_DEPTH) pending.push({ path, depth: current.depth + 1 }); continue; }
+          if (!entry.isFile()) continue;
+          const stats = statSync(path);
+          if (stats.size === 0 || stats.size > MAX_COPY_FILE_BYTES) continue;
+          if (hashedBytes + stats.size > MAX_DUPLICATE_SCAN_BYTES) { byteCapped = true; continue; }
+          const hash = sha256ForFile(path);
+          hashedBytes += stats.size;
+          const key = `${stats.size}:${hash}`;
+          hashes.set(key, [...(hashes.get(key) ?? []), path]);
+        }
+      } finally { handle.closeSync(); }
+    }
+    const groups = [...hashes.entries()].filter(([, paths]) => paths.length > 1).slice(0, maxResults).map(([key, paths]) => ({ sizeBytes: Number(key.split(':', 1)[0]), paths }));
+    const truncated = visited >= MAX_SEARCH_VISITS || pending.length > 0 || byteCapped;
+    return { ok: true, content: `${groups.length} duplicate file group(s) found under ${root}${truncated ? ` in a bounded scan of ${visited} entries / ${hashedBytes} bytes; more may exist` : ''}${groups.length ? `:\n${groups.map((group) => `- ${group.sizeBytes} bytes:\n  ${group.paths.join('\n  ')}`).join('\n')}` : '.'}`, detail: { root, visited, hashedBytes, truncated, groups }, verification: { summary: `Compared ${visited} regular files by size and SHA-256 across ${hashedBytes} bytes; no files were changed.`, source: 'bounded filesystem hash comparison' } };
   }
 
   private write(args: Record<string, unknown>): FileToolResult {

@@ -73,6 +73,8 @@ export const APPLICATION_ALLOWLIST: Record<string, string> = {
 export const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 
 export interface ExecutorDeps {
+  /** Main-process text clipboard access. Never exposed to renderer code. */
+  clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
   /**
    * Capture access. Only called for `analyze_screen`, and only after the
    * permission flow has approved that specific call.
@@ -121,6 +123,8 @@ export class ToolExecutors {
   private readonly children = new Set<ChildProcess>();
   private readonly deps: ExecutorDeps;
   private readonly inputLease: DesktopInputLease;
+  private readonly clipboardSnapshots = new Map<string, { previous: string; written: string; expiresAt: number }>();
+  private clipboardSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(deps: ExecutorDeps = {}) {
     this.deps = deps;
@@ -141,6 +145,9 @@ export class ToolExecutors {
       }
     }
     this.children.clear();
+    this.clipboardSnapshots.clear();
+    if (this.clipboardSnapshotTimer) clearTimeout(this.clipboardSnapshotTimer);
+    this.clipboardSnapshotTimer = null;
     if (this.deps.browser) void this.deps.browser.close();
     this.deps.nativeHelper?.dispose();
     return killed;
@@ -151,7 +158,7 @@ export class ToolExecutors {
     if (signal?.aborted) return cancelledResult(name);
 
     let releaseInput: (() => void) | null = null;
-    if (name === 'type_text' || name === 'invoke_ui_element' || name === 'control_ui_element') {
+    if (name === 'type_text' || name === 'clipboard_paste' || name === 'invoke_ui_element' || name === 'control_ui_element') {
       releaseInput = await this.inputLease.acquire(signal);
       if (!releaseInput || signal?.aborted) {
         releaseInput?.();
@@ -220,6 +227,14 @@ export class ToolExecutors {
       switch (name) {
         case 'get_current_time':
           return this.getCurrentTime();
+        case 'clipboard_read':
+          return await this.readClipboard();
+        case 'clipboard_copy':
+          return await this.copyClipboard(args);
+        case 'clipboard_restore':
+          return await this.restoreClipboard(args);
+        case 'clipboard_paste':
+          return await this.pasteClipboard(args, signal);
         case 'request_human_takeover': {
           const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
           if (!this.deps.requestHumanTakeover || !taskId) {
@@ -301,6 +316,100 @@ export class ToolExecutors {
         errorCode: 'FAILED',
       };
     }
+  }
+
+  private async readClipboard(): Promise<ToolResult> {
+    if (!this.deps.clipboard) return { ok: false, content: 'Windows text clipboard access is unavailable.', errorCode: 'UNAVAILABLE' };
+    const text = await this.deps.clipboard.readText();
+    if (!text) return { ok: true, content: 'The text clipboard is empty or contains a non-text item.', detail: { characters: 0 }, verification: { summary: 'The main-process text clipboard read returned no text.', source: 'Electron clipboard text read' } };
+    if (looksLikeClipboardSecret(text)) return { ok: false, content: 'Pixel did not read clipboard content because it matches a common credential or bearer-token pattern. Clear or replace the clipboard before asking again.', errorCode: 'DENIED' };
+    const bounded = text.slice(0, 20_000);
+    return {
+      ok: true,
+      content: `Clipboard text (${text.length > bounded.length ? `first ${bounded.length} of ${text.length} characters` : `${bounded.length} characters`}):\n${bounded}`,
+      detail: { characters: bounded.length, truncated: text.length > bounded.length },
+      verification: { summary: `Read ${bounded.length} characters from the current text clipboard; clipboard contents are not recorded in the audit detail.`, source: 'Electron clipboard text read' },
+    };
+  }
+
+  private async copyClipboard(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.deps.clipboard) return { ok: false, content: 'Windows text clipboard access is unavailable.', errorCode: 'UNAVAILABLE' };
+    const text = typeof args.text === 'string' ? args.text : '';
+    if (!text.trim()) return { ok: false, content: 'Provide non-empty text to copy.', errorCode: 'FAILED' };
+    if (text.length > 20_000) return { ok: false, content: 'Clipboard text exceeds the 20,000 character limit.', errorCode: 'FAILED' };
+    this.expireClipboardSnapshots();
+    const previous = await this.deps.clipboard.readText();
+    await this.deps.clipboard.writeText(text);
+    if (await this.deps.clipboard.readText() !== text) return { ok: false, content: 'Pixel wrote to the clipboard but could not verify the copied text.', errorCode: 'FAILED' };
+    // A restore snapshot is optional. Do not retain credential-like or large
+    // prior values in memory just to offer undo for an otherwise valid copy.
+    if (previous.length > 20_000 || looksLikeClipboardSecret(previous)) {
+      return {
+        ok: true,
+        content: `Copied ${text.length} characters to the Windows text clipboard and verified the write. The prior clipboard value was not retained for restoration because it was sensitive or exceeded the 20,000 character snapshot limit.`,
+        detail: { characters: text.length, verified: true, restorable: false },
+        verification: { summary: `The text clipboard read-back matched all ${text.length} approved characters.`, source: 'Electron clipboard text read-back' },
+      };
+    }
+    const restoreToken = randomUUID();
+    this.clipboardSnapshots.set(restoreToken, { previous, written: text, expiresAt: Date.now() + 5 * 60_000 });
+    this.scheduleClipboardSnapshotExpiry();
+    return {
+      ok: true,
+      content: `Copied ${text.length} characters to the Windows text clipboard and verified the write. The previous text snapshot can be restored for five minutes with restore token ${restoreToken}.`,
+      detail: { characters: text.length, restoreToken, verified: true },
+      verification: { summary: `The text clipboard read-back matched all ${text.length} approved characters.`, source: 'Electron clipboard text read-back' },
+    };
+  }
+
+  private async restoreClipboard(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.deps.clipboard) return { ok: false, content: 'Windows text clipboard access is unavailable.', errorCode: 'UNAVAILABLE' };
+    this.expireClipboardSnapshots();
+    const token = typeof args.restoreToken === 'string' ? args.restoreToken : '';
+    const snapshot = this.clipboardSnapshots.get(token);
+    if (!snapshot) return { ok: false, content: 'That clipboard restore snapshot is missing or expired.', errorCode: 'NOT_FOUND' };
+    if (await this.deps.clipboard.readText() !== snapshot.written) {
+      this.clipboardSnapshots.delete(token);
+      return { ok: false, content: 'Pixel left the clipboard unchanged because another application or user changed it after Pixel copied text.', errorCode: 'DENIED' };
+    }
+    await this.deps.clipboard.writeText(snapshot.previous);
+    this.clipboardSnapshots.delete(token);
+    if (await this.deps.clipboard.readText() !== snapshot.previous) return { ok: false, content: 'Pixel attempted to restore the prior text clipboard, but read-back did not match.', errorCode: 'FAILED' };
+    return { ok: true, content: 'Restored the previous text clipboard and verified it without returning or logging its contents.', detail: { restored: true }, verification: { summary: 'The prior text clipboard was restored after confirming Pixel still owned the current clipboard contents.', source: 'Electron clipboard text read-back' } };
+  }
+
+  private async pasteClipboard(args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
+    if (!this.deps.clipboard) return { ok: false, content: 'Windows text clipboard access is unavailable.', errorCode: 'UNAVAILABLE' };
+    const text = await this.deps.clipboard.readText();
+    if (!text) return { ok: false, content: 'The text clipboard is empty or contains a non-text item.', errorCode: 'NOT_FOUND' };
+    if (looksLikeClipboardSecret(text)) return { ok: false, content: 'Pixel refused to place credential-like clipboard text into an application field.', errorCode: 'DENIED' };
+    if (text.length > 2_000) return { ok: false, content: 'Clipboard text is longer than the 2,000 character safe field limit.', errorCode: 'FAILED' };
+    return this.typeText({ ...args, text }, signal);
+  }
+
+  private expireClipboardSnapshots(): void {
+    const now = Date.now();
+    for (const [token, snapshot] of this.clipboardSnapshots) if (snapshot.expiresAt <= now) this.clipboardSnapshots.delete(token);
+    while (this.clipboardSnapshots.size > 8) {
+      const first = this.clipboardSnapshots.keys().next().value as string | undefined;
+      if (!first) break;
+      this.clipboardSnapshots.delete(first);
+    }
+  }
+
+  private scheduleClipboardSnapshotExpiry(): void {
+    if (this.clipboardSnapshotTimer) clearTimeout(this.clipboardSnapshotTimer);
+    const nextExpiry = Math.min(...[...this.clipboardSnapshots.values()].map((snapshot) => snapshot.expiresAt));
+    if (!Number.isFinite(nextExpiry)) {
+      this.clipboardSnapshotTimer = null;
+      return;
+    }
+    this.clipboardSnapshotTimer = setTimeout(() => {
+      this.clipboardSnapshotTimer = null;
+      this.expireClipboardSnapshots();
+      if (this.clipboardSnapshots.size) this.scheduleClipboardSnapshotExpiry();
+    }, Math.max(0, nextExpiry - Date.now()));
+    this.clipboardSnapshotTimer.unref?.();
   }
 
   private async runBoardTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
@@ -1303,4 +1412,12 @@ function validColor(value: unknown): string | null {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function looksLikeClipboardSecret(text: string): boolean {
+  return /\b(password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s*(?:=|:)\s*\S+/i.test(text)
+    || /\b(password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s+is\s+\S+/i.test(text)
+    || /\bsk-[A-Za-z0-9_-]{12,}\b/.test(text)
+    || /\bAKIA[0-9A-Z]{16}\b/.test(text)
+    || /\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/i.test(text);
 }
