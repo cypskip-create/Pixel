@@ -1,12 +1,36 @@
 # Pixel project handoff
 
-Updated: 2026-11-22. This file is the short recovery point for future Codex sessions.
+Updated: 2026-11-23. This file is the short recovery point for future sessions.
+
+## Latest Checkpoint (2026-11-23 — Local Uncommitted)
+
+- **Design System & Workspace Redesign (Checkpoint B):**
+  - Applied the requested warm matte palette (`#0C0B0A` base, opaque warm surfaces, `#F28A43` restrained accent) in `src/renderer/index.css` and `src/renderer/workspace-design-system.css`. The visual remains flat and opaque, with no frosted panels or colored selection-edge strips. `tests/monochrome-theme.test.ts` now asserts the warm palette and contrast.
+  - Consolidated the Workspace into a compact `240px` sidebar: **New Chat**, **Projects**, **Library**, **Pixel Board**, **Running Tasks**, **Recent Chats** (search, rename, delete confirmation, scrollable history, active project indicator), **Notes & Planning**, and **Settings**. Tools, plugins, memory, and routines remain available in Settings categories.
+  - Upgraded Settings (`src/renderer/components/SettingsPanel.tsx`) to the **11 approved flat categories**: General, AI & Models, Agent & Permissions, Voice, Memory, Tools, Plugins & Connections, Skills & Routines, Appearance, Workspace, and Advanced (gray selected nav only, flat sections).
+  - Redesigned Activity as **Running Tasks** (`src/renderer/components/WorkspaceTasks.tsx`) showing active/queued/waiting/paused/recovering/failed tasks with live elapsed timer and current step; completed tasks move into collapsible Task History.
+  - Fixed Windows titlebar controls order in `src/renderer/Workspace.tsx` to **Minimize → Maximize/Restore → Close** (left to right).
+- **Pix Ambient Motion (Section 12):**
+  - Researched `stackedlol/ascii-sharks` (`fff1af0`, MIT) via REA MCP (`ev_6e6b60bdb2b2a0de7a903a816e3c31d0921d23777fa4a4b9e198275d5e14af3a`) and direct source inspection.
+  - Adapted the upstream fixed-step, visibility, resize, pointer, and reduced-motion techniques in `src/renderer/lib/asciiSharks.ts`; replaced the source shark artwork with small, low-contrast constellation glyphs so Pix remains Pixel's mascot. The canvas is pointer-inert, pauses when hidden/off-screen or reduced motion is enabled, and cleans up on unmount (`tests/ascii-sharks.test.tsx`).
+- **Agent Mode Scoped Autonomy & Git/GitHub Tools (Checkpoints C & F):**
+  - Root cause found in `src/main/agent/tools.ts`: `evaluateInvocation` previously treated `agent` mode identically to `hybrid` mode for `requiresApproval` tools. Added `AGENT_MODE_AUTONOMOUS_TOOLS` for routine bounded Git/GitHub/file/document inspection and safe HTTPS clone in Agent mode while keeping Guide read-only, Hybrid prompting, Emergency Stop paramount, and `critical`/destructive actions always approval-gated.
+  - Implemented `src/main/git/toolset.ts` (`git_status`, `git_diff`, `git_log`, `git_branches`, `git_clone`, `git_init`, `git_fetch`, `git_pull`, `git_commit`, `git_push`, `git_revert` via `execFile` with `shell: false`, dirty-tree protection, HTTPS-only clone, no force-push) wired into `ToolExecutors` and `ipc.ts`.
+  - Expanded `src/main/plugins/github.ts` with DNS-pinned read-only helpers for files, issues, pull requests, branches, and workflow runs.
+- **Hermes / Clicky Research & Python Agent Service Prototype (Checkpoints A, D & E):**
+  - Cloned `NousResearch/hermes-agent` (`0f602c5f`), `farzaa/clicky` (`e71105c`), and `stackedlol/ascii-sharks` (`fff1af0`) outside Pixel under `C:\dev\pixel-research\`; documented comparison matrix and REA Evidence IDs in `docs/research/HERMES_CLICKY_REA_RESEARCH.md`.
+  - Built advisory-only Python agent service prototype (`python/agent_service.py`, protocol `pixel-agent-v1`) + typed `src/main/services/pythonAgentBridge.ts` preserving Electron's main-process `PermissionBroker` as the sole execution authority (`tests/python-agent-bridge.test.ts`).
+  - Improved selective memory (`src/main/memory/autoExtract.ts`) with `relevanceScore`, `confidence`, `isLowValueNoise` filtering, and `filterNovelMemoryCandidates` deduplication (`tests/git-and-agent-autonomy.test.ts`).
+- **Remaining / Open Items:**
+  - Live Windows GUI visual screenshot acceptance and Electron `0x80000003` local launch diagnostics remain open for a desktop-GUI-capable run.
+  - Full Pixel Board UX expansion, additional OAuth/external productivity plugins (Drive/Calendar/Email), and offline Python voice inference packages (`faster-whisper`, `kokoro_onnx`) remain future milestone work.
+  - Do not commit or push for the user; all changes are kept locally in the project folder.
 
 ## Repository state
 
 - Existing checkout: `C:\Users\cypri\OneDrive\Desktop\cyps`, branch `main`.
-- Current committed HEAD and `origin/main`: `74f3973293992e3c44c5194f3f84b90f758d15f5`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed test additions.
-- The last confirmed Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, including typecheck, automated tests, native helper compile, package build and artifact upload. GitHub's status endpoint returned no records for `74f3973`; CI for current HEAD is unverified. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by those runs.
+- Current committed HEAD and `origin/main`: `b70c212c46aa8e7e93dfa360ddf4659389fbe369`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed changes.
+- The last confirmed Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, including typecheck, automated tests, native helper compile, package build and artifact upload. GitHub's status endpoint returned no records for `b70c212`; CI for current HEAD is unverified. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by those runs.
 - A fresh `npm run dev` retry built main/preload and the native helper, preserved the occupied 5199 listener, started Vite on 5200, then Electron exited `2147483651` (`0x80000003`) without a targetable window. Follow-up isolation: direct `electron.exe --version` exited with the same code before printing a version, both from this checkout and from the read-only `C:\dev\Pixel` binary; their executable SHA-256 hashes match. A Computer Use launch timed out, and a fresh desktop inventory still showed no Pixel window. No `%TEMP%\Pixel` startup log was created, confirming the process did not reach Pixel's boot logger. Existing `%APPDATA%\Pixel` data was read-only and left untouched. This does not establish a source defect; GUI acceptance remains blocked by the current host runtime.
 - Do not commit or push for the user.
 
@@ -21,9 +45,11 @@ source and tests are currently uncommitted. See
 `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md` and
 `docs/architecture/PIXEL_DESIGN_TOKENS.md`.
 
-This continuation's latest `npm run verify` passes typecheck, the production
-build and the suite: **994 passed, 11 skipped, 0 failed** (1,005 total; 74 files
-passed, 1 skipped). `scripts/test.mjs` selects the matching Chromium revision
+The latest full `npm run verify` before the final design pass passed **994
+tests, 11 skipped, 0 failed** (1,005 total; 74 files passed, 1 skipped). After
+the final palette and route updates, typecheck and production build passed;
+focused Workspace tests passed 32/32 and theme plus ambient tests passed 11/11.
+`scripts/test.mjs` selects the matching Chromium revision
 from `.pw-browsers` when present and preserves an explicit
 `PLAYWRIGHT_BROWSERS_PATH`; the full run passed all 30 live Chromium tests.
 Remaining skips are seven NSIS tests (`makensis` unavailable), three native
@@ -72,6 +98,12 @@ title before selected-target operations. Semantic UIA actions re-query the
 control and validate a postcondition. This is implementation evidence, not live
 Windows acceptance; richer hierarchy and actual Notepad/app interaction remain
 open.
+The latest disposable UIA fixture run verified exact-window selection and
+`ValuePattern` read-back, then exposed a provider failure: the WinForms
+checkbox's `TogglePattern.Toggle()` threw `InvalidOperationException`. Pixel
+correctly blocked later actions because the state-changing step was
+unverified. See `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`; do not count this
+toggle run as passing.
 Native helper compilation passes and voice-worker boundary tests pass 12/12.
 `VoiceService.capability()` reports `stt=false`, `tts=true`; the host has no
 Windows recognizer installed. A short real playback through Pixel's Windows

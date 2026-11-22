@@ -65,6 +65,45 @@ export function riskAllowsGrantDuration(risk: RiskLevel, duration: 'once' | 'ses
 }
 
 /**
+ * Routine, bounded tools that may execute automatically in Agent mode without
+ * interrupting the user for per-call approval.
+ *
+ * Hard invariants:
+ *  - Emergency stop always overrides this list.
+ *  - Guide mode still blocks any state-changing tool.
+ *  - Hybrid mode still asks for approval normally.
+ *  - Critical-risk operations (destructive actions, force push, uploads,
+ *    form submission, credential/clipboard access) are NEVER in this set.
+ */
+export const AGENT_MODE_AUTONOMOUS_TOOLS: ReadonlySet<string> = new Set([
+  // Public GitHub read-only inspection
+  'plugin_github_repo_summary',
+  'github_read_file',
+  'github_list_issues',
+  'github_list_prs',
+  'github_repo_branches',
+  'github_workflow_runs',
+  'github_compare_commits',
+  'github_search_repos',
+  // Local Git inspection & bounded public clone
+  'git_status',
+  'git_diff',
+  'git_log',
+  'git_branches',
+  'git_fetch',
+  'git_clone',
+  // Bounded local read-only file & document inspection
+  'file_list',
+  'file_read',
+  'file_search',
+  'file_metadata',
+  'file_find_duplicates',
+  'documents_search',
+  'documents_list',
+  'documents_read',
+]);
+
+/**
  * Decide whether a tool may run right now.
  *
  * Order matters: emergency stop outranks everything, then mode, then approval.
@@ -95,6 +134,10 @@ export function evaluateInvocation(
   }
 
   const risk = classifyInvocationRisk(tool, context.args ?? {});
+  if (context.mode === 'agent' && risk !== 'critical' && AGENT_MODE_AUTONOMOUS_TOOLS.has(tool.name)) {
+    return { allowed: true };
+  }
+
   if ((tool.requiresApproval || CONSEQUENCE_POLICY[risk].approvalFloor !== 'declared') && !hasValidGrant(tool.name, context)) {
     return {
       allowed: false,

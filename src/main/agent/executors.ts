@@ -26,6 +26,7 @@ import { DesktopInputLease } from './inputLease';
 import type { MemoryTools } from '../memory/toolset';
 import type { DocumentTools } from '../documents/toolset';
 import type { FileTools } from '../files/toolset';
+import type { GitTools } from '../git/toolset';
 import { terminateProcessTree } from '../services/process';
 import { NativeHelperError } from '../services/nativeHelper';
 import type { FindElementsQuery, LastExternalWindowResult, NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
@@ -115,6 +116,8 @@ export interface ExecutorDeps {
   productivity?: ProductivityTools;
   /** Bounded, user-approved local file tools. */
   files?: FileTools;
+  /** Controlled local Git workflow tools (execFile only, never shell interpolation). */
+  git?: GitTools;
   /** Isolated desktop-input lease for integration tests; production shares one lease. */
   inputLease?: DesktopInputLease;
   /** Wait for an explicit user handoff acknowledgement without granting authority. */
@@ -251,6 +254,9 @@ export class ToolExecutors {
       }
       if (this.deps.files?.handles(name)) {
         return this.deps.files.run(name, args);
+      }
+      if (this.deps.git?.handles(name)) {
+        return await this.deps.git.run(name, args, signal);
       }
       if (isBoardTool(name)) return await this.runBoardTool(name, args, signal);
 

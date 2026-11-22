@@ -7,18 +7,23 @@ export interface AutomaticMemoryCandidate {
   /** Stable only within the active project; used to replace a directly updated preference. */
   slot?: string;
   replaceSlot?: boolean;
+  /** Deterministic relevance score in [0, 1] used to reject low-value chatter. */
+  relevanceScore?: number;
+  /** Confidence in [0, 1] based on explicitness of user statement. */
+  confidence?: number;
 }
 
 const MAX_CANDIDATE_LENGTH = 500;
+const MIN_RELEVANCE_SCORE = 0.65;
 
 /**
- * Extract a very small set of memories from trusted user-authored text.
- * No model is called here: deterministic phrasing rules, content filters and
- * project scoping make the persistence decision in the main process.
+ * Extract a selective, high-signal set of memories from trusted user-authored text.
+ * Rejects one-off questions, temporary URLs, raw commands, status messages,
+ * unverified assumptions, and secrets.
  */
 export function extractAutomaticMemoryCandidates(input: string): AutomaticMemoryCandidate[] {
   const text = input.trim().replace(/\s+/g, ' ');
-  if (!text || text.length > 2_000 || hasUnsafeMemoryContent(text)) return [];
+  if (!text || text.length > 2_000 || hasUnsafeMemoryContent(text) || isLowValueNoise(text)) return [];
 
   const correction = text.match(/^(?:pixel[, :]\s*)?(?:that(?:'s| is) wrong[,;:. ]+)?(?:change|update|correct) my (theme|response style|workflow) (?:preference|settings?) to (.+)$/i);
   if (correction?.[1] && correction[2]) {
@@ -31,6 +36,8 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
       tags: ['automatic', 'user-confirmed', 'auto-correction', `auto-slot:${slot}`],
       slot,
       replaceSlot: true,
+      relevanceScore: 0.98,
+      confidence: 0.98,
     }];
   }
 
@@ -38,7 +45,7 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
     ?? text.match(/^i want you to remember(?:\s+that)?\s+(.+)$/i)?.[1];
   if (explicit) {
     const fact = cleanCandidate(explicit);
-    if (!fact) return [];
+    if (!fact || isLowValueNoise(fact)) return [];
     const preference = /\b(prefer|like|love|want|always use|usually use)\b/i.test(fact);
     const slot = preference ? preferenceSlot(fact) : undefined;
     return [{
@@ -46,13 +53,15 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
       content: preference ? canonicalPreference(fact) : asSentence(fact),
       tags: ['automatic', 'user-requested', ...(slot ? [`auto-slot:${slot}`] : [])],
       ...(slot ? { slot, replaceSlot: true } : {}),
+      relevanceScore: 0.95,
+      confidence: 0.95,
     }];
   }
 
   const preference = text.match(/^(?:for pixel,?\s+)?i\s+(prefer|like|love|want pixel to|always use|usually use)\s+(.+)$/i);
   if (preference?.[1] && preference[2]) {
     const fact = cleanCandidate(preference[2]);
-    if (!fact) return [];
+    if (!fact || isLowValueNoise(fact)) return [];
     const slot = preferenceSlot(fact);
     const predicate = preference[1].toLowerCase() === 'want pixel to' ? 'wants Pixel to' : 'prefers';
     return [{
@@ -61,6 +70,8 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
       tags: ['automatic', 'user-confirmed', `auto-slot:${slot}`],
       slot,
       replaceSlot: true,
+      relevanceScore: 0.88,
+      confidence: 0.86,
     }];
   }
 
@@ -69,11 +80,49 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
   const projectFact = text.match(/^(?:the\s+)?pixel project\s+(uses|is built with|uses the architecture)\s+(.+)$/i);
   if (projectFact?.[1] && projectFact[2]) {
     const fact = cleanCandidate(`${projectFact[1].toLowerCase()} ${projectFact[2]}`);
-    if (!fact) return [];
-    return [{ kind: 'project', content: `The Pixel project ${stripTerminalPunctuation(fact)}.`, tags: ['automatic', 'user-confirmed', 'project-fact'] }];
+    if (!fact || isLowValueNoise(fact)) return [];
+    return [{
+      kind: 'project',
+      content: `The Pixel project ${stripTerminalPunctuation(fact)}.`,
+      tags: ['automatic', 'user-confirmed', 'project-fact'],
+      relevanceScore: 0.85,
+      confidence: 0.88,
+    }];
   }
 
   return [];
+}
+
+/** Rejects one-off questions, temporary URLs, raw CLI commands, and transient status chatter. */
+function isLowValueNoise(text: string): boolean {
+  if (text.endsWith('?')) return true;
+  if (/^(?:what|why|how|when|where|who|can you|could you|would you|please run|run |open |check |show me)\b/i.test(text)) return true;
+  if (/https?:\/\/\S+/i.test(text) && text.length < 180) return true;
+  if (/^(?:npm|npx|git|python|pip|cd|ls|dir|cat|echo|curl)\s+\S+/i.test(text)) return true;
+  if (/^(?:ok|okay|thanks|thank you|got it|sounds good|looks good|done|hi|hello|hey)\b[.!]?$/i.test(text)) return true;
+  return false;
+}
+
+/**
+ * Filters out candidates that fail the relevance floor or duplicate an existing
+ * memory (unless explicitly replacing a preference slot).
+ */
+export function filterNovelMemoryCandidates(
+  candidates: AutomaticMemoryCandidate[],
+  existingContents: readonly string[],
+): AutomaticMemoryCandidate[] {
+  const normalizedExisting = new Set(existingContents.map(normalizeForNovelty));
+  return candidates.filter((candidate) => {
+    if ((candidate.relevanceScore ?? 1) < MIN_RELEVANCE_SCORE) return false;
+    const norm = normalizeForNovelty(candidate.content);
+    if (!norm) return false;
+    if (!candidate.replaceSlot && normalizedExisting.has(norm)) return false;
+    return true;
+  });
+}
+
+function normalizeForNovelty(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 /** A direct user command to forget one well-defined automatic preference slot. */

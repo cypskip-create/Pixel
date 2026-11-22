@@ -71,6 +71,7 @@ import { extractAutomaticMemoryCandidates, extractAutomaticMemoryForgetSlot, has
 import { DocumentIndex } from './documents/indexer';
 import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
 import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
+import { GitTools, GIT_TOOL_DEFINITIONS } from './git/toolset';
 import { PythonWorker } from './services/python-worker';
 import type { NativeHelper } from './services/nativeHelper';
 import { VoiceService, validateDiagnosticVoiceWav } from './voice/voice';
@@ -351,6 +352,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const productivityStore = new ProductivityStore(database);
   const productivityTools = new ProductivityTools(productivityStore, projectId);
   const fileTools = new FileTools();
+  const gitTools = new GitTools();
   const boardService = new PixelBoardService(join(app.getPath('userData'), 'boards', 'active-board.json'));
   boardService.subscribe((snapshot) => {
     const workspace = windows.getWorkspaceWindow();
@@ -481,6 +483,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     ...MEMORY_TOOL_DEFINITIONS.filter((definition) => definition.name !== 'memory_save'),
     ...DOCUMENT_TOOL_DEFINITIONS,
     ...FILE_TOOL_DEFINITIONS,
+    ...GIT_TOOL_DEFINITIONS,
     ...PRODUCTIVITY_TOOL_DEFINITIONS,
     ...pluginStore.installedTools(),
   ], (grant) => {
@@ -635,6 +638,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     documents: documentTools,
     productivity: productivityTools,
     files: fileTools,
+    git: gitTools,
     board: boardService,
     chooseBoardFile,
     focusBoard: () => {

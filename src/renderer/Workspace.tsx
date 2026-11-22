@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Maximize2, Minimize2, ShieldAlert, Wrench, X,
+  Maximize2, Minimize2, Minus, ShieldAlert, X,
 } from 'lucide-react';
 import type {
   AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryOpenResult, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
@@ -13,10 +13,9 @@ import { WorkspaceComposer } from '@/components/WorkspaceComposer';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
+import { AsciiSharkBackground } from '@/components/AsciiSharkBackground';
 import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
-import { AutomationPanel } from '@/components/AutomationPanel';
-import { MemoryPanel } from '@/components/MemoryPanel';
-import { SettingsPanel } from '@/components/SettingsPanel';
+import { SettingsPanel, type SettingsPage } from '@/components/SettingsPanel';
 import type { PluginLifecycleAction, PluginProjectAvailability, PluginSettingChange } from '@/components/WorkspacePluginManager';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
@@ -32,7 +31,6 @@ const WorkspaceProjects = lazy(() => import('@/components/WorkspaceProjects').th
 const WorkspaceLibrary = lazy(() => import('@/components/WorkspaceLibrary').then((module) => ({ default: module.WorkspaceLibrary })));
 const WorkspaceTasks = lazy(() => import('@/components/WorkspaceTasks').then((module) => ({ default: module.WorkspaceTasks })));
 const ProductivityPanel = lazy(() => import('@/components/ProductivityPanel').then((module) => ({ default: module.ProductivityPanel })));
-const WorkspacePluginManager = lazy(() => import('@/components/WorkspacePluginManager').then((module) => ({ default: module.WorkspacePluginManager })));
 const PixelBoard = lazy(() => import('@/components/PixelBoard').then((module) => ({ default: module.PixelBoard })));
 
 export function Workspace(): React.JSX.Element {
@@ -40,6 +38,7 @@ export function Workspace(): React.JSX.Element {
   const { settings, hasApiKey, error: settingsError, saving, patch, setMode, saveApiKey, removeApiKey, testApiKeyConnection } = useSettings();
   const chat = useChat(settings.privacy.persistHistory);
   const [view, setView] = useState<WorkspaceView>('chat');
+  const [settingsInitialPage, setSettingsInitialPage] = useState<SettingsPage | undefined>(undefined);
   const settingsReturnView = useRef<WorkspaceView>('chat');
   const chatScrollTop = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -78,6 +77,20 @@ export function Workspace(): React.JSX.Element {
     if (view === 'chat') chatScrollTop.current = scrollRef.current?.scrollTop ?? chatScrollTop.current;
     setView('settings');
   }, [view]);
+  const openWorkspaceDestination = useCallback((destination: WorkspaceView) => {
+    const settingsPages: Partial<Record<WorkspaceView, SettingsPage>> = {
+      memory: 'memory', skills: 'skills', tools: 'tools', plugins: 'plugins',
+    };
+    const page = settingsPages[destination];
+    if (page) {
+      setSettingsInitialPage(page);
+      openSettings();
+    } else if (destination === 'settings') {
+      openSettings();
+    } else {
+      setView(destination);
+    }
+  }, [openSettings]);
   const returnFromSettings = useCallback(() => {
     const previous = settingsReturnView.current;
     settingsReturnView.current = 'chat';
@@ -156,7 +169,7 @@ export function Workspace(): React.JSX.Element {
   }, [bridge]);
 
   useEffect(() => {
-    if (bridge.kind !== 'ready' || view !== 'plugins') return;
+    if (bridge.kind !== 'ready' || view !== 'settings') return;
     let alive = true;
     void Promise.all([bridge.bridge.plugins.list(), bridge.bridge.tools.list()]).then(([nextPlugins, nextTools]) => {
       if (alive) { setPlugins(nextPlugins); setTools(nextTools); }
@@ -471,9 +484,30 @@ export function Workspace(): React.JSX.Element {
   }, [bridge, currentProject?.id, refreshLibrary, view]);
 
   const viewTitle: Record<WorkspaceView, string> = {
-    chat: 'Workspace', projects: 'Projects', library: 'Library', tasks: 'Tasks & Activity', notes: 'Notes & Planning', skills: 'Skills & Routines',
-    memory: 'Memory', tools: 'Tools', plugins: 'Plugins', board: 'Pixel Board', settings: 'Settings',
+    chat: 'Workspace', projects: 'Projects', library: 'Library', tasks: 'Activity', notes: 'Notes & Planning',
+    skills: 'Skills & Routines', memory: 'Memory', tools: 'Tools', plugins: 'Plugins', board: 'Pixel Board', settings: 'Settings',
   };
+  const handlePluginChange = useCallback(async (
+    action: PluginLifecycleAction,
+    pluginId: string,
+    enabled?: boolean,
+    availability?: PluginProjectAvailability,
+    setting?: PluginSettingChange,
+  ) => {
+    if (bridge.kind !== 'ready') return;
+    try {
+      const next = action === 'install' ? await bridge.bridge.plugins.install(pluginId)
+        : action === 'update' ? await bridge.bridge.plugins.update(pluginId)
+        : action === 'uninstall' ? await bridge.bridge.plugins.uninstall(pluginId)
+          : action === 'project-availability' ? await bridge.bridge.plugins.setProjectAvailability(pluginId, availability ?? 'inherit')
+            : action === 'setting' ? await bridge.bridge.plugins.setSetting(pluginId, setting?.key ?? '', setting?.value ?? '')
+            : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
+      setPlugins(next);
+      setTools(await bridge.bridge.tools.list());
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Pixel could not update that plugin.');
+    }
+  }, [bridge]);
   const pendingApproval = permission ? (
     <div className="workspace-approval" aria-label="Approval required">
       <PermissionCard request={permission} pending={permissionPending} onDecide={(decision) => void respondPermission(decision)} compact />
@@ -483,21 +517,21 @@ export function Workspace(): React.JSX.Element {
   return (
     <div className={`workspace-shell${settings.companion.reducedMotion ? ' reduce-motion' : ''}`} data-workspace>
       <header className="workspace-titlebar drag">
-        <div className="flex min-w-0 items-center gap-2"><PixelMark size={22} /><span className="pixel-wordmark pixel-wordmark-large">PIXEL</span><span className="workspace-title-divider" />
-          <span className="truncate text-[13px] text-[var(--color-ink-soft)]">{viewTitle[view]}</span>
+        <div className="flex min-w-0 items-center gap-2"><PixelMark size={22} /><span className="pixel-wordmark pixel-wordmark-large">PIXEL</span>
+          {view !== 'chat' ? <><span className="workspace-title-divider" /><span className="truncate text-[13px] text-[var(--color-ink-soft)]">{viewTitle[view]}</span></> : null}
         </div>
         <div className="workspace-window-controls no-drag">
           <button type="button" aria-label={stopped ? 'Clear emergency stop' : 'Emergency stop'} aria-pressed={stopped} onClick={() => void toggleEmergency()} title={stopped ? 'Clear emergency stop' : 'Emergency stop'} className={`workspace-window-button workspace-emergency-control ${stopped ? 'is-active' : ''}`}><ShieldAlert size={15} /></button>
-          <button type="button" aria-label={windowState.maximized ? 'Restore window' : 'Maximize window'} onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.toggleWorkspaceMaximize(); }} title={windowState.maximized ? 'Restore' : 'Maximize'} className="workspace-window-button">{windowState.maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
-          <button type="button" aria-label="Minimize Pixel Workspace" onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.minimizeWorkspace(); }} className="workspace-window-button">—</button>
-          <button type="button" aria-label="Close Pixel Workspace" onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.closeWorkspace(); }} className="workspace-window-button workspace-close-button"><X size={15} /></button>
+          <button type="button" aria-label="Minimize Pixel Workspace" title="Minimize" onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.minimizeWorkspace(); }} className="workspace-window-button"><Minus size={14} /></button>
+          <button type="button" aria-label={windowState.maximized ? 'Restore window' : 'Maximize window'} onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.toggleWorkspaceMaximize(); }} title={windowState.maximized ? 'Restore' : 'Maximize'} className="workspace-window-button">{windowState.maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
+          <button type="button" aria-label="Close Pixel Workspace" title="Close" onClick={() => { if (bridge.kind === 'ready') void bridge.bridge.window.closeWorkspace(); }} className="workspace-window-button workspace-close-button"><X size={15} /></button>
         </div>
       </header>
 
       <div className="workspace-body">
         {view !== 'settings' ? <WorkspaceSidebar
           view={view}
-          onViewChange={(nextView) => nextView === 'settings' ? openSettings() : setView(nextView)}
+          onViewChange={openWorkspaceDestination}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
           history={history}
@@ -519,6 +553,11 @@ export function Workspace(): React.JSX.Element {
           {view !== 'chat' ? pendingApproval : null}
 
           {view === 'chat' ? <section className="workspace-conversation">
+            <AsciiSharkBackground
+              mode={chat.messages.length === 0 && !chat.streaming ? 'empty' : 'active'}
+              reducedMotion={settings.companion.reducedMotion}
+              theme={settings.theme === 'light' ? 'light' : 'dark'}
+            />
             <WorkspaceConversationHeader
               title={title}
               projectName={currentProject?.name && currentProject.name !== 'Default project' ? currentProject.name : undefined}
@@ -576,34 +615,10 @@ export function Workspace(): React.JSX.Element {
 
           {view === 'projects' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /></Suspense> : null}
           {view === 'library' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceLibrary documents={libraryDocuments} loading={libraryLoading} onRefresh={() => void refreshLibrary()} onIndexFolder={indexLibraryFolder} onRead={readLibraryDocument} onOpen={openLibraryDocument} onOpenFolder={openLibraryFolder} /></Suspense> : null}
-          {view === 'tasks' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceTasks tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setView('skills'); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /></Suspense> : null}
+          {view === 'tasks' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceTasks tasks={tasks} audit={audit} projectName={currentProject?.name} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setSettingsInitialPage('skills'); openSettings(); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /></Suspense> : null}
           {view === 'notes' ? <Suspense fallback={<WorkspacePanelLoading />}><ProductivityPanel /></Suspense> : null}
-          {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><Suspense fallback={<WorkspacePanelLoading />}><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></Suspense></div> : null}
-          {view === 'memory' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Project memory</h1><p>Locally stored memories for the selected project.</p></div><Suspense fallback={<WorkspacePanelLoading />}><MemoryPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></Suspense></div> : null}
-          {view === 'tools' ? <ToolsView tools={tools} /> : null}
-          {view === 'plugins' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspacePluginManager plugins={plugins} onChange={async (
-            action: PluginLifecycleAction,
-            pluginId: string,
-            enabled?: boolean,
-            availability?: PluginProjectAvailability,
-            setting?: PluginSettingChange,
-          ) => {
-            if (bridge.kind !== 'ready') return;
-            try {
-              const next = action === 'install' ? await bridge.bridge.plugins.install(pluginId)
-                : action === 'update' ? await bridge.bridge.plugins.update(pluginId)
-                : action === 'uninstall' ? await bridge.bridge.plugins.uninstall(pluginId)
-                  : action === 'project-availability' ? await bridge.bridge.plugins.setProjectAvailability(pluginId, availability ?? 'inherit')
-                    : action === 'setting' ? await bridge.bridge.plugins.setSetting(pluginId, setting?.key ?? '', setting?.value ?? '')
-                    : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
-              setPlugins(next);
-              setTools(await bridge.bridge.tools.list());
-            } catch (error) {
-              setNotice(error instanceof Error ? error.message : 'Pixel could not update that plugin.');
-            }
-          }} /></Suspense> : null}
           {view === 'board' ? <Suspense fallback={<WorkspacePanelLoading />}><PixelBoard emergencyStopped={stopped} /></Suspense> : null}
-          {view === 'settings' ? <div className="workspace-settings"><Suspense fallback={<WorkspacePanelLoading />}><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout /></Suspense></div> : null}
+          {view === 'settings' ? <div className="workspace-settings"><Suspense fallback={<WorkspacePanelLoading />}><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout initialPage={settingsInitialPage} tools={tools} plugins={plugins} onPluginChange={handlePluginChange} /></Suspense></div> : null}
         </main>
 
         {contextOpen ? <WorkspaceTaskDetails
@@ -618,56 +633,6 @@ export function Workspace(): React.JSX.Element {
       </div>
     </div>
   );
-}
-function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element {
-  const categories: Array<{ id: ToolCatalogEntry['category']; title: string }> = [
-    { id: 'screen', title: 'Screen' },
-    { id: 'input', title: 'Computer control' },
-    { id: 'browser', title: 'Browser' },
-    { id: 'files', title: 'Files' },
-    { id: 'documents', title: 'Documents' },
-    { id: 'productivity', title: 'Notes & tasks' },
-    { id: 'board', title: 'Pixel Board' },
-    { id: 'system', title: 'System' },
-    { id: 'memory', title: 'Memory' },
-    { id: 'code', title: 'Code' },
-  ];
-  const capabilityNotes = [
-    { title: 'Desktop drawing editor', status: 'Partial', detail: 'Pixel can show passive highlights and arrows on verified accessible controls. Freehand desktop editing and saved overlay sessions are not available.' },
-    { title: 'File organization', status: 'Partial', detail: 'Scoped list, filtered search, metadata, read, write, create, copy, rename/move, bounded batch operations, duplicate detection, approved open and Recycle Bin send are available. Visible application launch and restore-from-Recycle-Bin verification remain outstanding.' },
-    { title: 'Document creation', status: 'Partial', detail: 'Supported UTF-8 text files can be created or edited with approval and read-back verification. The Library can open a fresh indexed document from the active project after an explicit click. PDF and Office authoring/export are not supported.' },
-    { title: 'Workflow recording', status: 'Partial', detail: 'Completed verified tasks can be saved as project-scoped drafts and edited into a new version. Active tool-only skills can run once with declared inputs; scheduled routines use the stored tool order. Fresh observations, current approvals, supported result checks and postconditions are enforced. Non-tool steps and broader predicate types remain unsupported.' },
-    { title: 'Specialist delegation', status: 'Partial', detail: 'Research, browser, systems, and knowledge specialists can run bounded subtasks through the live model pipeline and normal tool approval gateway. Infra and Pixel Code are unavailable; Windows acceptance and durable task recovery remain unverified.' },
-    { title: 'Clipboard access', status: 'Partial', detail: 'Approval-gated one-shot text read/copy/conditional restore and verified field set are available. Real Windows acceptance remains outstanding.' },
-    { title: 'Notes and planning tasks', status: 'Partial', detail: 'Project-scoped notes, linked local documents, checklists, and tasks persist and are user/agent editable. Markdown import/export and storage/UI bridge tests exist; actual Windows dialog and document-open acceptance remain outstanding.' },
-    { title: 'Expanded system diagnostics', status: 'Partial', detail: 'CPU, memory, disk, uptime and display facts are available. Network adapter, running-app, selected-process and audio-device diagnostics are not available.' },
-  ];
-  return <section className="workspace-page">
-    <div className="workspace-page-heading"><h1>Tools</h1><p>Registered capabilities and their prerequisites. Runtime-dependent tools are checked again when used.</p></div>
-    {tools.length === 0 ? <div className="workspace-empty-card">No agent tools are registered in this build.</div> : categories.map((category) => {
-      const members = tools.filter((tool) => tool.category === category.id);
-      if (members.length === 0) return null;
-      return <section className="workspace-tool-group" key={category.id} aria-label={`${category.title} tools`}>
-        <h2 className="workspace-section-title">{category.title}<span>{members.length}</span></h2>
-        <div className="workspace-tool-grid">{members.map((tool) => <article key={tool.name} className="workspace-tool-card">
-          <header><Wrench size={15} /><strong>{tool.name.replaceAll('_', ' ')}</strong><span className={`risk risk-${tool.risk}`}>{tool.risk}</span></header>
-          <p>{tool.description}</p>
-          <footer>{tool.changesState ? 'Changes computer or document state' : 'Read only'} · {tool.requiresApproval ? 'Approval may be required' : 'No approval required by tool policy'}</footer>
-          {tool.dependency ? <small className={`workspace-tool-availability availability-${tool.availability ?? 'not_checked'}`}>
-            {tool.availability === 'ready' ? 'Dependency verified' : tool.availability === 'unavailable' ? 'Currently unavailable' : tool.availability === 'not_checked' ? 'Checked when first used' : 'Conditional · checked when used'} · {tool.dependency}
-          </small> : null}
-          {tool.availabilityReason ? <small className="workspace-tool-unavailable-reason">{tool.availabilityReason}</small> : null}
-        </article>)}</div>
-      </section>;
-    })}
-    <section className="workspace-tool-group" aria-label="Partial and unavailable capabilities">
-      <h2 className="workspace-section-title">Partial or unavailable</h2>
-      <div className="workspace-tool-gap-grid">{capabilityNotes.map((item) => <article className="workspace-tool-gap" key={item.title}>
-        <header><strong>{item.title}</strong><span className={`workspace-capability-status status-${item.status.toLowerCase()}`}>{item.status}</span></header>
-        <p>{item.detail}</p>
-      </article>)}</div>
-    </section>
-  </section>;
 }
 
 function mergeTask(current: TaskRecord[], next: TaskRecord): TaskRecord[] {

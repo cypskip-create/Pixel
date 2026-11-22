@@ -1,26 +1,17 @@
 import { useState, type FormEvent } from 'react';
 import {
-  Activity, Brain, Check, FileText, FolderKanban, FolderOpen, MessagesSquare,
-  PanelLeftClose, PanelLeftOpen, Pencil, Plug, Plus, Search, Settings, Sparkles, Trash2,
-  Wrench, X,
+  Activity, Check, FileText, FolderKanban, FolderOpen, LayoutGrid, MessageSquare,
+  PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings, Trash2, X,
 } from 'lucide-react';
-import { PenLine } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
-import { PixelMark } from '@/components/PixelMark';
 
 export type WorkspaceView = 'chat' | 'projects' | 'library' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'plugins' | 'board' | 'settings';
 
-const NAV_ITEMS: Array<{ id: Exclude<WorkspaceView, 'settings'>; label: string; icon: typeof FolderKanban; group: 'workspace' | 'library' | 'tools' }> = [
-  { id: 'chat', label: 'Conversations', icon: MessagesSquare, group: 'workspace' },
-  { id: 'projects', label: 'Projects', icon: FolderKanban, group: 'workspace' },
-  { id: 'library', label: 'Library', icon: FolderOpen, group: 'workspace' },
-  { id: 'notes', label: 'Notes & Planning', icon: FileText, group: 'library' },
-  { id: 'tasks', label: 'Activity', icon: Activity, group: 'library' },
-  { id: 'memory', label: 'Memory', icon: Brain, group: 'library' },
-  { id: 'board', label: 'Pixel Board', icon: PenLine, group: 'library' },
-  { id: 'skills', label: 'Skills & Routines', icon: Sparkles, group: 'library' },
-  { id: 'tools', label: 'Tools', icon: Wrench, group: 'tools' },
-  { id: 'plugins', label: 'Plugins', icon: Plug, group: 'tools' },
+const NAV_ITEMS: Array<{ id: 'projects' | 'library' | 'board' | 'tasks'; label: string; icon: typeof FolderKanban }> = [
+  { id: 'projects', label: 'Projects', icon: FolderKanban },
+  { id: 'library', label: 'Library', icon: FolderOpen },
+  { id: 'board', label: 'Pixel Board', icon: LayoutGrid },
+  { id: 'tasks', label: 'Running Tasks', icon: Activity },
 ];
 
 interface WorkspaceSidebarProps {
@@ -46,6 +37,7 @@ export function WorkspaceSidebar({
   historySearch, onHistorySearchChange, onOpenConversation, onNewChat,
   onRenameConversation, onDeleteConversation, currentProject, activeTaskCount, disabled,
 }: WorkspaceSidebarProps) {
+  const [searchOpen, setSearchOpen] = useState(Boolean(historySearch));
   const [renaming, setRenaming] = useState<ConversationSummary | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ConversationSummary | null>(null);
@@ -75,71 +67,89 @@ export function WorkspaceSidebar({
     }
   };
 
+  const showSearch = searchOpen || historySearch.length > 0;
+
   return (
     <aside className="workspace-sidebar" data-collapsed={collapsed} aria-label="Workspace sidebar">
-      <div className="workspace-sidebar-rail">
-        <div className="workspace-sidebar-brand" aria-label="Pixel"><PixelMark size={24} /><span>PIXEL</span></div>
-        <nav className="workspace-sidebar-nav" aria-label="Workspace navigation">
-          {(['workspace', 'library', 'tools'] as const).map((group) => (
-            <div className="workspace-nav-group" key={group}>
-              <span className="workspace-nav-group-label">{group === 'workspace' ? 'Workspace' : group === 'tools' ? 'Integrations' : 'Personal'}</span>
-              {NAV_ITEMS.filter((item) => item.group === group).map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`workspace-nav-item ${view === id ? 'is-active' : ''}`}
-                  aria-label={label}
-                  aria-current={view === id ? 'page' : undefined}
-                  onClick={() => onViewChange(id)}
-                  title={label}
-                >
-                  <Icon size={16} aria-hidden="true" /><span>{label}</span>
-                  {id === 'tasks' && activeTaskCount > 0 ? <span className="workspace-nav-count">{activeTaskCount}</span> : null}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <div className="workspace-sidebar-bottom">
-          <button type="button" className="workspace-project-selector" onClick={() => onViewChange('projects')} aria-label={`Project: ${currentProject?.name ?? 'Default project'}`} title={`Project: ${currentProject?.name ?? 'Default project'}`}>
-            <FolderKanban size={15} aria-hidden="true" /><span>{currentProject?.name ?? 'Default project'}</span>
-          </button>
-          <button
-            type="button"
-            className={`workspace-nav-item workspace-settings-link ${view === 'settings' ? 'is-active' : ''}`}
-            aria-label="Settings"
-            aria-current={view === 'settings' ? 'page' : undefined}
-            onClick={() => onViewChange('settings')}
-            title="Settings"
-          ><Settings size={16} aria-hidden="true" /><span>Settings</span></button>
-        </div>
+      <div className="workspace-sidebar-top">
+        <button type="button" className="workspace-new-chat" onClick={onNewChat} disabled={disabled} title="New Chat">
+          <Plus size={15} aria-hidden="true" /><span>New Chat</span>
+        </button>
+        <button
+          type="button"
+          className="workspace-sidebar-toggle"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-pressed={collapsed}
+          onClick={onToggleCollapsed}
+        >{collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>
       </div>
 
-      <section className="workspace-chat-list-pane" aria-label="Conversation list">
-        <div className="workspace-sidebar-top">
-          <button type="button" className="workspace-new-chat" onClick={onNewChat} disabled={disabled} title="New chat">
-            <Plus size={16} aria-hidden="true" /><span>New chat</span>
+      <nav className="workspace-sidebar-nav" aria-label="Workspace navigation">
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className={`workspace-nav-item ${view === id ? 'is-active' : ''}`}
+            aria-label={label}
+            aria-current={view === id ? 'page' : undefined}
+            onClick={() => onViewChange(id)}
+            title={label}
+          >
+            <Icon size={15} aria-hidden="true" /><span>{label}</span>
+            {id === 'tasks' && activeTaskCount > 0 ? <span className="workspace-nav-count">{activeTaskCount}</span> : null}
           </button>
+        ))}
+      </nav>
+
+      <div className="workspace-sidebar-divider" aria-hidden="true" />
+
+      <section className="workspace-recent" aria-label="Recent chats">
+        <div className="workspace-section-label">
+          <span>Recent Chats</span>
           <button
             type="button"
-            className="workspace-sidebar-toggle"
-            aria-label={collapsed ? 'Expand conversation list' : 'Collapse conversation list'}
-            title={collapsed ? 'Expand conversation list' : 'Collapse conversation list'}
-            aria-pressed={collapsed}
-            onClick={onToggleCollapsed}
-          >{collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
+            className="workspace-search-toggle"
+            aria-label="Search recent chats"
+            aria-pressed={showSearch}
+            title="Search recent chats"
+            onClick={() => {
+              if (showSearch && historySearch) onHistorySearchChange('');
+              setSearchOpen((open) => !open);
+            }}
+          >
+            <Search size={13} aria-hidden="true" />
+          </button>
         </div>
-        <section className="workspace-recent" aria-label="Recent conversations">
-          <div className="workspace-section-label"><span>Recent chats</span><span className="workspace-history-count">{history.length}</span></div>
+
+        {showSearch ? (
           <label className="workspace-search">
-            <Search size={14} aria-hidden="true" />
-            <input type="search" aria-label="Search chats" value={historySearch} onChange={(event) => onHistorySearchChange(event.target.value.slice(0, 120))} placeholder="Search chats" />
+            <Search size={13} aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search chats"
+              value={historySearch}
+              onChange={(event) => onHistorySearchChange(event.target.value.slice(0, 120))}
+              placeholder="Search chats…"
+            />
           </label>
-          {error ? <p role="alert" className="workspace-sidebar-error">{error}</p> : null}
-          <div className="workspace-history-list">
-            {history.length === 0 ? <p className="workspace-sidebar-empty">{historySearch ? 'No matching chats.' : 'No conversations yet.'}</p> : null}
-            {history.map((item) => (
-              <div key={item.id} className={`workspace-history-row ${selectedConversationId === item.id ? 'is-active' : ''}`}>
+        ) : null}
+
+        {currentProject && currentProject.name !== 'Default project' ? (
+          <div className="workspace-project-pill" title={`Active project: ${currentProject.name}`}>
+            <FolderKanban size={11} aria-hidden="true" />
+            <span>{currentProject.name}</span>
+          </div>
+        ) : null}
+
+        {error ? <p role="alert" className="workspace-sidebar-error">{error}</p> : null}
+
+        <div className="workspace-history-list">
+          {history.length === 0 ? <p className="workspace-sidebar-empty">{historySearch ? 'No matching chats.' : 'No conversations yet.'}</p> : null}
+          {history.map((item) => {
+            const isActive = view === 'chat' && selectedConversationId === item.id;
+            return (
+              <div key={item.id} className={`workspace-history-row ${isActive ? 'is-active' : ''}`}>
                 {renaming?.id === item.id ? (
                   <form className="workspace-rename-form" onSubmit={(event) => void submitRename(event)}>
                     <input aria-label="Conversation title" value={renameDraft} maxLength={80} autoFocus onChange={(event) => setRenameDraft(event.target.value)} />
@@ -148,8 +158,16 @@ export function WorkspaceSidebar({
                   </form>
                 ) : (
                   <>
-                    <button type="button" className="workspace-history-open" disabled={disabled} aria-current={selectedConversationId === item.id ? 'page' : undefined} onClick={() => onOpenConversation(item.id)} title={item.title}>
-                      <span className="workspace-history-title">{item.title}</span><time>{relativeDate(item.updatedAt)}</time>
+                    <button
+                      type="button"
+                      className="workspace-history-open"
+                      disabled={disabled}
+                      aria-current={isActive ? 'page' : undefined}
+                      onClick={() => onOpenConversation(item.id)}
+                      title={`${item.title} · ${relativeDate(item.updatedAt)}`}
+                    >
+                      <MessageSquare size={14} aria-hidden="true" />
+                      <span className="workspace-history-title">{item.title}</span>
                     </button>
                     <div className="workspace-history-actions">
                       <button type="button" aria-label={`Rename ${item.title}`} title={`Rename ${item.title}`} disabled={disabled} onClick={() => { setRenaming(item); setRenameDraft(item.title); }}><Pencil size={13} /></button>
@@ -158,10 +176,31 @@ export function WorkspaceSidebar({
                   </>
                 )}
               </div>
-            ))}
-          </div>
-        </section>
+            );
+          })}
+        </div>
       </section>
+
+      <div className="workspace-sidebar-bottom">
+        <button
+          type="button"
+          className={`workspace-nav-item ${view === 'notes' ? 'is-active' : ''}`}
+          aria-label="Notes & Planning"
+          aria-current={view === 'notes' ? 'page' : undefined}
+          onClick={() => onViewChange('notes')}
+          title="Notes & Planning"
+        ><FileText size={15} aria-hidden="true" /><span>Notes & Planning</span></button>
+        <button
+          type="button"
+          className={`workspace-nav-item workspace-settings-link ${view === 'settings' ? 'is-active' : ''}`}
+          aria-label="Settings"
+          aria-current={view === 'settings' ? 'page' : undefined}
+          onClick={() => onViewChange('settings')}
+          title="Settings"
+        >
+          <Settings size={15} aria-hidden="true" /><span>Settings</span>
+        </button>
+      </div>
 
       {deleteTarget ? (
         <div className="workspace-sidebar-confirm" role="alertdialog" aria-labelledby="workspace-delete-title" aria-describedby="workspace-delete-description">

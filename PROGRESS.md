@@ -30,6 +30,12 @@ Updated: 2026-11-22. Version: 0.2.1.
   listener and moved to 5200, then Electron exited `2147483651`
   (`0x80000003`) without a window. A minimal isolated Electron smoke exited 0
   but emitted no ready marker, so it does not establish that the runtime works.
+- A fresh disposable Windows UIA integration run verified exact-window
+  selection and `ValuePattern` read-back. The fixture checkbox's
+  `TogglePattern.Toggle()` threw `InvalidOperationException`; Pixel correctly
+  blocked later actions while the mutation lacked verification. The harness
+  now re-observes after each state-changing step. This toggle scenario remains
+  failed/unverified; see `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
 - Visual-preview follow-up: Vite started on `0.0.0.0:5200`, but local browser
   requests from the host sandbox were denied (`ERR_NETWORK_ACCESS_DENIED`) and
   the in-app browser timed out. A `file:` preview of the production renderer

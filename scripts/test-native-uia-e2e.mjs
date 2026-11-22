@@ -154,25 +154,29 @@ async function main() {
       role: 'Edit',
       ...selectedWindow,
     }, 4),
-    toolOutcome('invoke_ui_element', {
-      selector: buttonName,
-      role: 'Button',
-      ...selectedWindow,
-      expectedResult: { selector: resultName, role: 'Text', state: 'present' },
-    }, 5),
-    toolOutcome('verify_ui_state', {
-      selector: resultName,
-      role: 'Text',
-      ...selectedWindow,
-      state: 'present',
-    }, 6),
+    // Every state-changing UIA operation is followed by a fresh observation;
+    // an element search from before ValuePattern.SetValue is not reusable.
+    toolOutcome('find_ui_elements', { text: buttonName, roles: ['Button'], maxResults: 5, ...selectedWindow }, 5),
     toolOutcome('control_ui_element', {
       selector: 'PixelHarmlessSwitch',
       role: 'CheckBox',
       action: 'toggle',
       desiredToggleState: 'on',
       ...selectedWindow,
-    }, 7),
+    }, 6),
+    toolOutcome('find_ui_elements', { text: buttonName, roles: ['Button'], maxResults: 5, ...selectedWindow }, 7),
+    toolOutcome('invoke_ui_element', {
+      selector: buttonName,
+      role: 'Button',
+      ...selectedWindow,
+      expectedResult: { selector: resultName, role: 'Text', state: 'present' },
+    }, 8),
+    toolOutcome('verify_ui_state', {
+      selector: resultName,
+      role: 'Text',
+      ...selectedWindow,
+      state: 'present',
+    }, 9),
     answerOutcome('The harmless UIA action completed and its postcondition was verified.'),
   ];
   const observedToolResults = [];
@@ -199,7 +203,7 @@ async function main() {
   const runResult = await agent.run({
     requestId: `uia-e2e-${stamp}`,
     request: {
-      text: 'List windows, select the unique harmless UIA fixture, enter harmless test text, toggle its test switch on, invoke the harmless button, and verify the completion label.',
+      text: 'List windows, select the unique harmless UIA fixture, enter harmless test text, re-observe, toggle its test switch on, re-observe, invoke the harmless button, and verify the completion label.',
       mode: 'hybrid',
     },
     model: 'scripted-uia-e2e',

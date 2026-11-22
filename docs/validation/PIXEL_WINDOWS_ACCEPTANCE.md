@@ -925,6 +925,21 @@ Automated tests cover the SQLite store, interrupted-task recovery, safe-point pa
 
 ## Native desktop and human-handoff checks
 
+### Current disposable fixture recheck (2026-11-22)
+
+The local `scripts/test-native-uia-e2e.mjs --launch-fixture` run launched the
+disposable fixture and confirmed exact-window selection plus `ValuePattern`
+text entry/read-back. The fixture's WinForms checkbox exposed `TogglePattern`,
+but its provider threw `InvalidOperationException: Operation is not valid due
+to the current state of the object` on `Toggle()`. Pixel recorded the failed
+state-changing action and correctly refused the later invocation because the
+action outcome still needed verification. The JSON diagnostic is under
+`artifacts/windows-acceptance/` (git-ignored). This run is a failure for the
+toggle scenario, not a pass; retry with a provider-compatible fixture or test
+control, then separately exercise the approval UI in Pixel. The harness now
+re-observes after typing and after the toggle attempt to respect observation
+freshness.
+
 Start the harmless, uniquely accessible Windows Forms fixture in a separate PowerShell window:
 
 ```powershell

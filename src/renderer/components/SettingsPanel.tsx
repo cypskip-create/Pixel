@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Brain, Eye, EyeOff, Gauge, Globe2, Keyboard, ListChecks, Mic, ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
-import type { AppSettings, AssistantState, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot, Mode, VoiceModelInfo, VoiceModelProgress } from '@shared/types';
+import {
+  ArrowLeft, Brain, Cpu, Eye, EyeOff, Gauge, Globe2, Keyboard, LayoutDashboard,
+  ListChecks, Mic, Palette, Plug, ShieldCheck, Sparkles, Terminal, Wrench, X,
+} from 'lucide-react';
+import type {
+  AppSettings, AssistantState, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot,
+  Mode, PluginView, ToolCatalogEntry, VoiceModelInfo, VoiceModelProgress,
+} from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
@@ -10,7 +16,42 @@ import { PermissionsPanel } from '@/components/PermissionsPanel';
 import { PixelMark } from '@/components/PixelMark';
 import { PixMascot } from '@/components/PixMascot';
 import { CursorBuddy } from '@/components/CursorBuddy';
+import {
+  WorkspacePluginManager,
+  type PluginLifecycleAction,
+  type PluginProjectAvailability,
+  type PluginSettingChange,
+} from '@/components/WorkspacePluginManager';
 import { MicrophoneCapture, type VoiceCaptureDiagnostics } from '@/lib/audioCapture';
+
+export type SettingsPage =
+  | 'general'
+  | 'ai-models'
+  | 'agent-permissions'
+  | 'voice'
+  | 'memory'
+  | 'tools'
+  | 'plugins'
+  | 'skills'
+  | 'appearance'
+  | 'workspace'
+  | 'advanced';
+
+export const SETTINGS_CATEGORIES: ReadonlyArray<{ id: SettingsPage; label: string; icon: typeof Gauge }> = [
+  { id: 'general', label: 'General', icon: Gauge },
+  { id: 'ai-models', label: 'AI & Models', icon: Cpu },
+  { id: 'agent-permissions', label: 'Agent & Permissions', icon: ShieldCheck },
+  { id: 'voice', label: 'Voice', icon: Mic },
+  { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'tools', label: 'Tools', icon: Wrench },
+  { id: 'plugins', label: 'Plugins & Connections', icon: Plug },
+  { id: 'skills', label: 'Skills & Routines', icon: Sparkles },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'workspace', label: 'Workspace', icon: LayoutDashboard },
+  { id: 'advanced', label: 'Advanced', icon: Terminal },
+];
+
+const VALID_SETTINGS_PAGES = new Set<string>(SETTINGS_CATEGORIES.map((item) => item.id));
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -27,20 +68,30 @@ interface SettingsPanelProps {
   error: string | null;
   saving: boolean;
   workspaceLayout?: boolean;
+  initialPage?: SettingsPage;
+  tools?: ToolCatalogEntry[];
+  plugins?: PluginView[];
+  onPluginChange?: (
+    action: PluginLifecycleAction,
+    pluginId: string,
+    enabled?: boolean,
+    availability?: PluginProjectAvailability,
+    setting?: PluginSettingChange,
+  ) => Promise<void>;
 }
 
 export type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
 
-type SettingsPage = 'general' | 'voice' | 'privacy' | 'tools';
-const SETTINGS_PAGE_KEY = 'pixel.settings.workspace-page.v1';
+const SETTINGS_PAGE_KEY = 'pixel.settings.workspace-page.v2';
 
-function initialSettingsPage(): SettingsPage {
+function initialSettingsPage(override?: SettingsPage): SettingsPage {
+  if (override && VALID_SETTINGS_PAGES.has(override)) return override;
   if (typeof window === 'undefined') return 'general';
   try {
     const value = window.localStorage.getItem(SETTINGS_PAGE_KEY);
-    if (value === 'voice' || value === 'privacy' || value === 'tools') return value;
+    if (value && VALID_SETTINGS_PAGES.has(value)) return value as SettingsPage;
   } catch { /* Settings still opens when browser storage is unavailable. */ }
   return 'general';
 }
@@ -67,9 +118,16 @@ export function SettingsPanel(props: SettingsPanelProps) {
     error,
     saving,
     workspaceLayout = false,
+    initialPage,
+    tools = [],
+    plugins = [],
+    onPluginChange,
   } = props;
   const [advanced, setAdvanced] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialSettingsPage);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>(() => initialSettingsPage(initialPage));
+  useEffect(() => {
+    if (initialPage && VALID_SETTINGS_PAGES.has(initialPage)) setSettingsPage(initialPage);
+  }, [initialPage]);
   const [cursorPreview, setCursorPreview] = useState(false);
   const [pixPreviewState, setPixPreviewState] = useState<AssistantState>('idle');
   const [automationOpen, setAutomationOpen] = useState(false);
@@ -379,23 +437,35 @@ export function SettingsPanel(props: SettingsPanelProps) {
         {workspaceLayout ? (
           <nav className="workspace-settings-nav" aria-label="Settings categories">
             <button type="button" className="workspace-settings-back" onClick={closeSettings}>
-              <ArrowLeft size={16} aria-hidden="true" /> <span>Back to Workspace</span>
+              <ArrowLeft size={15} aria-hidden="true" /> <span>Back to Workspace</span>
             </button>
             <h3>Settings</h3>
-            {([
-              ['general', 'General', Gauge],
-              ['voice', 'Voice', Mic],
-              ['privacy', 'Privacy & Memory', ShieldCheck],
-              ['tools', 'Tools & Integrations', SlidersHorizontal],
-            ] as const).map(([id, label, Icon]) => (
-              <button key={id} type="button" aria-current={settingsPage === id ? 'page' : undefined} className={settingsPage === id ? 'is-active' : ''} onClick={() => { setSettingsPage(id); try { window.localStorage.setItem(SETTINGS_PAGE_KEY, id); } catch { /* Selection is still active for this visit. */ } setAutomationOpen(false); setMemoryOpen(false); setPermissionsOpen(false); }}>
-                <Icon size={16} aria-hidden="true" /> <span>{label}</span>
+            {SETTINGS_CATEGORIES.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                aria-current={settingsPage === id ? 'page' : undefined}
+                className={settingsPage === id ? 'is-active' : ''}
+                onClick={() => {
+                  setSettingsPage(id);
+                  try { window.localStorage.setItem(SETTINGS_PAGE_KEY, id); } catch { /* Selection is still active for this visit. */ }
+                  setAutomationOpen(false);
+                  setMemoryOpen(false);
+                  setPermissionsOpen(false);
+                }}
+              >
+                <Icon size={15} aria-hidden="true" /> <span>{label}</span>
               </button>
             ))}
           </nav>
         ) : null}
         <div className={workspaceLayout ? 'workspace-settings-content' : ''}>
-        {workspaceLayout ? <div className="workspace-settings-page-heading"><h1>{settingsPage === 'privacy' ? 'Privacy & Memory' : settingsPage === 'tools' ? 'Tools & Integrations' : settingsPage === 'voice' ? 'Voice' : 'General'}</h1>{saving ? <span role="status" aria-live="polite">Saving…</span> : null}</div> : null}
+        {workspaceLayout ? (
+          <div className="workspace-settings-page-heading">
+            <h1>{SETTINGS_CATEGORIES.find((item) => item.id === settingsPage)?.label ?? 'General'}</h1>
+            {saving ? <span role="status" aria-live="polite">Saving…</span> : null}
+          </div>
+        ) : null}
         {error !== null ? (
           <p
             role="alert"
@@ -748,10 +818,69 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </p>
         </Group>
 
-        <Group icon={ShieldCheck} title="Privacy & Memory" category="privacy">
-          <Row label="Screenshots need approval">
-            <span className="text-[11px] font-medium text-neutral-200">Always on</span>
+        <Group icon={Cpu} title="Provider & API key" category="ai-models">
+          <Row label="Provider">
+            <span className="text-[11px] font-medium text-[var(--color-ink)]">{settings.provider.provider}</span>
           </Row>
+          <Row label="Primary model">
+            <select
+              aria-label="Primary model"
+              value={settings.provider.primaryModel}
+              onChange={(event) => onPatch({ provider: { primaryModel: event.target.value } })}
+              className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)]"
+            >
+              <option value="deepseek-flash">DeepSeek Flash (default)</option>
+              <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+              <option value="deepseek-chat">DeepSeek Chat</option>
+              <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+            </select>
+          </Row>
+          <Row label="Reasoning model">
+            <span className="text-[11px] text-[var(--color-ink-dim)]">{settings.provider.reasoningModel}</span>
+          </Row>
+          <ApiKeyManager
+            hasApiKey={hasApiKey}
+            onSave={onSaveApiKey}
+            onRemove={onRemoveApiKey}
+            onTestConnection={onTestConnection}
+            resetToken={keyEditorReset}
+          />
+        </Group>
+
+        <Group icon={ShieldCheck} title="Mode & Permissions" category="agent-permissions">
+          <div className="pb-1.5">
+            <ModeSwitcher
+              current={settings.companion.mode}
+              onRequestMode={onRequestMode}
+              variant="inline"
+            />
+            <p className="mt-1.5 px-1 text-[10.5px] leading-snug text-[var(--color-ink-dim)]">
+              {modeDescriptor.summary}
+            </p>
+          </div>
+          <Row label="Screenshots need approval">
+            <span className="text-[11px] font-medium text-[var(--color-ink)]">Always on</span>
+          </Row>
+          <Row label="Emergency stop shortcut">
+            <Accelerator value={settings.emergencyStopAccelerator} />
+          </Row>
+          {workspaceLayout ? (
+            <div className="workspace-settings-embedded mt-3">
+              <PermissionsPanel onBack={() => setSettingsPage('general')} />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPermissionsOpen(true)}
+              className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
+            >
+              <ShieldCheck size={12} aria-hidden="true" />
+              Manage Always Allow permissions
+            </button>
+          )}
+        </Group>
+
+        <Group icon={Brain} title="Privacy & Memory" category="memory">
           <Toggle
             label="Keep conversation history"
             hint="Stored locally on this machine only."
@@ -760,67 +889,133 @@ export function SettingsPanel(props: SettingsPanelProps) {
           />
           <Toggle
             label="Automatic Memory"
-            hint="Save concise preferences and verified task outcomes to this project. Passwords, credentials and copied webpage instructions are excluded."
+            hint="Save durable user preferences, explicit corrections, and verified project facts. Secrets, one-off questions, and copied webpage instructions are excluded."
             checked={settings.privacy.automaticMemory}
             onChange={(value) => onPatch({ privacy: { automaticMemory: value } })}
           />
-          <ApiKeyManager
-            hasApiKey={hasApiKey}
-            onSave={onSaveApiKey}
-            onRemove={onRemoveApiKey}
-            onTestConnection={onTestConnection}
-            resetToken={keyEditorReset}
-          />
-          <button
-            type="button"
-            onClick={() => setMemoryOpen(true)}
-            className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
-          >
-            <Brain size={12} aria-hidden="true" />
-            Manage project memory
-          </button>
-          <button
-            type="button"
-            onClick={() => setPermissionsOpen(true)}
-            className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
-          >
-            <ShieldCheck size={12} aria-hidden="true" />
-            Manage Always Allow permissions
-          </button>
+          {workspaceLayout ? (
+            <div className="workspace-settings-embedded mt-3">
+              <MemoryPanel onBack={() => setSettingsPage('general')} returnLabel="Back" />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setMemoryOpen(true)}
+              className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-soft)] hover:bg-white/8"
+            >
+              <Brain size={12} aria-hidden="true" />
+              Manage project memory
+            </button>
+          )}
         </Group>
 
-        <button
-          type="button"
-          onClick={() => setAutomationOpen(true)}
-          data-settings-category="tools"
-          className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-neutral-300/20 bg-neutral-300/8 px-2.5 py-2 text-left text-[10.5px] font-medium text-neutral-100 hover:bg-neutral-300/14"
-        >
-          <ListChecks size={12} aria-hidden="true" />
-          Skills and routines
-        </button>
+        {workspaceLayout ? (
+          <>
+            <div className="workspace-settings-group mb-4" data-settings-category="tools">
+              <h3 className="mb-2 flex items-center gap-1.5 text-[13.5px] font-semibold text-[var(--color-ink)]">
+                <Wrench size={14} aria-hidden="true" />
+                Registered Tools ({tools.length})
+              </h3>
+              <SettingsToolsCatalog tools={tools} />
+            </div>
 
-        <button
-          type="button"
-          onClick={() => setAdvanced((value) => !value)}
-          data-settings-category="general"
-          aria-expanded={advanced}
-          className="no-drag mt-1 w-full rounded-xl px-2 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-dim)] hover:bg-white/6 hover:text-[var(--color-ink-soft)]"
-        >
-          {advanced ? 'Hide' : 'Show'} advanced
-        </button>
+            <div className="workspace-settings-group mb-4 workspace-settings-embedded" data-settings-category="plugins">
+              {onPluginChange ? (
+                <WorkspacePluginManager plugins={plugins} onChange={onPluginChange} />
+              ) : (
+                <p className="text-[12px] text-[var(--color-ink-dim)]">Plugin controls are available in Workspace.</p>
+              )}
+            </div>
 
-        {advanced ? (
-          <div data-settings-category="general" className="mt-1 rounded-xl border border-[var(--color-border)] bg-black/15 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-[var(--color-ink-dim)]">
-            <p>provider: {settings.provider.provider}</p>
-            <p>primary: {settings.provider.primaryModel}</p>
-            <p>reasoning: {settings.provider.reasoningModel}</p>
-            <p>temperature: {String(settings.provider.temperature)}</p>
-            <p>maxTokens: {String(settings.provider.maxTokens)}</p>
-            <p>timeout: {String(settings.provider.requestTimeoutMs)}ms</p>
-            <p>theme: {settings.theme}</p>
-            <p>history: {settings.privacy.historyRetentionDays === 0 ? 'forever' : `${String(settings.privacy.historyRetentionDays)}d`}</p>
-          </div>
-        ) : null}
+            <div className="workspace-settings-group mb-4 workspace-settings-embedded" data-settings-category="skills">
+              <AutomationPanel onBack={() => setSettingsPage('general')} returnLabel="Back" />
+            </div>
+
+            <Group icon={Palette} title="Theme & Motion" category="appearance">
+              <Row label="Theme">
+                <select
+                  aria-label="Application theme"
+                  value={settings.theme}
+                  onChange={(event) => onPatch({ theme: event.target.value as AppSettings['theme'] })}
+                  className="no-drag max-w-[190px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)]"
+                >
+                  <option value="system">System default</option>
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </Row>
+              <Toggle
+                label="Reduce motion"
+                hint="Disables companion animations and transitions ambient sharks to a calm static composition."
+                checked={settings.companion.reducedMotion}
+                onChange={(value) => onPatch({ companion: { reducedMotion: value } })}
+              />
+            </Group>
+
+            <Group icon={LayoutDashboard} title="Workspace & Layout" category="workspace">
+              <Row label="Default interaction mode">
+                <span className="text-[11px] text-[var(--color-ink-soft)]">{getModeDescriptor(settings.companion.mode).label}</span>
+              </Row>
+              <Toggle
+                label="Collapse companion bar after answering"
+                hint="Return the floating top bar to compact state once a reply finishes."
+                checked={settings.companion.autoCollapse}
+                onChange={(value) => onPatch({ companion: { autoCollapse: value } })}
+              />
+              <Row label="Ambient chat background">
+                <span className="text-[11px] text-[var(--color-ink-dim)]">ASCII sharks ({settings.companion.reducedMotion ? 'static · reduced motion' : 'active'})</span>
+              </Row>
+            </Group>
+
+            <Group icon={Terminal} title="Diagnostics & Runtime" category="advanced">
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
+                <p>provider: {settings.provider.provider}</p>
+                <p>primary: {settings.provider.primaryModel}</p>
+                <p>reasoning: {settings.provider.reasoningModel}</p>
+                <p>temperature: {String(settings.provider.temperature)}</p>
+                <p>maxTokens: {String(settings.provider.maxTokens)}</p>
+                <p>timeout: {String(settings.provider.requestTimeoutMs)}ms</p>
+                <p>theme: {settings.theme}</p>
+                <p>history: {settings.privacy.historyRetentionDays === 0 ? 'forever' : `${String(settings.privacy.historyRetentionDays)}d`}</p>
+              </div>
+            </Group>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setAutomationOpen(true)}
+              data-settings-category="tools"
+              className="no-drag mt-1 flex w-full items-center gap-1.5 rounded-xl border border-neutral-300/20 bg-neutral-300/8 px-2.5 py-2 text-left text-[10.5px] font-medium text-neutral-100 hover:bg-neutral-300/14"
+            >
+              <ListChecks size={12} aria-hidden="true" />
+              Skills and routines
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAdvanced((value) => !value)}
+              data-settings-category="general"
+              aria-expanded={advanced}
+              className="no-drag mt-1 w-full rounded-xl px-2 py-1.5 text-left text-[10.5px] font-medium text-[var(--color-ink-dim)] hover:bg-white/6 hover:text-[var(--color-ink-soft)]"
+            >
+              {advanced ? 'Hide' : 'Show'} advanced
+            </button>
+
+            {advanced ? (
+              <div data-settings-category="general" className="mt-1 rounded-xl border border-[var(--color-border)] bg-black/15 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-[var(--color-ink-dim)]">
+                <p>provider: {settings.provider.provider}</p>
+                <p>primary: {settings.provider.primaryModel}</p>
+                <p>reasoning: {settings.provider.reasoningModel}</p>
+                <p>temperature: {String(settings.provider.temperature)}</p>
+                <p>maxTokens: {String(settings.provider.maxTokens)}</p>
+                <p>timeout: {String(settings.provider.requestTimeoutMs)}ms</p>
+                <p>theme: {settings.theme}</p>
+                <p>history: {settings.privacy.historyRetentionDays === 0 ? 'forever' : `${String(settings.privacy.historyRetentionDays)}d`}</p>
+              </div>
+            ) : null}
+          </>
+        )}
         </>}
         </div>
       </div>
@@ -1093,6 +1288,56 @@ function connectionFailureMessage(code?: CypsErrorCode): string {
   }
 }
 
+function SettingsToolsCatalog({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element {
+  const categories: Array<{ id: ToolCatalogEntry['category']; title: string }> = [
+    { id: 'screen', title: 'Screen' },
+    { id: 'input', title: 'Computer control' },
+    { id: 'browser', title: 'Browser' },
+    { id: 'files', title: 'Files' },
+    { id: 'documents', title: 'Documents' },
+    { id: 'productivity', title: 'Notes & tasks' },
+    { id: 'board', title: 'Pixel Board' },
+    { id: 'system', title: 'System' },
+    { id: 'memory', title: 'Memory' },
+    { id: 'code', title: 'Code' },
+  ];
+  if (tools.length === 0) {
+    return <p className="text-[12px] text-[var(--color-ink-dim)]">No agent tools are registered in this build.</p>;
+  }
+  return (
+    <div className="space-y-4">
+      {categories.map((category) => {
+        const members = tools.filter((tool) => tool.category === category.id);
+        if (members.length === 0) return null;
+        return (
+          <section key={category.id} aria-label={`${category.title} tools`}>
+            <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-dim)]">
+              {category.title} ({members.length})
+            </h4>
+            <div className="divide-y divide-[var(--color-border)] border-t border-b border-[var(--color-border)]">
+              {members.map((tool) => (
+                <div key={tool.name} className="py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong className="text-[12.5px] font-medium text-[var(--color-ink)]">{tool.name.replaceAll('_', ' ')}</strong>
+                    <span className={`risk risk-${tool.risk}`}>{tool.risk}</span>
+                  </div>
+                  <p className="mt-0.5 text-[11.5px] text-[var(--color-ink-dim)]">{tool.description}</p>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[10.5px] text-[var(--color-ink-dim)]">
+                    <span>{tool.changesState ? 'State-changing' : 'Read-only'}</span>
+                    <span>·</span>
+                    <span>{tool.requiresApproval ? 'Approval gated' : 'No approval required'}</span>
+                    {tool.dependency ? <><span>·</span><span>{tool.dependency} ({tool.availability ?? 'not_checked'})</span></> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function Group({
   icon: Icon,
   title,
@@ -1101,7 +1346,7 @@ function Group({
 }: {
   icon: typeof Gauge;
   title: string;
-  category: 'general' | 'voice' | 'privacy' | 'tools';
+  category: SettingsPage;
   children: React.ReactNode;
 }) {
   return (

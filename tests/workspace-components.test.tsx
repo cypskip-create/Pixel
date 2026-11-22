@@ -128,12 +128,21 @@ describe('conversation-first Workspace controls', () => {
     expect(rendered.querySelector('[aria-label="Workspace navigation"]')).not.toBeNull();
     expect(rendered.querySelector('[aria-label="Pixel sections"]')).toBeNull();
 
-    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('New chat'))?.click());
+    // Consolidated main navigation: Projects, Library, Pixel Board, Running Tasks + New Chat + Settings
+    const navLabels = [...rendered.querySelectorAll('[aria-label="Workspace navigation"] button')].map((b) => b.getAttribute('aria-label'));
+    expect(navLabels).toEqual(['Projects', 'Library', 'Pixel Board', 'Running Tasks']);
+    expect(navLabels).not.toContain('Conversations');
+    expect(navLabels).not.toContain('Memory');
+    expect(navLabels).not.toContain('Tools');
+    expect(navLabels).not.toContain('Plugins');
+    expect(navLabels).not.toContain('Skills & Routines');
+
+    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('New Chat'))?.click());
     expect(onNewChat).toHaveBeenCalledOnce();
-    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Activity'))?.click());
+    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Running Tasks'))?.click());
     expect(onViewChange).toHaveBeenCalledWith('tasks');
-    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Notes & Planning'))?.click());
-    expect(onViewChange).toHaveBeenCalledWith('notes');
+    act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Pixel Board'))?.click());
+    expect(onViewChange).toHaveBeenCalledWith('board');
     act(() => [...rendered.querySelectorAll('button')].find((button) => button.textContent?.includes('Library'))?.click());
     expect(onViewChange).toHaveBeenCalledWith('library');
     expect(rendered.querySelector('.workspace-history-open[aria-current="page"]')?.textContent).toContain('A saved conversation');
