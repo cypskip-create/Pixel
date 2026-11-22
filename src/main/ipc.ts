@@ -49,6 +49,7 @@ import type {
   ScreenWindowTarget,
   ProductivityChecklistView,
   ProductivityDocumentLinkView,
+  DocumentLibraryIndexResult,
   PluginView,
 } from '../shared/types';
 import type { BoardOperation, PixelBoardDocument } from '../shared/drawingBoard';
@@ -658,6 +659,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     showVisualGuidance: (request) => windows.showVisualGuidance(request),
     clearVisualGuidance: (selector) => windows.clearVisualGuidance(selector),
     onPluginHealth: (pluginId, error) => pluginStore.recordHealth(pluginId, error),
+    getPluginSetting: (pluginId, key) => pluginStore.getSetting(pluginId, key),
   });
 
   const agent = new AgentExecutor({
@@ -1109,6 +1111,32 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.documentsLibraryRead, (_event, documentId: string, startChunk = 0) =>
     documentTools.readForWorkspace(documentId, startChunk),
   );
+  registerHandler(CHANNELS.documentsLibraryOpen, async (_event, documentId: string) => {
+    const result = await documentTools.openForWorkspace(documentId, (path) => shell.openPath(path));
+    audit.record('tool', 'Opened indexed Library document', result.ok ? 'ok' : 'error');
+    return result;
+  });
+  registerHandler(CHANNELS.documentsLibraryOpenFolder, async (_event, folderId: string) => {
+    const result = await documentTools.openFolderForWorkspace(folderId, (path) => shell.openPath(path));
+    audit.record('tool', 'Opened indexed Library folder', result.ok ? 'ok' : 'error');
+    return result;
+  });
+  registerHandler(CHANNELS.documentsLibraryIndex, async (): Promise<DocumentLibraryIndexResult> => {
+    const parent = windows.getWorkspaceWindow();
+    const pickerOptions = { title: 'Choose a folder for this project Library', properties: ['openDirectory'] as Array<'openDirectory'> };
+    const picked = parent && !parent.isDestroyed()
+      ? await dialog.showOpenDialog(parent, pickerOptions)
+      : await dialog.showOpenDialog(pickerOptions);
+    const directory = picked.filePaths[0];
+    if (picked.canceled || !directory) return { ok: false, cancelled: true, content: 'Folder selection cancelled.' };
+    const confirmation = parent && !parent.isDestroyed()
+      ? await dialog.showMessageBox(parent, { type: 'info', title: 'Index this folder?', message: 'Pixel will read supported documents in this folder for the active project.', detail: directory, buttons: ['Cancel', 'Index folder'], defaultId: 0, cancelId: 0, noLink: true })
+      : await dialog.showMessageBox({ type: 'info', title: 'Index this folder?', message: 'Pixel will read supported documents in this folder for the active project.', detail: directory, buttons: ['Cancel', 'Index folder'], defaultId: 0, cancelId: 0, noLink: true });
+    if (confirmation.response !== 1) return { ok: false, cancelled: true, content: 'Folder indexing cancelled.' };
+    const result = await documentTools.indexForWorkspace(directory);
+    audit.record('tool', 'Indexed project Library folder', result.ok ? 'ok' : 'error', result.ok ? `${result.indexed ?? 0} indexed; ${result.failed ?? 0} failed` : 'Indexing was unavailable or rejected.');
+    return result;
+  });
 
   /* ----------------------------- settings ---------------------------- */
 
@@ -1853,6 +1881,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     pluginStore.setProjectAvailability(pluginId, projectId(), availability);
     revokePluginPermissions(pluginId, manifest);
     audit.record('system', `Changed project plugin availability for ${pluginId}`, 'ok', `Project ${projectId()}; setting ${availability}; existing grants cleared.`);
+    return pluginStore.list(projectId());
+  });
+  registerHandler(CHANNELS.pluginsSetSetting, (_event, pluginId: string, key: string, value: string): PluginView[] => {
+    pluginStore.setSetting(pluginId, key, value);
+    audit.record('system', `Changed a setting for Pixel plugin ${pluginId}`, 'ok', `Setting ${key} was changed through its reviewed manifest.`);
     return pluginStore.list(projectId());
   });
 

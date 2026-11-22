@@ -434,6 +434,44 @@ describe('document index safety', () => {
     expect(index.search(project, 'matchingword', 10_000)).toHaveLength(MAX_SEARCH_RESULTS);
     expect(index.search(project, 'matchingword', 1.8)).toHaveLength(1);
   });
+
+  it('withholds matching cached passages when the indexed source has changed', async () => {
+    const { index, project } = setup();
+    const path = join(tempDir(), 'evidence.txt');
+    const originalText = 'fresh needle evidence';
+    writeFileSync(path, originalText);
+    const originalStat = statSync(path);
+    index.storeDocument(project, {
+      ...extracted(path, originalText, originalStat.mtimeMs),
+      sizeBytes: originalStat.size,
+    });
+    const currentPath = join(tempDir(), 'current.txt');
+    const currentText = 'current needle context';
+    writeFileSync(currentPath, currentText);
+    const currentStat = statSync(currentPath);
+    index.storeDocument(project, {
+      ...extracted(currentPath, currentText, currentStat.mtimeMs),
+      sizeBytes: currentStat.size,
+    });
+    const tools = new DocumentTools(index, () => project, () => ({ available: true }));
+
+    const current = await tools.run('documents_search', { query: 'needle' });
+    expect(current.ok).toBe(true);
+    expect(current.content).toContain(originalText);
+    expect(current.content).toContain(currentText);
+
+    const changedText = 'stale needle evidence';
+    expect(changedText.length).toBe(originalText.length);
+    writeFileSync(path, changedText);
+    const changedMtime = originalStat.mtimeMs + 5_000;
+    utimesSync(path, new Date(changedMtime), new Date(changedMtime));
+
+    const stale = await tools.run('documents_search', { query: 'needle' });
+    expect(stale).toMatchObject({ ok: true, detail: { count: 1, staleCount: 1 } });
+    expect(stale.content).toContain('re-index the user-approved folder');
+    expect(stale.content).not.toContain(originalText);
+    expect(stale.content).toContain(currentText);
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -514,6 +552,27 @@ describe.skipIf(!availability.available)('document tools', () => {
     expect(found.content).toMatch(/untrusted content/i);
   }, 40_000);
 
+  it('indexes a user-selected Library folder into the active project without returning its path', async () => {
+    const db = database();
+    db.execute('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', ['p', 'p', Date.now(), Date.now()]);
+    const dir = tempDir();
+    writeFileSync(join(dir, 'selected.md'), 'A selected folder document with a searchable word.');
+    const tools = new DocumentTools(new DocumentIndex(db, worker), () => 'p', () => ({ available: true }));
+    const result = await tools.indexForWorkspace(dir);
+    expect(result).toMatchObject({ ok: true, indexed: 1, skipped: 0, failed: 0, documents: 1, chunks: 1 });
+    expect(result.content).toContain('This project\'s Library now contains 1 documents');
+    expect(result.content).not.toContain(dir);
+    expect(tools.listForWorkspace()).toHaveLength(1);
+  }, 40_000);
+
+  it('fails closed for invalid folder paths or unavailable extraction workers', async () => {
+    const db = database();
+    const unavailable = new DocumentTools(new DocumentIndex(db, worker), () => 'p', () => ({ available: false, reason: 'Python worker unavailable.' }));
+    await expect(unavailable.indexForWorkspace('C:\\Docs')).resolves.toMatchObject({ ok: false, content: 'Python worker unavailable.' });
+    const available = new DocumentTools(new DocumentIndex(db, worker), () => 'p', () => ({ available: true }));
+    await expect(available.indexForWorkspace('relative\\folder')).resolves.toMatchObject({ ok: false });
+  });
+
   it('exposes only active-project document metadata to the Library and supports bounded preview reads', async () => {
     const db = database();
     db.execute('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [
@@ -534,6 +593,71 @@ describe.skipIf(!availability.available)('document tools', () => {
       state: 'ready', title: 'guide.md', passages: [{ content: expect.stringContaining('Observed fact') }],
     });
     expect(tools.readForWorkspace('../outside')).toBeNull();
+  }, 40_000);
+
+  it('opens only a fresh supported source already indexed in the active project', async () => {
+    const db = database();
+    for (const id of ['active', 'other']) {
+      db.execute('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [id, id, Date.now(), Date.now()]);
+    }
+    const dir = tempDir();
+    const documentPath = join(dir, 'brief.md');
+    const racePath = join(dir, 'race.md');
+    const codePath = join(dir, 'source.ts');
+    writeFileSync(documentPath, '# Approved local brief\n\nA small document.');
+    writeFileSync(racePath, '# Concurrent source\n\nThis source changes during open.');
+    writeFileSync(codePath, 'export const example = true;');
+    const index = new DocumentIndex(db, worker);
+    await index.indexDirectory('active', dir);
+    const tools = new DocumentTools(index, () => 'active', () => ({ available: true }));
+    const brief = tools.listForWorkspace().find((document) => document.fileName === 'brief.md');
+    expect(brief).toBeDefined();
+    let openedPath = '';
+    const opened = await tools.openForWorkspace(brief!.id, async (path) => { openedPath = path; return ''; });
+    expect(opened).toMatchObject({ ok: true });
+    expect(opened.content).toContain('cannot verify which application displayed it');
+    expect(opened.content).not.toContain(documentPath);
+    expect(openedPath).toBe(documentPath);
+
+    let openedFolderPath = '';
+    const openedFolder = await tools.openFolderForWorkspace(brief!.folderId, async (path) => { openedFolderPath = path; return ''; });
+    expect(openedFolder).toMatchObject({ ok: true });
+    expect(openedFolder.content).toContain('cannot verify whether File Explorer displayed it');
+    expect(openedFolder.content).not.toContain(dir);
+    expect(openedFolderPath).toBe(dir);
+
+    const race = tools.listForWorkspace().find((document) => document.fileName === 'race.md');
+    expect(race).toBeDefined();
+    const changedDuringOpen = await tools.openForWorkspace(race!.id, async (path) => {
+      writeFileSync(path, '# Changed during open\n\nThe postcondition must fail.');
+      return '';
+    });
+    expect(changedDuringOpen).toMatchObject({ ok: false });
+    expect(changedDuringOpen.content).toContain('could not verify');
+    expect(changedDuringOpen.content).not.toContain(racePath);
+
+    const wrongProject = new DocumentTools(index, () => 'other', () => ({ available: true }));
+    let wrongProjectOpened = false;
+    await expect(wrongProject.openForWorkspace(brief!.id, async () => { wrongProjectOpened = true; return ''; }))
+      .resolves.toMatchObject({ ok: false, content: expect.stringContaining('not available in the active project') });
+    expect(wrongProjectOpened).toBe(false);
+    let wrongProjectFolderOpened = false;
+    await expect(wrongProject.openFolderForWorkspace(brief!.folderId, async () => { wrongProjectFolderOpened = true; return ''; }))
+      .resolves.toMatchObject({ ok: false, content: expect.stringContaining('not available in the active project') });
+    expect(wrongProjectFolderOpened).toBe(false);
+
+    writeFileSync(documentPath, '# Changed after indexing\n\nDo not open stale provenance.');
+    let staleOpened = false;
+    await expect(tools.openForWorkspace(brief!.id, async () => { staleOpened = true; return ''; }))
+      .resolves.toMatchObject({ ok: false, content: expect.stringContaining('changed after indexing') });
+    expect(staleOpened).toBe(false);
+
+    const code = tools.listForWorkspace().find((document) => document.fileName === 'source.ts');
+    expect(code).toBeDefined();
+    let unsupportedOpened = false;
+    await expect(tools.openForWorkspace(code!.id, async () => { unsupportedOpened = true; return ''; }))
+      .resolves.toMatchObject({ ok: false, content: expect.stringContaining('file type is not supported') });
+    expect(unsupportedOpened).toBe(false);
   }, 40_000);
 
   it('reads bounded passages with source provenance and refuses stale indexed content', async () => {
@@ -572,10 +696,12 @@ describe.skipIf(!availability.available)('document tools', () => {
     const dir = tempDir();
     const file = join(dir, 'freshness.txt');
     writeFileSync(file, 'source version one');
+    const secondStart = Math.floor(statSync(file).mtimeMs / 1000) * 1000;
+    const original = secondStart + 100;
+    utimesSync(file, new Date(original), new Date(original));
     const index = new DocumentIndex(db, worker);
     await index.indexDirectory('p', dir);
     const documentId = index.listDocuments('p')[0].id;
-    const original = statSync(file).mtimeMs;
 
     writeFileSync(file, 'source version two');
     utimesSync(file, new Date(original), new Date(original + 200));

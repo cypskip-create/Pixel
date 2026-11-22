@@ -1,12 +1,13 @@
 # Pixel project handoff
 
-Updated: 2026-11-21. This file is the short recovery point for future Codex sessions.
+Updated: 2026-11-22. This file is the short recovery point for future Codex sessions.
 
 ## Repository state
 
 - Existing checkout: `C:\Users\cypri\OneDrive\Desktop\cyps`, branch `main`.
-- Current committed HEAD and `origin/main`: `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed test additions.
-- Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed against current HEAD, including typecheck, automated tests, native helper compile, package build and artifact upload. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by run 44916016724.
+- Current committed HEAD and `origin/main`: `74f3973293992e3c44c5194f3f84b90f758d15f5`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed test additions.
+- The last confirmed Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, including typecheck, automated tests, native helper compile, package build and artifact upload. GitHub's status endpoint returned no records for `74f3973`; CI for current HEAD is unverified. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by those runs.
+- A fresh `npm run dev` retry built main/preload and the native helper, preserved the occupied 5199 listener, started Vite on 5200, then Electron exited `2147483651` (`0x80000003`) without a targetable window. Follow-up isolation: direct `electron.exe --version` exited with the same code before printing a version, both from this checkout and from the read-only `C:\dev\Pixel` binary; their executable SHA-256 hashes match. A Computer Use launch timed out, and a fresh desktop inventory still showed no Pixel window. No `%TEMP%\Pixel` startup log was created, confirming the process did not reach Pixel's boot logger. Existing `%APPDATA%\Pixel` data was read-only and left untouched. This does not establish a source defect; GUI acceptance remains blocked by the current host runtime.
 - Do not commit or push for the user.
 
 ## Current checkpoint
@@ -21,23 +22,35 @@ source and tests are currently uncommitted. See
 `docs/architecture/PIXEL_DESIGN_TOKENS.md`.
 
 This continuation's latest `npm run verify` passes typecheck, the production
-build and the suite: **991 passed, 4 skipped, 0 failed** (995 total; 74 files
-passed, 1 skipped). The sandbox-only attempt first failed because file/task
-tests create disposable fixtures under the user home (`EPERM`); the approved
-retry passed and cleaned those fixtures. Three native foreground acceptance
-tests and one symlink-creation regression remain skipped. Lazy-loaded secondary
-Workspace panels reduce the renderer entry chunk to 457.54 kB; the build is
-below Vite's 500 kB advisory threshold. The project-indexed Library now groups
+build and the suite: **994 passed, 11 skipped, 0 failed** (1,005 total; 74 files
+passed, 1 skipped). `scripts/test.mjs` selects the matching Chromium revision
+from `.pw-browsers` when present and preserves an explicit
+`PLAYWRIGHT_BROWSERS_PATH`; the full run passed all 30 live Chromium tests.
+Remaining skips are seven NSIS tests (`makensis` unavailable), three native
+foreground acceptance scenarios and the symlink fixture denied by the sandbox.
+The renderer entry is 458.39 kB, below Vite's 500 kB advisory threshold. The
+project-indexed Library now groups
 actual indexed files into matte folder cards and provides bounded previews over
-typed, path-redacted IPC. The
-latest additions include project-scoped
-plugin availability with a global enable ceiling and revocation of persisted,
-volatile and pending tool permissions on scope changes, disable, update and
-uninstall. The
-The approved full run included the cached-Chromium browser tests and NSIS
-checks; a separate `PLAYWRIGHT_BROWSERS_PATH=.pw-browsers` run also passed all
+typed, path-redacted IPC. The Library also has a direct user flow: a native
+folder picker, confirmation showing the exact selected path, active-project
+indexing and renderer-safe counts. The absolute path stays in main-process
+code. Focused tests cover the index result and UI action; native dialog
+interaction remains unverified. Latest additions include project-scoped plugin
+availability with a global enable ceiling and revocation of persisted, volatile
+and pending tool permissions on scope changes, disable, update and uninstall.
+The Library preview now also exposes “Open original” for supported indexed
+document/text formats. Main-process code rechecks active-project membership and
+source freshness before and after `shell.openPath`, refuses stale/missing files,
+excludes source-code and macro-enabled spreadsheet formats, and returns no
+absolute path to the renderer. A keyboard-accessible folder menu also opens the
+actual indexed directory by project-scoped folder ID after symlink/existence
+checks. The Library type filter applies to both folder cards and file rows.
+Post-change verification passed focused document/Library tests (**45 passed,
+1 skipped**), TypeScript checks and production build (458.31 kB renderer entry).
+Native Shell behavior remains unverified.
+A separate `PLAYWRIGHT_BROWSERS_PATH=.pw-browsers` run previously passed all
 **30** browser tests and 29 policy tests against real Chromium and disposable
-local-file fixtures.
+local-file fixtures. NSIS and live GUI acceptance remain unverified locally.
 Document discovery now rejects symlinked roots/entries and credential-like
 filenames; the Windows sandbox denied the symlink fixture (`EPERM`), so that
 specific regression test skipped locally. The agent can now read bounded,
@@ -45,7 +58,20 @@ source-located passages from project-indexed documents and refuses cached text
 when its file size/mtime signature has changed. The signature retains
 millisecond timestamp precision, with a regression test for same-size edits in
 one second; a rewrite that restores both size and mtime remains outside this
-metadata-only freshness check.
+metadata-only freshness check. `documents_search` applies this same freshness
+gate to FTS hits and withholds stale cached excerpts. The GitHub plugin now
+offers a manifest-declared description-detail setting (hidden/compact/full),
+persisted and validated in main-process SQLite; it bounds untrusted provider
+text and never accepts credentials or arbitrary JSON. Its manifest is 1.1.0.
+The plugin subsystem and 6.2 checklist remain open: provider DNS, installed UI,
+Electron launch/dialog and Windows interaction have not been accepted.
+
+The native desktop-control path was rechecked in source: opaque window IDs are
+resolved against the live HWND, PID, process start identity, process name and
+title before selected-target operations. Semantic UIA actions re-query the
+control and validate a postcondition. This is implementation evidence, not live
+Windows acceptance; richer hierarchy and actual Notepad/app interaction remain
+open.
 Native helper compilation passes and voice-worker boundary tests pass 12/12.
 `VoiceService.capability()` reports `stt=false`, `tts=true`; the host has no
 Windows recognizer installed. A short real playback through Pixel's Windows
@@ -71,7 +97,7 @@ The supplied Ostrand screenshot was sampled at the outer background, a raised
 surface, and the orange chart bar. Rounded warm tokens are recorded in
 `docs/architecture/PIXEL_DESIGN_TOKENS.md`; companion and theme tests now
 assert the revised values and WCAG AA text contrast. The current renderer build
-emits a 457.54 kB entry chunk with route chunks for Library, Plugins, Projects,
+emits a 457.87 kB entry chunk with route chunks for Library, Plugins, Projects,
 Tasks, Notes and Board.
 The direct `replaySkill` path was also hardened: it enforces the live runner's
 input count/length and credential checks, redacts input echoes from replay
@@ -181,18 +207,15 @@ artifacts were left intact.
 - User approved Codex MCP registration at `C:\Users\cypri\.codex\config.toml`
   and the shared skill at
   `C:\Users\cypri\.agents\skills\reverse-engineer-anything`.
-- `codex mcp list` shows `rea` enabled / Unsupported. `rea doctor --client codex
-  --skill --json` reports the Codex registration and skill identity healthy;
-  optional engines are absent and `live_server` is unknown. A standalone MCP
-  stdio fallback negotiated protocol `2024-11-05`, listed 263 tools and called
-  `analyze_javascript_application` on a disposable fixture (Evidence
-  `ev_8dab99644a9753790a6514321e92cb0d50d076cc4439cc51005c98dbc163759f`). The
-  packaged Pixel analysis timed out. REA's public Inspora browser scenario could
-  not start Chrome in the host sandbox; crashpad exited and cleanup was reported
-  incomplete with no retained resources. The reported PID was absent on a
-  follow-up process check; no no-sandbox override was applied. The current Codex
-  session still exposes no REA tool namespace. Reference targets remain
-  browser/visual-inspected rather than REA-analyzed.
+- `codex mcp list` historically reports `rea` enabled / Unsupported; the current
+  Codex session now exposes callable REA tools. A disposable JavaScript fixture
+  analysis and captures of the Inspora Folders article, ASCII Sharks gallery and
+  public GitHub repository succeeded. Evidence IDs, screenshot hashes and
+  limits are in `docs/debug/REA_INTEGRATION.md` and
+  `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`. The Ostrand image was inspected
+  as the user attachment. Packaged Pixel analysis timed out, and no live Pixel
+  desktop/source analysis or actual reference runtime is claimed. REA screenshots
+  remain in the REA service; no third-party artifacts were installed.
 - Optional Ghidra/IDA/JADX/Kuna/Hopper engines are absent by design; static JS
   analysis does not require them. Previous DeepSeek REA config was left intact.
 - Workflow: `docs/research/REA_REFERENCE_WORKFLOW.md`; installation history:

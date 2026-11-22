@@ -138,6 +138,9 @@ export const CHANNELS = {
 
   documentsLibraryList: 'documents:library:list',
   documentsLibraryRead: 'documents:library:read',
+  documentsLibraryOpen: 'documents:library:open',
+  documentsLibraryOpenFolder: 'documents:library:openFolder',
+  documentsLibraryIndex: 'documents:library:index',
 
   auditList: 'audit:list',
   toolsList: 'tools:list',
@@ -147,6 +150,7 @@ export const CHANNELS = {
   pluginsUninstall: 'plugins:uninstall',
   pluginsSetEnabled: 'plugins:setEnabled',
   pluginsSetProjectAvailability: 'plugins:setProjectAvailability',
+  pluginsSetSetting: 'plugins:setSetting',
 
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',

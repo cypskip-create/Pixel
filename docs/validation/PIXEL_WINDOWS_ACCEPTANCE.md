@@ -1235,3 +1235,17 @@ Commands and automated totals:
 GUI steps passed/failed:
 Artifacts/log paths:
 ```
+
+## Electron launch recheck
+
+The current source checkout built the main process, preload and native helper,
+and the dev renderer started on a fallback port. Electron exited with
+`2147483651` (`0x80000003`) before Pixel's boot log was created. A direct
+`electron.exe --version` probe reproduced the same exit before version output,
+using both this checkout's binary and the read-only binary under
+`C:\dev\Pixel`; both had SHA-256
+`15E815A2D04AED1A01787354B93CD2CAB425F339B3BEAEF4F9E4193647F5399B`. A
+Computer Use launch timed out; the subsequent fresh app inventory contained no
+Pixel window. Thus the app-level GUI acceptance could not begin. This evidence
+locates the failure before Pixel's main entry point, but does not identify its
+host-level cause. User app data was not changed for this recheck.

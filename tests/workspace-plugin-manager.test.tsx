@@ -19,9 +19,19 @@ afterEach(cleanup);
 
 const catalogPlugin: PluginView = {
   id: 'pixel.github-public', name: 'GitHub public repositories', description: 'Read public metadata.',
-  version: '1.0.0', publisher: 'Pixel', capabilities: ['Read repository metadata'],
+  version: '1.1.0', publisher: 'Pixel', capabilities: ['Read repository metadata'],
   permissions: ['HTTPS requests to api.github.com'], installed: false, enabled: false,
   connection: 'not_required', health: 'disabled', availableInProject: false, projectAvailability: 'inherit',
+};
+
+const descriptionSetting = {
+  key: 'descriptionDetail', label: 'Repository description',
+  description: 'Controls how much untrusted repository description text is included in the model result.',
+  value: 'compact', options: [
+    { value: 'hidden', label: 'Hide description' },
+    { value: 'compact', label: 'Compact · 160 characters' },
+    { value: 'full', label: 'Full · up to 500 characters' },
+  ],
 };
 
 describe('Workspace plugin manager', () => {
@@ -64,7 +74,7 @@ describe('Workspace plugin manager', () => {
       error: 'A reviewed bundled update is available.' };
     const onChange = vi.fn(async () => undefined);
     const rendered = mount([outdated], onChange);
-    expect(rendered.textContent).toContain('v0.9.0 → v1.0.0');
+    expect(rendered.textContent).toContain('v0.9.0 → v1.1.0');
     expect(rendered.textContent).toContain('Updating disables this plugin');
     const update = [...rendered.querySelectorAll('button')].find((button) => button.textContent === 'Update');
     await act(async () => { update?.click(); await Promise.resolve(); });
@@ -94,5 +104,22 @@ describe('Workspace plugin manager', () => {
       await Promise.resolve();
     });
     expect(onChange).toHaveBeenCalledWith('project-availability', installed.id, undefined, 'disabled');
+  });
+
+  it('shows declared plugin settings and persists a changed choice through lifecycle IPC', async () => {
+    const installed = { ...catalogPlugin, installed: true, enabled: true, availableInProject: true,
+      projectAvailability: 'inherit' as const, health: 'ready' as const, settings: [descriptionSetting] };
+    const onChange = vi.fn(async () => undefined);
+    const rendered = mount([installed], onChange);
+    const setting = rendered.querySelector<HTMLSelectElement>('[id="plugin-setting-pixel.github-public-descriptionDetail"]');
+    expect(setting?.value).toBe('compact');
+    expect(rendered.textContent).toContain('Controls how much untrusted repository description text');
+    await act(async () => {
+      if (!setting) throw new Error('Plugin description setting was not rendered.');
+      setting.value = 'hidden';
+      setting.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(onChange).toHaveBeenCalledWith('setting', installed.id, undefined, undefined, { key: 'descriptionDetail', value: 'hidden' });
   });
 });

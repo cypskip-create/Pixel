@@ -3,7 +3,7 @@ import {
   Maximize2, Minimize2, ShieldAlert, Wrench, X,
 } from 'lucide-react';
 import type {
-  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
+  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryOpenResult, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
   PermissionRequest, PluginView, ProjectView, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
 } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
@@ -17,7 +17,7 @@ import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
 import { AutomationPanel } from '@/components/AutomationPanel';
 import { MemoryPanel } from '@/components/MemoryPanel';
 import { SettingsPanel } from '@/components/SettingsPanel';
-import type { PluginLifecycleAction, PluginProjectAvailability } from '@/components/WorkspacePluginManager';
+import type { PluginLifecycleAction, PluginProjectAvailability, PluginSettingChange } from '@/components/WorkspacePluginManager';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
 import { useBridge } from '@/hooks/useBridge';
@@ -444,6 +444,27 @@ export function Workspace(): React.JSX.Element {
     return bridge.bridge.documents.readLibraryDocument(documentId, startChunk);
   }, [bridge]);
 
+  const openLibraryDocument = useCallback(async (documentId: string): Promise<DocumentLibraryOpenResult> => {
+    if (bridge.kind !== 'ready') return { ok: false, content: 'Pixel is not connected to its local services.' };
+    return bridge.bridge.documents.openLibraryDocument(documentId);
+  }, [bridge]);
+
+  const openLibraryFolder = useCallback(async (folderId: string): Promise<DocumentLibraryOpenResult> => {
+    if (bridge.kind !== 'ready') return { ok: false, content: 'Pixel is not connected to its local services.' };
+    return bridge.bridge.documents.openLibraryFolder(folderId);
+  }, [bridge]);
+
+  const indexLibraryFolder = useCallback(async () => {
+    if (bridge.kind !== 'ready') return { ok: false, content: 'Pixel is not connected to its local services.' };
+    try {
+      const result = await bridge.bridge.documents.indexLibraryFolder();
+      if (result.ok) await refreshLibrary();
+      return result;
+    } catch (cause) {
+      return { ok: false, content: cause instanceof Error ? cause.message : 'Pixel could not index that folder.' };
+    }
+  }, [bridge, refreshLibrary]);
+
   useEffect(() => {
     if (view !== 'library' || bridge.kind !== 'ready') return;
     void refreshLibrary();
@@ -554,7 +575,7 @@ export function Workspace(): React.JSX.Element {
           </section> : null}
 
           {view === 'projects' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /></Suspense> : null}
-          {view === 'library' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceLibrary documents={libraryDocuments} loading={libraryLoading} onRefresh={() => void refreshLibrary()} onRead={readLibraryDocument} /></Suspense> : null}
+          {view === 'library' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceLibrary documents={libraryDocuments} loading={libraryLoading} onRefresh={() => void refreshLibrary()} onIndexFolder={indexLibraryFolder} onRead={readLibraryDocument} onOpen={openLibraryDocument} onOpenFolder={openLibraryFolder} /></Suspense> : null}
           {view === 'tasks' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceTasks tasks={tasks} audit={audit} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setView('skills'); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /></Suspense> : null}
           {view === 'notes' ? <Suspense fallback={<WorkspacePanelLoading />}><ProductivityPanel /></Suspense> : null}
           {view === 'skills' ? <div className="workspace-page"><div className="workspace-page-heading"><h1>Skills & Routines</h1><p>Review implemented workflows and their local schedules.</p></div><Suspense fallback={<WorkspacePanelLoading />}><AutomationPanel onBack={() => setView('chat')} returnLabel="Back to Workspace" /></Suspense></div> : null}
@@ -565,6 +586,7 @@ export function Workspace(): React.JSX.Element {
             pluginId: string,
             enabled?: boolean,
             availability?: PluginProjectAvailability,
+            setting?: PluginSettingChange,
           ) => {
             if (bridge.kind !== 'ready') return;
             try {
@@ -572,6 +594,7 @@ export function Workspace(): React.JSX.Element {
                 : action === 'update' ? await bridge.bridge.plugins.update(pluginId)
                 : action === 'uninstall' ? await bridge.bridge.plugins.uninstall(pluginId)
                   : action === 'project-availability' ? await bridge.bridge.plugins.setProjectAvailability(pluginId, availability ?? 'inherit')
+                    : action === 'setting' ? await bridge.bridge.plugins.setSetting(pluginId, setting?.key ?? '', setting?.value ?? '')
                     : await bridge.bridge.plugins.setEnabled(pluginId, enabled === true);
               setPlugins(next);
               setTools(await bridge.bridge.tools.list());
@@ -612,7 +635,7 @@ function ToolsView({ tools }: { tools: ToolCatalogEntry[] }): React.JSX.Element 
   const capabilityNotes = [
     { title: 'Desktop drawing editor', status: 'Partial', detail: 'Pixel can show passive highlights and arrows on verified accessible controls. Freehand desktop editing and saved overlay sessions are not available.' },
     { title: 'File organization', status: 'Partial', detail: 'Scoped list, filtered search, metadata, read, write, create, copy, rename/move, bounded batch operations, duplicate detection, approved open and Recycle Bin send are available. Visible application launch and restore-from-Recycle-Bin verification remain outstanding.' },
-    { title: 'Document creation', status: 'Partial', detail: 'Supported UTF-8 text files can be created or edited with approval and read-back verification. PDF and Office authoring/export are not supported.' },
+    { title: 'Document creation', status: 'Partial', detail: 'Supported UTF-8 text files can be created or edited with approval and read-back verification. The Library can open a fresh indexed document from the active project after an explicit click. PDF and Office authoring/export are not supported.' },
     { title: 'Workflow recording', status: 'Partial', detail: 'Completed verified tasks can be saved as project-scoped drafts and edited into a new version. Active tool-only skills can run once with declared inputs; scheduled routines use the stored tool order. Fresh observations, current approvals, supported result checks and postconditions are enforced. Non-tool steps and broader predicate types remain unsupported.' },
     { title: 'Specialist delegation', status: 'Partial', detail: 'Research, browser, systems, and knowledge specialists can run bounded subtasks through the live model pipeline and normal tool approval gateway. Infra and Pixel Code are unavailable; Windows acceptance and durable task recovery remain unverified.' },
     { title: 'Clipboard access', status: 'Partial', detail: 'Approval-gated one-shot text read/copy/conditional restore and verified field set are available. Real Windows acceptance remains outstanding.' },

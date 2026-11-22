@@ -1,6 +1,6 @@
 # Improvement 6.3 — plugin foundation checkpoint
 
-Updated: 2026-11-21. Status: foundation implemented; first plugin is fixture-tested; live provider call and Windows UI acceptance remain unverified.
+Updated: 2026-11-22. Status: foundation implemented; first plugin is fixture-tested; live provider call and Windows UI acceptance remain unverified.
 
 ## Implemented
 
@@ -29,6 +29,14 @@ Updated: 2026-11-21. Status: foundation implemented; first plugin is fixture-tes
   disabled until the user re-enables it. Fixture-backed UI tests cover catalog
   grouping, permission disclosure, duplicate clicks, failure presentation and
   this update/re-enable explanation.
+- Plugin settings now come only from reviewed manifest select choices. The
+  GitHub description-detail setting defaults to compact, can hide descriptions
+  or include up to 500 characters, persists in SQLite, is validated in the
+  main process and is audited without recording its value. Typed preload IPC
+  exposes this setting; arbitrary JSON and credentials are not accepted. The
+  executor applies the selected limit before returning untrusted text.
+- The GitHub manifest is now `1.1.0`; existing `1.0.0` installs enter the
+  reviewed update flow and remain disabled until the user re-enables them.
 - First-party public GitHub repository reader with an explicit manifest
   capability, bounded validated input, HTTPS/TLS, pinned host, checked public
   DNS answer, bounded payload, safe errors, approval and untrusted-content
@@ -43,10 +51,12 @@ Plugin API version is `1`; `version` is exact SemVer of the bundled manifest.
 Unknown manifest IDs fail closed. Incompatible or version-mismatched state does
 not enable tools. A plugin can request only user-visible data permissions and
 provide declarative tool schemas. Privileged operations remain in reviewed
-main-process adapters and the existing permission gateway. The plugin config
-field is available for future non-secret settings only. Credentials require a
-separately reviewed encrypted store; the current DeepSeek safeStorage record is
-not treated as a general credential vault.
+main-process adapters and the existing permission gateway. Plugin settings
+currently accept only exact choices declared by the bundled manifest; the
+GitHub description-detail choice is persisted locally and arbitrary JSON and
+credentials are rejected. Credentials require a separately reviewed encrypted
+store; the current DeepSeek safeStorage record is not treated as a general
+credential vault.
 
 This is a local first-party catalog, not a remote marketplace. The current app
 supports explicit updates only from its bundled reviewed manifest; remote
@@ -57,8 +67,11 @@ its latest actual tool call, not a fabricated background connection status.
 
 ## Validation
 
-- 2026-11-21 continuation: latest full `npm run verify` **991 passed, 4 skipped, 0 failed**
-  (995 total; three native foreground scenarios and the symlink-fixture prerequisite account for skips).
+- 2026-11-22 continuation: latest full `npm run verify` **994 passed, 11 skipped, 0 failed**
+  (1,005 total; 74 files passed, 1 skipped). The repository test launcher now
+  selects the matching cached Chromium when present; all 30 browser tests pass.
+  Seven NSIS tests (`makensis` absent), three native foreground scenarios and
+  the symlink-fixture prerequisite account for the remaining skips.
   Focused Workspace and theme suite passed **22/22**; TypeScript check, renderer
   production build, native helper compile and voice worker boundary suite
   (12/12) passed. Pixel Windows System.Speech playback also passed directly;
@@ -71,21 +84,26 @@ its latest actual tool call, not a fabricated background connection status.
   rechecks task cancellation after DNS and rejects invalid address families or
   private addresses before opening the TLS socket.
 
-- `tests/plugin-system.test.ts`: **10/10** deterministic tests cover fixture-backed
+- `tests/plugin-system.test.ts`: **11/11** deterministic tests cover settings
+  validation/persistence and fixture-backed
   lifecycle, approval-to-executor flow, cancellation after DNS, private address
   refusal, unsupported API fail-closed behavior and rejection of install-as-update
   bypass (no live GitHub API call).
 - `tests/permission-store.test.ts`: **7/7** tests include persistent permission
   revocation across restart and cancellation of a pending approval when plugin
   access is removed.
+- `tests/workspace-plugin-manager.test.tsx`: **7/7**, including the persisted
+  description-detail control. Actual Windows UI installation/activation and
+  model visibility remain unverified.
 - Earlier plugin checkpoint run: **901 passed, 28 skipped, 0 failed** (929
   total; 65 files passed, 1 skipped), with `PIXEL_TEST_HOME` isolated under the
-  sandbox temp directory. The current full run is **991 passed, 4 skipped, 0
-  failed** (995 total; 74 files passed, 1 skipped); it includes note-document
+  sandbox temp directory. The current full run is **994 passed, 11 skipped, 0
+  failed** (1,005 total; 74 files passed, 1 skipped); it includes note-document
   storage, renderer bridge, project-scoped Plugin Manager availability, the
   project-scoped indexed-document Library, binary text-write
-  refusal, the indexed-document Library, and dynamic dev-port tests. Three
-  native foreground scenarios and the symlink-creation test account for skips.
+  refusal, the indexed-document Library open/folder actions, dynamic dev-port
+  tests, stale FTS source withholding, and manifest-declared plugin settings.
+  NSIS, native foreground and symlink creation account for skips.
   Typecheck and production build passed.
 - Browser suite skips its Chromium-dependent checks when the Playwright browser
   is not installed. Real Workspace display/toggling remains unverified until a

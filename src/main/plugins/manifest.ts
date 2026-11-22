@@ -1,4 +1,8 @@
-import type { PluginView, ToolDefinition } from '../../shared/types';
+import type { PluginSettingView, PluginView, ToolDefinition } from '../../shared/types';
+
+export interface PixelPluginSettingDefinition extends Omit<PluginSettingView, 'value'> {
+  defaultValue: string;
+}
 
 export interface PixelPluginManifest {
   id: string;
@@ -10,6 +14,8 @@ export interface PixelPluginManifest {
   capabilities: string[];
   permissions: string[];
   connection: 'not_required' | 'oauth' | 'api_key';
+  /** Declarative, non-secret select settings only. */
+  settings?: PixelPluginSettingDefinition[];
   tools: ToolDefinition[];
   source: 'bundled';
 }
@@ -18,12 +24,23 @@ export const GITHUB_PUBLIC_PLUGIN: PixelPluginManifest = {
   id: 'pixel.github-public',
   name: 'GitHub public repositories',
   description: 'Read public repository metadata from GitHub. No account connection or token is used.',
-  version: '1.0.0',
+  version: '1.1.0',
   pixelApiVersion: 1,
   publisher: 'Pixel',
   capabilities: ['Read public repository metadata'],
   permissions: ['HTTPS requests to api.github.com', 'Share the requested owner and repository with GitHub'],
   connection: 'not_required',
+  settings: [{
+    key: 'descriptionDetail',
+    label: 'Repository description',
+    description: 'Controls how much untrusted repository description text is included in the model result.',
+    defaultValue: 'compact',
+    options: [
+      { value: 'hidden', label: 'Hide description' },
+      { value: 'compact', label: 'Compact · 160 characters' },
+      { value: 'full', label: 'Full · up to 500 characters' },
+    ],
+  }],
   source: 'bundled',
   tools: [{
     name: 'github_repo_summary',
@@ -55,6 +72,7 @@ export function pluginView(manifest: PixelPluginManifest, state?: {
   error?: string;
   availableInProject?: boolean;
   projectAvailability?: PluginView['projectAvailability'];
+  settings?: PluginSettingView[];
 }): PluginView {
   const installed = state?.installed ?? false;
   const enabled = state?.enabled ?? false;
@@ -76,5 +94,7 @@ export function pluginView(manifest: PixelPluginManifest, state?: {
     ...(state?.error ? { error: state.error } : {}),
     ...(state?.availableInProject !== undefined ? { availableInProject: state.availableInProject } : {}),
     ...(state?.projectAvailability ? { projectAvailability: state.projectAvailability } : {}),
+    settings: (state?.settings ?? (manifest.settings ?? []).map(({ key, label, description, defaultValue, options }) => ({ key, label, description, value: defaultValue, options: options.map((option) => ({ ...option })) })))
+      .map((setting) => ({ ...setting, options: setting.options.map((option) => ({ ...option })) })),
   };
 }

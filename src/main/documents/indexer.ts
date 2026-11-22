@@ -492,6 +492,22 @@ export class DocumentIndex {
       });
   }
 
+  /** Resolve a folder action only from a group represented in this project. */
+  resolveFolderPath(projectId: string, folderId: string): string | null {
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(folderId)) return null;
+    const matches = this.listDocuments(projectId).filter((document) => document.folderId === folderId);
+    if (matches.length === 0) return null;
+    const folders = new Set(matches.map((document) => resolve(dirname(document.path)).toLocaleLowerCase()));
+    if (folders.size !== 1) return null;
+    const folder = resolve(dirname(matches[0].path));
+    try {
+      if (hasSymlinkPathComponent(folder) || !lstatSync(folder).isDirectory()) return null;
+      return folder;
+    } catch {
+      return null;
+    }
+  }
+
   /** Read a bounded page from the active project's indexed copy of one document. */
   readDocument(projectId: string, documentId: string, startChunk = 0, limit = 6): IndexedDocumentRead | null {
     if (!/^[a-zA-Z0-9_-]{1,120}$/.test(documentId)) return null;

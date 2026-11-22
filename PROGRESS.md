@@ -1,33 +1,56 @@
 # Pixel progress
 
-Updated: 2026-11-21. Version: 0.2.1.
+Updated: 2026-11-22. Version: 0.2.1.
 
 ## New-chat recovery and current local checkpoint
 
 - Recovery began at `8288850ac825d5b5c1b79656f1432622a8129bf7`; current
-  committed HEAD and `origin/main` are `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`.
-  Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724)
-  succeeded on that committed SHA. Current local edits are uncommitted and are
-  not covered by that run.
+  committed HEAD and `origin/main` are `74f3973293992e3c44c5194f3f84b90f758d15f5`.
+  The last confirmed Windows CI run,
+  [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724),
+  passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`. GitHub returned no
+  status records for `74f3973`, so CI for current HEAD is unverified. Current
+  local edits are uncommitted and are not covered by that run.
 - REA `6.10.1` remains registered and its Codex config/skill identity checks are
-  healthy. `codex mcp list` labels it **enabled / Unsupported** and this session
-  has no native REA namespace. A standalone stdio MCP fallback negotiated
-  `2024-11-05`, listed 263 tools, and analyzed a disposable Electron fixture
-  (Evidence `ev_8dab99644a9753790a6514321e92cb0d50d076cc4439cc51005c98dbc163759f`).
-  The packaged Pixel analysis timed out; a public Inspora browser scenario could
-  not start Chrome in the host sandbox and REA reported incomplete cleanup with
-  no retained resources. The PID was absent on follow-up. No no-sandbox override
-  was applied. Reference pages therefore remain direct visual/browser-researched,
-  not REA-analyzed.
+  healthy. `codex mcp list` historically labels it **enabled / Unsupported**,
+  while this current Codex session exposes callable REA tools. A disposable
+  JavaScript fixture analysis and captures of Inspora Folders, the ASCII Sharks
+  gallery and its public GitHub repo succeeded; evidence IDs and hashes are in
+  `docs/debug/REA_INTEGRATION.md` and
+  `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`. The Ostrand screenshot was
+  inspected as the user attachment. Packaged Pixel analysis timed out, and no
+  live Pixel runtime was analyzed. Browser captures show accessible reference
+  pages, not the original products' live application behavior.
 - The latest Windows app inventory found two `Pixel` windows, both from the
   separate `C:\dev\Pixel` checkout. Computer Use could not read either
   accessibility tree; the windows were left untouched. No running window from
   this repository was identified, so its GUI acceptance remains open.
+- Launch was retried after desktop access was approved. Main/preload and native
+  helper builds succeeded; the dev server preserved the existing port 5199
+  listener and moved to 5200, then Electron exited `2147483651`
+  (`0x80000003`) without a window. A minimal isolated Electron smoke exited 0
+  but emitted no ready marker, so it does not establish that the runtime works.
 - Visual-preview follow-up: Vite started on `0.0.0.0:5200`, but local browser
   requests from the host sandbox were denied (`ERR_NETWORK_ACCESS_DENIED`) and
   the in-app browser timed out. A `file:` preview of the production renderer
   had blocked module assets and yielded a blank page; that capture was removed.
   The test server was stopped. No current-checkout UI evidence was produced.
+- The Library empty state now has a real “Add folder” workflow. A native
+  picker is followed by a confirmation that displays the selected path; only
+  then does the main process index that directory into the active project.
+  Renderer IPC receives counts/result text but no source path. Typecheck,
+  focused document/Library tests and the production build passed; full Windows
+  dialog acceptance remains open.
+- Follow-up adds “Open original” from a ready Library preview. Main-process
+  logic accepts a project document ID, rechecks indexed source freshness and an
+  extension allowlist, then calls `shell.openPath`; paths never cross IPC.
+  Stale/missing files, source-code formats and macro-enabled spreadsheets are
+  refused. The type filter constrains both folder cards and file rows; an
+  accessible card action menu opens a real indexed folder through a
+  project-scoped ID, with path resolution and symlink checks kept in the main
+  process. Focused document/Library suites pass **45 tests** with one
+  symlink-creation skip; `npm run typecheck` and `npm run build` pass, with a
+  458.31 kB renderer entry. Native open behavior remains unverified.
 - Local source adds a centralized critical-risk policy, dynamic one-time risk
   for explicit browser submission, a bundled-only plugin lifecycle and UI, and
   a read-only public GitHub repository metadata tool. This uncommitted
@@ -47,17 +70,40 @@ Updated: 2026-11-21. Version: 0.2.1.
   test detects same-size edits inside one second; metadata-restoring edits still
   require re-indexing to detect. Integration tests cover bounded pages, project
   isolation, untrusted-content labeling and stale-source refusal.
+- `documents_search` now checks freshness for every matched source before
+  returning cached FTS excerpts. Changed or unavailable sources are withheld
+  with a re-index instruction; regression coverage edits a source without
+  changing its size. This uses the same size/mtime freshness limit as reads.
+- The GitHub plugin adds a manifest-declared `descriptionDetail` select,
+  stored as a validated exact choice in SQLite, shown in the installed-plugin
+  manager and applied before returning untrusted repository description text.
+  Existing `1.0.0` installs require the reviewed update to `1.1.0` and remain
+  disabled until re-enabled. This is a non-secret setting, not account auth.
+- Final exact-tree `npm run verify` passes typecheck, production build and 74
+  test files: **994 passed, 11 skipped, 0 failed** (1,005 total). All 30 real
+  Chromium tests passed. It required a disposable temporary user profile:
+  the initial default-profile run hit sandbox `EPERM` for fixtures under the
+  real home folder. Skips remain seven missing-NSIS tests, three native
+  foreground acceptance scenarios and the denied symlink fixture. The
+  renderer entry is 458.39 kB.
+- Electron GUI triage: this checkout rebuilt main/preload/native and launched
+  Vite, but Electron again exited with `0x80000003` before Pixel's boot logger.
+  Direct `electron.exe --version` produced the same exit for this binary and
+  the read-only `C:\dev\Pixel` copy (same SHA-256); no Pixel window appeared in
+  a fresh desktop inventory. Computer Use's explicit launch timed out. This
+  narrows the blocker to the host Electron runtime before Pixel code; it does
+  not identify the Windows cause or count as GUI acceptance. User app data was
+  not modified.
 - Latest `npm run verify`: typecheck and production build passed; the full
-  suite reports **991 passed, 4 skipped, 0 failed** (995 total; 74 files
-  passed, 1 skipped). The sandbox-only run hit `EPERM` because file and task
-  tests create disposable fixtures under user home; the approved retry passed.
-  Four skips are the symlink-creation regression and three native foreground
-  integration scenarios. Cached Chromium tests pass **30/30** browser tests
-  and **29/29** policy tests
-  against disposable local HTML/file fixtures. This includes actual file-input
-  selection and a browser download saved to a new file with SHA-256 read-back.
-  Lazy-loaded secondary Workspace views reduce the renderer entry to 457.54
-  kB, below Vite's 500 kB advisory threshold.
+  suite reports **994 passed, 11 skipped, 0 failed** (1,005 total; 74 files
+  passed, 1 skipped). `scripts/test.mjs` automatically selects the matching
+  Chromium revision from `.pw-browsers` when present and respects an explicit
+  `PLAYWRIGHT_BROWSERS_PATH`. All **30** live Chromium tests passed, including
+  actual file-input selection and download hash read-back. Remaining skips are
+  seven NSIS tests (`makensis` absent), three native foreground scenarios and
+  the symlink fixture denied by the sandbox. Lazy-loaded secondary Workspace
+  views reduce the renderer entry to 458.31 kB, below Vite's 500 kB advisory
+  threshold. The latest plugin setting changes this entry to 458.39 kB.
 - Agent `get_system_info` now consumes the same main-process diagnostics
   snapshot as Pixel's diagnostics view for uptime, load average, system-volume
   capacity through Node `statfs`, primary display dimensions/scale and battery
@@ -73,7 +119,7 @@ Updated: 2026-11-21. Version: 0.2.1.
   `faster-whisper`, `kokoro_onnx` or `onnxruntime`; the inspected unpacked
   artifact has no packaged worker or Kokoro assets. Offline inference remains
   blocked.
-- The renderer production bundle currently emits a 457.54 kB minified entry
+- The renderer production bundle currently emits a 457.87 kB minified entry
   chunk, below Vite's advisory 500 kB threshold. Library, Plugins, Projects,
   Tasks, Notes and Board are emitted as dedicated lazy-loaded chunks. Actual
   Workspace startup remains unverified because this checkout's Electron launch
@@ -1075,11 +1121,10 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
   because `github.com` DNS failed. Existing `release` installer, portable and
   unpacked artifacts predate this attempt and were preserved; no new package or
   successful local packaging result is claimed.
-- See the current REA connectivity result in `docs/debug/REA_INTEGRATION.md`:
-  direct MCP stdio analysis succeeded on a fixture, while REA browser capture
-  of the reference and analysis of packaged Pixel were blocked. The reference
-  pages were manually researched; raw ASCII Sharks source acquisition from the
-  shell remains blocked by `codeload.github.com` DNS.
+- REA current-session verification is recorded in
+  `docs/debug/REA_INTEGRATION.md`: the fixture analysis and three public browser
+  captures succeeded. Analysis of packaged Pixel remains timed out; no source
+  artifacts or screenshots were added to the repository.
 - An earlier CUA capture showed Pixel from a separate `C:\dev\Pixel` checkout;
   it showed older Chats/Library navigation and was left untouched. In the
   latest inventory, after the user accepted the Electron access prompt, no

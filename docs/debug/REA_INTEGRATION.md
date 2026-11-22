@@ -83,6 +83,36 @@ Verification recorded so far:
   untouched. No window from `C:\Users\cypri\OneDrive\Desktop\cyps` was
   identified, and no usable current-checkout Workspace screenshot was obtained.
 
+## 2026-11-22 current-session REA verification
+
+The earlier CLI status (`enabled / Unsupported`) and missing-tool observations
+above are historical. The current Codex session now exposes callable `mcp__rea`
+tools. A safe `analyze_javascript_application` invocation on a disposable
+two-file JavaScript fixture succeeded (parent Evidence
+`ev_62f449ddb32f13112e2960adbf6aea9c7ce9e4e72285e473532bdd1e07a8e234`, result
+`ev_80b54c96763dacd6de4d766149c0fe3384760b86909060c67d4e59f92ba64c60`). The
+fixture was removed and not executed.
+
+REA `capture_browser_scenario` captured the Inspora Folders article with
+screenshot and accessibility snapshot (parent Evidence
+`ev_8e576b1151534912f3cbd9570ca79a36254c79823a66b051a50975e94aa833ed`), the
+Inspora ASCII Sharks gallery (parent Evidence
+`ev_c25a18c3681c605efc2abdd405d5ecde37e1fa35f610fee6ca02134ab15d09ac`), and
+the public ASCII Sharks GitHub repository page (parent Evidence
+`ev_68f0a9ff2530cefc56254fd42cd1d115fd0ef244396cb41721f228c347d5f4b1`). The
+first Folders attempt with DOM capture timed out; screenshot plus accessibility
+capture succeeded on retry. REA observed the article and repo pages, not the
+original product runtime or a running Pixel app. The attached Ostrand screenshot
+was visually inspected directly. Packaged Pixel `app.asar` analysis remains
+timed out without evidence. See `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md`
+for observed design findings and screenshot/accessibility hashes.
+
+Screenshots and REA Evidence are retained by the REA service, not copied into
+the repository. No source artifacts from the targets were installed or
+executed. The previous standalone stdio fallback and `codex mcp list` status
+remain useful diagnostics, but are not evidence that this session lacks the
+direct REA tools now used above.
+
 The earlier DeepSeek client configuration and REA 6.8.0 history below remain
 as historical records. That registration was not changed by the Codex setup.
 

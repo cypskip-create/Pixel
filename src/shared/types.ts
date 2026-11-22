@@ -875,6 +875,16 @@ export interface PluginView {
   availableInProject?: boolean;
   /** Whether this project inherits the global setting or has a local override. */
   projectAvailability?: 'inherit' | 'enabled' | 'disabled';
+  /** Reviewed non-secret settings declared by the bundled manifest. */
+  settings?: PluginSettingView[];
+}
+
+export interface PluginSettingView {
+  key: string;
+  label: string;
+  description: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1084,6 +1094,9 @@ export interface CypsBridge {
   documents: {
     listLibrary(): Promise<DocumentLibraryItem[]>;
     readLibraryDocument(documentId: string, startChunk?: number): Promise<DocumentLibraryRead | null>;
+    openLibraryDocument(documentId: string): Promise<DocumentLibraryOpenResult>;
+    openLibraryFolder(folderId: string): Promise<DocumentLibraryOpenResult>;
+    indexLibraryFolder(): Promise<DocumentLibraryIndexResult>;
   };
   audit: {
     list(limit?: number): Promise<AuditEntry[]>;
@@ -1098,6 +1111,7 @@ export interface CypsBridge {
     uninstall(pluginId: string): Promise<PluginView[]>;
     setEnabled(pluginId: string, enabled: boolean): Promise<PluginView[]>;
     setProjectAvailability(pluginId: string, availability: 'inherit' | 'enabled' | 'disabled'): Promise<PluginView[]>;
+    setSetting(pluginId: string, key: string, value: string): Promise<PluginView[]>;
   };
   app: {
     getVersion(): Promise<string>;
@@ -1216,6 +1230,8 @@ export interface ProductivityChecklistView { id: string; projectId: string; titl
 export interface ProductivityTaskView { id: string; projectId: string; title: string; description: string; status: 'open' | 'in_progress' | 'completed'; dueAt: number | null; checklistId: string | null; createdAt: number; updatedAt: number }
 export interface DocumentLibraryItem { id: string; folderId: string; folderName: string; fileName: string; title: string; kind: string; sizeBytes: number; modifiedAt: number; indexedAt: number; chunks: number }
 export interface DocumentLibraryRead { state: 'ready' | 'stale' | 'unavailable'; title: string; kind: string; startChunk: number; chunkCount: number; hasMore: boolean; passages: Array<{ ordinal: number; content: string; location: string | null }> }
+export interface DocumentLibraryOpenResult { ok: boolean; content: string }
+export interface DocumentLibraryIndexResult { ok: boolean; cancelled?: boolean; content: string; indexed?: number; skipped?: number; failed?: number; documents?: number; chunks?: number; cleanupSkipped?: boolean }
 
 export interface WorkspaceWindowState {
   maximized: boolean;

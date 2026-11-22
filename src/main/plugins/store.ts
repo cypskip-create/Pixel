@@ -32,6 +32,7 @@ export class PluginStore {
       const override = projectId
         ? this.projectAvailability(manifest.id, projectId)
         : 'inherit';
+      const config = parsePluginSettings(manifest, row?.config_json);
       return pluginView(manifest, {
         installed: Boolean(row),
         enabled: globallyEnabled,
@@ -41,12 +42,46 @@ export class PluginStore {
         installedVersion: row?.manifest_version,
         updatedAt: row ? Number(row.updated_at) : undefined,
         error: !apiCompatible ? 'This plugin requires an unsupported Pixel plugin API version.' : !versionMatches ? 'A reviewed bundled update is available. Updating will disable the plugin until you enable it again.' : row?.last_error ?? undefined,
+        settings: (manifest.settings ?? []).map((setting) => ({
+          key: setting.key, label: setting.label, description: setting.description,
+          value: config[setting.key] ?? setting.defaultValue,
+          options: setting.options.map((option) => ({ ...option })),
+        })),
       });
     });
   }
 
   manifest(id: string): PixelPluginManifest | undefined {
     return this.manifests.find((item) => item.id === id);
+  }
+
+  getSetting(pluginId: string, key: string): string | undefined {
+    const manifest = this.manifest(pluginId);
+    const row = this.db.queryOne<PluginInstallationRow>('SELECT * FROM plugin_installations WHERE plugin_id = ?', [pluginId]);
+    if (!manifest || !row) return undefined;
+    return parsePluginSettings(manifest, row.config_json)[key]
+      ?? manifest.settings?.find((setting) => setting.key === key)?.defaultValue;
+  }
+
+  setSetting(pluginId: string, key: string, value: string): void {
+    const manifest = this.requireManifest(pluginId);
+    const row = this.db.queryOne<PluginInstallationRow>('SELECT * FROM plugin_installations WHERE plugin_id = ?', [pluginId]);
+    if (!row) throw new Error('Install this plugin before changing its settings.');
+    if (manifest.pixelApiVersion !== 1 || row.manifest_version !== manifest.version) {
+      throw new Error('Update this plugin to a compatible version before changing its settings.');
+    }
+    const definition = manifest.settings?.find((setting) => setting.key === key);
+    if (!definition) throw new Error('That setting is not declared by this plugin manifest.');
+    if (typeof value !== 'string' || !definition.options.some((option) => option.value === value)) {
+      throw new Error('Choose one of the values declared by this plugin setting.');
+    }
+    const config = parsePluginSettings(manifest, row.config_json);
+    config[key] = value;
+    this.db.execute('UPDATE plugin_installations SET config_json = ?, updated_at = ? WHERE plugin_id = ?', [JSON.stringify(config), Date.now(), pluginId]);
+    const saved = this.db.queryOne<PluginInstallationRow>('SELECT * FROM plugin_installations WHERE plugin_id = ?', [pluginId]);
+    if (!saved || parsePluginSettings(manifest, saved.config_json)[key] !== value) {
+      throw new Error('The plugin setting was not present after saving.');
+    }
   }
 
   installedTools(): PixelPluginManifest['tools'] {
@@ -147,4 +182,18 @@ export class PluginStore {
     if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
     return manifest;
   }
+}
+
+/** Only declared enum choices survive reads; config JSON can never contain credentials or arbitrary objects. */
+function parsePluginSettings(manifest: PixelPluginManifest, raw?: string): Record<string, string> {
+  let parsed: unknown;
+  try { parsed = raw ? JSON.parse(raw) : {}; } catch { parsed = {}; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const candidate = parsed as Record<string, unknown>;
+  const accepted: Record<string, string> = {};
+  for (const setting of manifest.settings ?? []) {
+    const value = candidate[setting.key];
+    if (typeof value === 'string' && setting.options.some((option) => option.value === value)) accepted[setting.key] = value;
+  }
+  return accepted;
 }

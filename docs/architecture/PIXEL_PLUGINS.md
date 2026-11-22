@@ -1,6 +1,6 @@
 # Pixel Plugin System
 
-Updated: 2026-11-21. Improvement 6.3 foundation; first provider is public, read-only GitHub repository metadata.
+Updated: 2026-11-22. Improvement 6.3 foundation; first provider is public, read-only GitHub repository metadata.
 
 ## Concepts and boundaries
 
@@ -50,6 +50,7 @@ interface PixelPluginManifest {
   capabilities: string[];       // user-readable declarations
   permissions: string[];        // user-readable, enforced by adapter policy
   connection: 'not_required' | 'oauth' | 'api_key';
+  settings?: Array<{ key: string; label: string; description: string; defaultValue: string; options: Array<{ value: string; label: string }> }>;
   tools: ToolDefinition[];      // strict JSON Schema subset; no executable callbacks
   source: 'bundled';
 }
@@ -88,7 +89,9 @@ and offers Update through the same reviewed bundled catalog. Updating replaces
 the recorded manifest version but leaves the plugin disabled; the user must
 explicitly enable it again. Install is idempotent for the current manifest and
 refuses an installed version mismatch, so it cannot bypass the distinct update
-operation or its audit record. An unsupported Pixel API version remains
+operation or its audit record. The manager renders only manifest-declared
+settings for installed plugins; values are exact allowed choices validated by
+the main process and recorded through existing audit history. An unsupported Pixel API version remains
 disabled and is not offered this update action. No remote package is fetched.
 
 Installed does not mean connected. The GitHub plugin reads public metadata and
@@ -97,7 +100,10 @@ must show connection separately, use OAuth scopes that match the manifest, and
 keep credentials in a protected main-process store; do not place secrets in the
 renderer, manifest, task history or plugin configuration JSON. Pixel's existing
 DeepSeek safeStorage entry is provider-specific and is not a generic credential
-vault.
+vault. The current GitHub `descriptionDetail` select controls how much
+untrusted repository description text is included in the model-facing tool
+result: hidden, compact (160 characters), or full (up to 500 characters).
+Values remain local and contain no credentials.
 
 ## Trust and permissions
 
@@ -123,7 +129,7 @@ vault.
 
 ## First integration: GitHub public repository reader
 
-Manifest: `pixel.github-public` version `1.0.0`, API version 1. Tool:
+Manifest: `pixel.github-public` version `1.1.0`, API version 1. Tool:
 `github_repo_summary(owner, repository)`. It performs one bounded unauthenticated
 GET to GitHub's documented repository endpoint, and returns public name,
 description, URL, stars, forks, issue count, default branch and update time.

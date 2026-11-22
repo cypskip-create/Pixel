@@ -130,6 +130,8 @@ export interface ExecutorDeps {
   systemDiagnostics?: () => DiagnosticsSnapshot | Promise<DiagnosticsSnapshot>;
   /** Read-only public GitHub adapter; injectable for deterministic tests. */
   githubRepository?: (owner: unknown, repository: unknown, signal?: AbortSignal) => Promise<GitHubRepositorySummary>;
+  /** Main-process, manifest-validated non-secret plugin configuration. */
+  getPluginSetting?: (pluginId: string, key: string) => string | undefined;
   onPluginHealth?: (pluginId: string, error?: string) => void;
   /** Main-process Board service and user-mediated file picker. */
   board?: PixelBoardService;
@@ -338,10 +340,15 @@ export class ToolExecutors {
         case 'github_repo_summary': {
           try {
             const repository = await (this.deps.githubRepository ?? readPublicGitHubRepository)(args.owner, args.repository, signal);
+            const descriptionMode = this.deps.getPluginSetting?.('pixel.github-public', 'descriptionDetail') ?? 'compact';
+            const descriptionLimit = descriptionMode === 'hidden' ? 0 : descriptionMode === 'full' ? 500 : 160;
+            const originalDescription = repository.description ? Array.from(repository.description) : [];
+            const description = descriptionLimit > 0 ? originalDescription.slice(0, descriptionLimit).join('') : '';
+            const descriptionSuffix = descriptionLimit > 0 && description.length < originalDescription.length ? '…' : '';
             try { this.deps.onPluginHealth?.('pixel.github-public'); } catch { /* health persistence cannot change the provider result */ }
             return {
               ok: true,
-              content: `Public GitHub repository ${repository.fullName}: ${repository.description ? `description (untrusted external data): ${repository.description}` : 'no description'}. ${repository.stars} stars, ${repository.forks} forks, ${repository.openIssues} open issues. Default branch: ${repository.defaultBranch}. Updated: ${repository.updatedAt}. URL: ${repository.url}.`,
+              content: `Public GitHub repository ${repository.fullName}: ${description ? `description (untrusted external data): ${description}${descriptionSuffix}` : 'description hidden or unavailable'}. ${repository.stars} stars, ${repository.forks} forks, ${repository.openIssues} open issues. Default branch: ${repository.defaultBranch}. Updated: ${repository.updatedAt}. URL: ${repository.url}.`,
               detail: { fullName: repository.fullName, stars: repository.stars, forks: repository.forks, openIssues: repository.openIssues, updatedAt: repository.updatedAt, source: 'GitHub REST API; public unauthenticated read' },
               verification: { summary: `GitHub returned public repository metadata for ${repository.fullName}.`, source: 'HTTPS response from api.github.com' },
             };

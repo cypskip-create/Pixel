@@ -46,6 +46,8 @@ import type {
   ProductivityTaskView,
   ProductivityChecklistView,
   DocumentLibraryItem,
+  DocumentLibraryIndexResult,
+  DocumentLibraryOpenResult,
   DocumentLibraryRead,
   PluginView,
   WorkspaceWindowState,
@@ -285,6 +287,11 @@ const bridge: CypsBridge = {
     listLibrary: () => ipcRenderer.invoke(CH.documentsLibraryList) as Promise<DocumentLibraryItem[]>,
     readLibraryDocument: (documentId: string, startChunk = 0) =>
       ipcRenderer.invoke(CH.documentsLibraryRead, documentId, startChunk) as Promise<DocumentLibraryRead | null>,
+    openLibraryDocument: (documentId: string) =>
+      ipcRenderer.invoke(CH.documentsLibraryOpen, documentId) as Promise<DocumentLibraryOpenResult>,
+    openLibraryFolder: (folderId: string) =>
+      ipcRenderer.invoke(CH.documentsLibraryOpenFolder, folderId) as Promise<DocumentLibraryOpenResult>,
+    indexLibraryFolder: () => ipcRenderer.invoke(CH.documentsLibraryIndex) as Promise<DocumentLibraryIndexResult>,
   },
 
   audit: {
@@ -303,6 +310,8 @@ const bridge: CypsBridge = {
     setEnabled: (pluginId: string, enabled: boolean) => ipcRenderer.invoke(CH.pluginsSetEnabled, pluginId, enabled) as Promise<PluginView[]>,
     setProjectAvailability: (pluginId: string, availability: 'inherit' | 'enabled' | 'disabled') =>
       ipcRenderer.invoke(CH.pluginsSetProjectAvailability, pluginId, availability) as Promise<PluginView[]>,
+    setSetting: (pluginId: string, key: string, value: string) =>
+      ipcRenderer.invoke(CH.pluginsSetSetting, pluginId, key, value) as Promise<PluginView[]>,
   },
 
   app: {

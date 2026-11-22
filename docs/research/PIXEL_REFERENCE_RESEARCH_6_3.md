@@ -1,6 +1,6 @@
 # Pixel Workspace reference research — 6.3
 
-Updated: 2026-11-21. This report separates visible facts, implementation
+Updated: 2026-11-22. This report separates visible facts, implementation
 choices and unavailable evidence. No third-party source code or visual assets
 were copied into Pixel.
 
@@ -34,15 +34,26 @@ established from the static image.
 
 ## Target B — Inspora Folders UI
 
-**Evidence:** the publicly accessible article at
-https://www.inspora.design/posts/folders-ui was inspected through the browser
-reader. It describes grouped folder browsing with large folder-card artwork,
-navigation hierarchy and associated content listings.
+**Evidence:** REA `capture_browser_scenario` on
+`https://www.inspora.design/posts/folders-ui` succeeded using Chromium 157,
+screenshot and accessibility capture (parent Evidence
+`ev_8e576b1151534912f3cbd9570ca79a36254c79823a66b051a50975e94aa833ed`).
+The screenshot SHA-256 is
+`ce7633506a979a520f2e6334c5afe9c00b5198794307411c22e7cc37bae1801b`; the
+accessibility snapshot SHA-256 is
+`23db0ee871fa147d6f1e6a765dcb4338dc53716c67c3bf4801f87e5695549c76`. An
+initial DOM+accessibility capture timed out before initial state; reducing the
+capture to screenshot+accessibility completed. This is the accessible article
+and its embedded reference image, not the original product runtime.
 
-**Observed:** folder forms use a layered front/back silhouette; content is
-grouped under folder context, and a file list provides a denser browsing mode.
-The article presents glass-like materials. Pixel explicitly excludes those
-materials and uses opaque matte fills, a fine warm border and a small shadow.
+**Observed:** the article screenshot shows a narrow product rail and nested
+knowledge tree, a breadcrumb, three dimensional folder cards, and a dense file
+table. Folder depth comes from offset front/back shapes and subtle shadows;
+labels and file metadata are compact. The embedded reference uses cool glossy
+surfaces. Pixel explicitly excludes glass-like materials and adapts depth using
+opaque matte fills, a fine warm border and a restrained shadow. The article's
+“View Original” X link returned HTTP 403; no sign-in or access control was
+bypassed.
 
 **Unknown:** the browser text extraction does not preserve all interactive
 hover states, exact responsive transitions, or full source geometry. Those
@@ -52,7 +63,20 @@ continues to use its actual notes/tasks and file flows rather than mock rows.
 
 ## Target C — ASCII Sharks
 
-**Evidence:** public upstream README, package metadata, license, `src/engine.ts`,
+**Evidence:** REA captured
+`https://www.inspora.design/posts/shark-ascii-animation` (parent Evidence
+`ev_c25a18c3681c605efc2abdd405d5ecde37e1fa35f610fee6ca02134ab15d09ac`). Its
+screenshot SHA-256 is
+`339c4cacb0f60be7eaf41a2dd5a918748206b950ef834743902f32715e70dd13`; the
+accessibility snapshot SHA-256 is
+`28ddef39016c11fb47b2e60db2df710057c22d887c123aacc1ef9f9253d89710`. The
+gallery screenshot shows gray ASCII sharks around a centered prompt on a pale
+dotted page; it is a static article/gallery capture, not a runtime animation
+test. REA also captured the public upstream repo README and accessibility tree
+(parent Evidence `ev_68f0a9ff2530cefc56254fd42cd1d115fd0ef244396cb41721f228c347d5f4b1`,
+accessibility SHA-256
+`f8bac4a2f365bdf2953d75fea7168827614dd43c5ccbe8b41f5b7570d6b3d427`). Public
+upstream README, package metadata, license, `src/engine.ts`,
 `src/renderer.ts`, and `src/world.ts` were inspected at the
 [repository](https://github.com/stackedlol/ascii-sharks) and its
 [engine](https://raw.githubusercontent.com/stackedlol/ascii-sharks/main/src/engine.ts),
@@ -70,19 +94,18 @@ stage and theme options select detail and palette. The renderer source contains
 configurable palettes, glyph density and cell shading.
 
 **Adaptation:** Pixel adds only three small decorative `·+·` glyphs beside
-the existing Pix composer presence. It does not import the engine, canvas,
-shark shapes, third-party colors, or an additional runtime dependency. This
-CSS-only effect is hidden during non-idle states, while the window is hidden,
-and under either reduced-motion preference; it is pointer-inert and aria
-hidden. Existing Pix remains the recognizable character.
+the existing Pix composer presence. In `WorkspacePixPlay.tsx`, they render only
+in idle state when page visibility is visible, activity is idle, and reduced
+motion is not requested. The CSS animation is an 8-second opacity/1–2 px drift,
+pointer-inert and `aria-hidden`; it is hidden in all other states. Existing Pix
+remains the recognizable character. Focused tests cover hidden and
+reduced-motion behavior. No canvas, imported shark shapes or runtime dependency
+was added.
 
-**Unknown:** no source-level performance benchmark or desktop GPU/CPU
-measurement was possible for the upstream demo or Pixel. The source repository
-could not be acquired with shell tooling because DNS lookup for
-`codeload.github.com` failed in this environment; source facts above were
-verified with the public raw source reader, not a local REA analysis. Pixel’s
-actual animation appearance/performance still needs a real application
-capture.
+**Unknown:** no CPU/GPU performance measurement was made for the Pixel effect
+or upstream runtime. REA captured the public repo page but did not execute its
+demo. Pixel’s actual animation appearance and performance still need a real
+application capture.
 
 ## Target D — Pixel Workspace
 
@@ -99,10 +122,18 @@ sidebar (section rail plus existing chat history), compact dense navigation,
 centered chat/composer sizing, and a searchable project grid/list over the
 existing local project records. The new Library route groups the active
 project's already-indexed documents into real folder cards and file rows;
-search, refresh, folder selection and bounded preview read from the SQLite
-index. Its narrow IPC exposes display metadata rather than absolute source
+search, type filtering, refresh, folder selection and bounded preview read from
+the SQLite index. The type filter constrains both folder cards and file rows.
+Its narrow IPC exposes display metadata rather than absolute source
 paths, and preview reads recheck active-project scope and source freshness.
-An empty Library explains how user-approved indexing populates it. A
+The preview also offers an explicit “Open original” action: main-process logic
+checks active-project scope, source freshness and a reviewed document/text
+extension allowlist (excluding source code and macro-enabled spreadsheets)
+before calling the OS, and does not return the path to React. A keyboard
+accessible folder menu opens the actual indexed directory through the main
+process, scoped to the active project's folder IDs and rejecting symlinked or
+missing directories. An empty Library explains how user-approved indexing
+populates it. A
 reduced-motion/visibility-aware decorative glyph accent sits beside Pix.
 Shared focus styles and responsive sidebar/library rules are in
 `src/renderer/workspace-design-system.css`.
@@ -122,22 +153,21 @@ at standard, narrow and minimum window sizes remain open.
 
 ## REA evidence status
 
-REA `6.10.1` is configured as a Codex stdio server. `codex mcp list` shows it
-enabled with status `Unsupported`; this current agent tool catalog has no REA
-namespace and server-scoped resource discovery reports `unknown MCP server`.
-A standalone stdio MCP fallback negotiated protocol `2024-11-05`, listed 263
-tools, and successfully called `analyze_javascript_application` on a disposable
-Electron fixture (Evidence `ev_8dab99644a9753790a6514321e92cb0d50d076cc4439cc51005c98dbc163759f`).
-The packaged Pixel `app.asar` analysis timed out without Evidence. The reference
-inspection of the screenshot and public Inspora/ASCII sources used direct
-visual/browser reading, not REA. REA's attempted Inspora capture could not start
-Chrome in the host sandbox; crashpad exited and the provider reported incomplete
-cleanup with no retained resources. The reported browser PID was absent on a
-follow-up check. No sandbox override was applied, and no page Evidence was
-produced. Therefore these references have not yet been
-reverse-engineered through REA, and its tools are still unavailable as native
-calls in this Codex session. Restart/reconnect Codex and repeat the reference
-analyses through the exposed tool surface.
+REA `6.10.1` remains configured as a Codex stdio server. `codex mcp list` has
+historically labeled it enabled / Unsupported, but this current Codex session
+now exposes callable REA tools. A safe `analyze_javascript_application` call
+on a disposable two-file JavaScript fixture succeeded (parent Evidence
+`ev_62f449ddb32f13112e2960adbf6aea9c7ce9e4e72285e473532bdd1e07a8e234`,
+result `ev_80b54c96763dacd6de4d766149c0fe3384760b86909060c67d4e59f92ba64c60`);
+the fixture was removed and was not executed. The two Inspora browser captures
+above and the ASCII Sharks repository capture also succeeded. An initial
+Inspora Folders capture timed out; the reduced screenshot+accessibility capture
+completed. The packaged Pixel `app.asar` analysis timed out without Evidence.
+The Ostrand screenshot was visually inspected as a user attachment, not passed
+through REA. No current Pixel source or live desktop was analyzed by REA. REA
+results are evidence of accessible page/source structure, not proof of runtime
+behavior, and screenshots remain in REA evidence storage rather than this
+repository.
 
 ## Workspace issues still to review
 

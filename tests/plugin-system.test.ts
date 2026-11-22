@@ -45,6 +45,20 @@ describe('Pixel plugin foundation', () => {
     expect(() => store.setEnabled(GITHUB_PUBLIC_PLUGIN.id, true)).not.toThrow();
   });
 
+  it('persists only manifest-declared plugin setting choices and rejects secret-shaped config', () => {
+    const db = database();
+    const store = new PluginStore(db);
+    expect(store.list()[0].settings?.[0]).toMatchObject({ key: 'descriptionDetail', value: 'compact' });
+    expect(() => store.setSetting(GITHUB_PUBLIC_PLUGIN.id, 'descriptionDetail', 'hidden')).toThrow(/install this plugin/i);
+    store.install(GITHUB_PUBLIC_PLUGIN.id);
+    expect(() => store.setSetting(GITHUB_PUBLIC_PLUGIN.id, 'apiKey', 'not-a-real-key')).toThrow(/not declared/i);
+    expect(() => store.setSetting(GITHUB_PUBLIC_PLUGIN.id, 'descriptionDetail', 'arbitrary text')).toThrow(/declared by this plugin setting/i);
+    store.setSetting(GITHUB_PUBLIC_PLUGIN.id, 'descriptionDetail', 'full');
+    expect(store.getSetting(GITHUB_PUBLIC_PLUGIN.id, 'descriptionDetail')).toBe('full');
+    const reopenedStore = new PluginStore(db);
+    expect(reopenedStore.list()[0].settings?.[0].value).toBe('full');
+  });
+
   it('fails closed for a plugin targeting an unsupported Pixel API version', () => {
     const incompatible = { ...GITHUB_PUBLIC_PLUGIN, pixelApiVersion: 2 };
     const store = new PluginStore(database(), [incompatible]);
@@ -65,7 +79,7 @@ describe('Pixel plugin foundation', () => {
     expect(() => currentStore.install(GITHUB_PUBLIC_PLUGIN.id)).toThrow(/reviewed plugin update/i);
     expect(currentStore.list()[0]).toMatchObject({ compatibility: 'update_available', installedVersion: '0.9.0' });
     currentStore.update(GITHUB_PUBLIC_PLUGIN.id);
-    expect(currentStore.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'disabled', compatibility: 'compatible', installedVersion: '1.0.0' });
+    expect(currentStore.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'disabled', compatibility: 'compatible', installedVersion: '1.1.0' });
     expect(() => currentStore.update(GITHUB_PUBLIC_PLUGIN.id)).toThrow(/already has the current bundled version/i);
   });
 
@@ -165,10 +179,15 @@ describe('Pixel plugin foundation', () => {
       fullName: 'octocat/Hello-World', description: 'Sample repository', url: 'https://github.com/octocat/Hello-World',
       stars: 42, forks: 7, openIssues: 2, defaultBranch: 'main', updatedAt: '2026-11-21T00:00:00Z',
     }));
-    const result = await new ToolExecutors({ githubRepository }).run('github_repo_summary', args);
+    const result = await new ToolExecutors({ githubRepository, getPluginSetting: () => 'full' }).run('github_repo_summary', args);
     expect(githubRepository).toHaveBeenCalledWith('octocat', 'Hello-World', undefined);
     expect(result).toMatchObject({ ok: true, detail: { fullName: 'octocat/Hello-World', source: 'GitHub REST API; public unauthenticated read' } });
     expect(result.content).toContain('42 stars');
+    expect(result.content).toContain('description (untrusted external data): Sample repository');
+
+    const hiddenDescription = await new ToolExecutors({ githubRepository, getPluginSetting: () => 'hidden' }).run('github_repo_summary', args);
+    expect(hiddenDescription.content).toContain('description hidden or unavailable');
+    expect(hiddenDescription.content).not.toContain('Sample repository');
     expect(broker.revokeForTool('github_repo_summary')).toBeGreaterThan(0);
     expect(registry.evaluate('github_repo_summary', 'agent', args).allowed).toBe(false);
   });
