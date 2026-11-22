@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../data/database';
 import type { SkillDefinition } from '../skills/schema';
-import { routineIncompatibility } from '../skills/plan';
+import { normalizeSkillInputValues, routineIncompatibility } from '../skills/plan';
 import { SkillStore } from '../skills/store';
 import { redactTaskText } from '../tasks/schema';
 
@@ -12,12 +12,16 @@ export interface LocalRoutine {
   name: string;
   localTime: string;
   timezone: string;
+  /** Main-process only. Values are never returned by routines.list. */
+  inputValues: Record<string, string>;
   enabled: boolean;
   retryPolicy: 'manual';
   missedRunPolicy: 'skip';
   createdAt: number;
   updatedAt: number;
 }
+
+export type LocalRoutineSummary = Omit<LocalRoutine, 'inputValues'> & { inputNames: string[] };
 
 export interface RoutineRun {
   id: string;
@@ -35,7 +39,7 @@ export interface RoutineRun {
 export class RoutineStore {
   constructor(private readonly db: Database, private readonly skills: SkillStore) {}
 
-  create(input: { projectId: string; skillId: string; name: string; localTime: string; timezone: string }): LocalRoutine {
+  create(input: { projectId: string; skillId: string; name: string; localTime: string; timezone: string; inputValues?: Record<string, string> }): LocalRoutine {
     if (typeof input.name !== 'string' || input.name.trim().length < 1 || input.name.length > 100) {
       throw new Error('Routine name must contain 1 to 100 characters.');
     }
@@ -48,11 +52,13 @@ export class RoutineStore {
     }
     const incompatibility = routineIncompatibility(skill);
     if (incompatibility) throw new Error(incompatibility);
+    const inputValues = normalizeSkillInputValues(skill.inputs, input.inputValues ?? {});
     validateSchedule(input.localTime, input.timezone);
     const now = Date.now();
     const routine: LocalRoutine = {
       id: `routine_${randomUUID().slice(0, 12)}`,
       ...input,
+      inputValues,
       enabled: true,
       retryPolicy: 'manual',
       missedRunPolicy: 'skip',
@@ -60,10 +66,10 @@ export class RoutineStore {
       updatedAt: now,
     };
     this.db.execute(
-      `INSERT INTO routines (id, project_id, skill_id, name, local_time, timezone, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO routines (id, project_id, skill_id, name, local_time, timezone, enabled, created_at, updated_at, input_values)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       [routine.id, routine.projectId, routine.skillId, routine.name, routine.localTime,
-        routine.timezone, now, now],
+        routine.timezone, now, now, JSON.stringify(inputValues)],
     );
     return this.get(routine.id) ?? (() => { throw new Error('Routine failed read-back.'); })();
   }
@@ -73,10 +79,16 @@ export class RoutineStore {
     return row ? fromRoutineRow(row) : null;
   }
 
-  list(projectId: string): LocalRoutine[] {
+  list(projectId: string): LocalRoutineSummary[] {
     return this.db.query<RoutineRow>(
       'SELECT * FROM routines WHERE project_id = ? ORDER BY local_time, name', [projectId],
-    ).map(fromRoutineRow);
+    ).map((row) => this.toSummary(fromRoutineRow(row)));
+  }
+
+  toSummary(routine: LocalRoutine): LocalRoutineSummary {
+    const { inputValues: _inputValues, ...summary } = routine;
+    const skill = this.skills.getActive(routine.skillId);
+    return { ...summary, inputNames: skill?.inputs.map((input) => input.name) ?? [] };
   }
 
   enabled(): LocalRoutine[] {
@@ -345,9 +357,24 @@ function localScheduleTime(timestamp: number, timezone: string): { date: string;
 }
 
 function fromRoutineRow(row: RoutineRow): LocalRoutine {
+  let inputValues: Record<string, string>;
+  try {
+    const parsed: unknown = JSON.parse(row.input_values);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+    inputValues = Object.fromEntries(Object.entries(parsed).map(([key, value]) => {
+      if (!/^[a-z][a-z0-9_]{0,39}$/.test(key) || typeof value !== 'string' || value.length > 2_000) {
+        throw new Error('invalid input entry');
+      }
+      return [key, value];
+    }));
+    if (Object.keys(inputValues).length > 30) throw new Error('too many inputs');
+  } catch {
+    throw new Error('Saved routine inputs are invalid. Delete and recreate this routine before it can run.');
+  }
   return {
     id: String(row.id), projectId: String(row.project_id), skillId: String(row.skill_id),
     name: String(row.name), localTime: String(row.local_time), timezone: String(row.timezone),
+    inputValues,
     enabled: Number(row.enabled) === 1, retryPolicy: 'manual', missedRunPolicy: 'skip',
     createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
   };
@@ -372,7 +399,7 @@ function clip(value: string | undefined): string | null {
 
 interface RoutineRow {
   id: string; project_id: string; skill_id: string; name: string; local_time: string;
-  timezone: string; enabled: number; created_at: number; updated_at: number;
+  timezone: string; enabled: number; created_at: number; updated_at: number; input_values: string;
 }
 
 interface RoutineRunRow {

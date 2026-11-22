@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FILE_TOOL_DEFINITIONS, FileTools, MAX_DIRECTORY_ENTRIES } from '../src/main/files/toolset';
@@ -9,7 +9,7 @@ import { ToolExecutors } from '../src/main/agent/executors';
 const roots: string[] = [];
 
 function tempHome(): string {
-  const root = mkdtempSync(join(homedir(), '.pixel-file-tools-'));
+  const root = mkdtempSync(join(tmpdir(), 'pixel-file-tools-'));
   roots.push(root);
   return root;
 }

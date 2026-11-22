@@ -297,7 +297,7 @@ describe('durable local routines', () => {
     scheduler.stop();
   });
 
-  it('rejects cross-project, inactive and interactive-input routine targets', () => {
+  it('rejects cross-project/inactive targets and persists only names in routine listings', () => {
     const { store, skills, activeSkillId } = setup();
     expect(() => store.create({ projectId: 'other', skillId: activeSkillId, name: 'Wrong scope', localTime: '10:00', timezone: 'UTC' })).toThrow(/same project/);
     expect(() => store.create({ projectId: 'project_a', skillId: 'missing', name: 'Inactive', localTime: '10:00', timezone: 'UTC' })).toThrow(/active skill/);
@@ -307,7 +307,14 @@ describe('durable local routines', () => {
       steps: [{ ordinal: 0, kind: 'tool', locator: 'browser_inspect', action: 'browser_inspect', params: { query: '${input.query}' }, expectation: {}, approvalRequired: true }],
       requiredTools: ['browser_inspect'],
     })).id);
-    expect(() => store.create({ projectId: 'project_a', skillId: needsInput.id, name: 'No input source', localTime: '10:00', timezone: 'UTC' })).toThrow(/interactive inputs/);
+    expect(() => store.create({ projectId: 'project_a', skillId: needsInput.id, name: 'Missing input', localTime: '10:00', timezone: 'UTC' })).toThrow(/Required skill input/);
+    expect(() => store.create({ projectId: 'project_a', skillId: needsInput.id, name: 'Secret input', localTime: '10:00', timezone: 'UTC', inputValues: { query: 'Bearer abcdefghijklmnop' } })).toThrow(/credential material/);
+    const inputValue = 'Routine-only public search term';
+    const withInput = store.create({ projectId: 'project_a', skillId: needsInput.id, name: 'Daily search', localTime: '10:00', timezone: 'UTC', inputValues: { query: inputValue } });
+    expect(withInput.inputValues).toEqual({ query: inputValue });
+    const listed = store.list('project_a').find((item) => item.id === withInput.id);
+    expect(listed?.inputNames).toEqual(['query']);
+    expect(JSON.stringify(listed)).not.toContain(inputValue);
 
     const unknownPredicate = skills.activate(skills.createDraft(definition({
       name: 'Unknown result check',

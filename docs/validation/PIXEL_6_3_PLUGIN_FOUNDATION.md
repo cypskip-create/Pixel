@@ -1,6 +1,6 @@
 # Improvement 6.3 — plugin foundation checkpoint
 
-Updated: 2026-11-22. Status: foundation implemented; first plugin is fixture-tested; live provider call and Windows UI acceptance remain unverified.
+Updated: 2026-11-23. Status: foundation implemented; first plugin is fixture-tested; live provider call and Windows UI acceptance remain unverified.
 
 ## Implemented
 
@@ -84,7 +84,7 @@ its latest actual tool call, not a fabricated background connection status.
   rechecks task cancellation after DNS and rejects invalid address families or
   private addresses before opening the TLS socket.
 
-- `tests/plugin-system.test.ts`: **11/11** deterministic tests cover settings
+- `tests/plugin-system.test.ts`: **12/12** deterministic tests cover settings
   validation/persistence and fixture-backed
   lifecycle, approval-to-executor flow, cancellation after DNS, private address
   refusal, unsupported API fail-closed behavior and rejection of install-as-update
@@ -113,6 +113,12 @@ its latest actual tool call, not a fabricated background connection status.
   DNS could not resolve `api.github.com` (`ENOTFOUND`). This is an environment
   blocker, not a successful live provider read. The full permission/executor
   path is verified with the deterministic fixture.
+
+- 2026-11-23 live adapter retry: `readPublicGitHubRepository('octocat',
+  'Hello-World')` again failed during DNS with `getaddrinfo ENOTFOUND
+  api.github.com`, before any HTTPS request. No repository result is claimed.
+  Added regression coverage proving the executor returns failure and records
+  this adapter error in Plugin Health rather than manufacturing success.
 
 ## 6.2 specialist pipeline follow-on
 

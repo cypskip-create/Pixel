@@ -721,6 +721,8 @@ export interface RoutineRecord {
   localTime: string;
   timezone: string;
   enabled: boolean;
+  /** Names only; saved values stay in the main process. */
+  inputNames: string[];
   retryPolicy: 'manual';
   missedRunPolicy: 'skip';
   createdAt: number;
@@ -1057,7 +1059,7 @@ export interface CypsBridge {
   };
   routines: {
     list(): Promise<RoutineRecord[]>;
-    create(input: { skillId: string; name: string; localTime: string; timezone: string }): Promise<RoutineRecord>;
+    create(input: { skillId: string; name: string; localTime: string; timezone: string; inputValues: Record<string, string> }): Promise<RoutineRecord>;
     setEnabled(routineId: string, enabled: boolean): Promise<boolean>;
     delete(routineId: string): Promise<boolean>;
     history(routineId: string, limit?: number): Promise<RoutineRunRecord[]>;

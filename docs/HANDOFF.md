@@ -4,6 +4,31 @@ Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
 ## Latest Checkpoint (2026-11-23 — Local Uncommitted)
 
+Latest validation follow-up: the disposable WPF UIA agent workflow passed on
+Windows and is documented in `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
+After the routine-input follow-up, `npm run typecheck` and `npm run build`
+passed. `npm test` passed **1,008 tests, 11 skipped, 0 failed** (1,019 total;
+77 files passed, 1 skipped). The real Chromium browser suite passed 30/30;
+skips include 7 NSIS cases because `makensis` is absent, 3 opt-in foreground
+tests, and 1 document symlink case. Pixel's actual Electron GUI remains
+unavailable because Electron exits with `0x80000003` before its entry point; no
+new GUI acceptance is claimed.
+
+Scheduled workflow follow-up: parameterized active skills can now be scheduled
+with values supplied in Skills & Routines. Migration 13 stores values locally;
+main-process validation refuses unknown, missing, oversized or credential-like
+values, returns only input names across renderer IPC, and redacts values from
+task/audit history. Focused plan, scheduler and UI tests pass 20/20. These
+routine values are local configuration, not encrypted credentials; users must
+not enter secrets. See `docs/architecture/PIXEL_SKILLS_AND_ROUTINES.md` and the
+updated 6.2 checklist.
+
+Plugin verification: a fresh direct public read through the GitHub adapter
+again failed at DNS resolution (`api.github.com`, `ENOTFOUND`) before HTTPS.
+The fixture suite is now 12/12 and includes a regression that records adapter
+errors in Plugin Health without returning false success. Live provider and
+Plugin Manager desktop verification remain open.
+
 - **Design System & Workspace Redesign (Checkpoint B):**
   - Applied the requested warm matte palette (`#0C0B0A` base, opaque warm surfaces, `#F28A43` restrained accent) in `src/renderer/index.css` and `src/renderer/workspace-design-system.css`. The visual remains flat and opaque, with no frosted panels or colored selection-edge strips. `tests/monochrome-theme.test.ts` now asserts the warm palette and contrast.
   - Consolidated the Workspace into a compact `240px` sidebar: **New Chat**, **Projects**, **Library**, **Pixel Board**, **Running Tasks**, **Recent Chats** (search, rename, delete confirmation, scrollable history, active project indicator), **Notes & Planning**, and **Settings**. Tools, plugins, memory, and routines remain available in Settings categories.
@@ -29,8 +54,8 @@ Updated: 2026-11-23. This file is the short recovery point for future sessions.
 ## Repository state
 
 - Existing checkout: `C:\Users\cypri\OneDrive\Desktop\cyps`, branch `main`.
-- Current committed HEAD and `origin/main`: `b70c212c46aa8e7e93dfa360ddf4659389fbe369`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed changes.
-- The last confirmed Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, including typecheck, automated tests, native helper compile, package build and artifact upload. GitHub's status endpoint returned no records for `b70c212`; CI for current HEAD is unverified. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Current local edits are uncommitted and not covered by those runs.
+- Current committed HEAD and `origin/main`: `4fe3ed658ca8ee59fefba9a19ee0834709b92f5a`, branch `main`. This continuation started from `8288850ac825d5b5c1b79656f1432622a8129bf7` and preserved later committed changes.
+- The last confirmed Windows CI run [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724) passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`, including typecheck, automated tests, native helper compile, package build and artifact upload. CI for current HEAD `4fe3ed6` is unverified. Earlier run [44882229282](https://github.com/cypskip-create/Pixel/actions/runs/44882229282) passed on `8288850`. CI/package builds do not prove interactive installed-app acceptance. Final documentation edits are uncommitted and not covered by those runs.
 - A fresh `npm run dev` retry built main/preload and the native helper, preserved the occupied 5199 listener, started Vite on 5200, then Electron exited `2147483651` (`0x80000003`) without a targetable window. Follow-up isolation: direct `electron.exe --version` exited with the same code before printing a version, both from this checkout and from the read-only `C:\dev\Pixel` binary; their executable SHA-256 hashes match. A Computer Use launch timed out, and a fresh desktop inventory still showed no Pixel window. No `%TEMP%\Pixel` startup log was created, confirming the process did not reach Pixel's boot logger. Existing `%APPDATA%\Pixel` data was read-only and left untouched. This does not establish a source defect; GUI acceptance remains blocked by the current host runtime.
 - Do not commit or push for the user.
 
@@ -41,7 +66,8 @@ public GitHub metadata plugin predate this continuation. This checkpoint
 implements the first warm matte Workspace pass: semantic warm tokens, grouped
 navigation plus existing conversation history, project search/grid/list over
 local records, and reduced-motion/visibility-aware decorative Pix glyphs. New
-source and tests are currently uncommitted. See
+source and tests are present in the current local commit; final documentation
+updates remain uncommitted. See
 `docs/research/PIXEL_REFERENCE_RESEARCH_6_3.md` and
 `docs/architecture/PIXEL_DESIGN_TOKENS.md`.
 
@@ -98,12 +124,15 @@ title before selected-target operations. Semantic UIA actions re-query the
 control and validate a postcondition. This is implementation evidence, not live
 Windows acceptance; richer hierarchy and actual Notepad/app interaction remain
 open.
-The latest disposable UIA fixture run verified exact-window selection and
-`ValuePattern` read-back, then exposed a provider failure: the WinForms
-checkbox's `TogglePattern.Toggle()` threw `InvalidOperationException`. Pixel
-correctly blocked later actions because the state-changing step was
-unverified. See `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`; do not count this
-toggle run as passing.
+The latest disposable WPF UIA fixture run passed the full agent path: exact
+window selection, approved `ValuePattern` entry/read-back, approved
+`TogglePattern` state/read-back, approved button invocation, explicit
+postcondition verification and SQLite task-history restoration. It exposed an
+8-turn agent ceiling that stopped before the verification turn; the bounded
+ceiling is now 12 and the regression run passed. This is native-helper and
+agent integration evidence, not acceptance of Pixel's actual Electron window.
+See `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md` for the artifact and remaining
+GUI blockers.
 Native helper compilation passes and voice-worker boundary tests pass 12/12.
 `VoiceService.capability()` reports `stt=false`, `tts=true`; the host has no
 Windows recognizer installed. A short real playback through Pixel's Windows

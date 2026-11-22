@@ -1264,3 +1264,31 @@ Computer Use launch timed out; the subsequent fresh app inventory contained no
 Pixel window. Thus the app-level GUI acceptance could not begin. This evidence
 locates the failure before Pixel's main entry point, but does not identify its
 host-level cause. User app data was not changed for this recheck.
+
+## Disposable UI Automation agent acceptance (2026-11-22)
+
+Command: `npm run test:native-uia-fixture` on Windows. The script compiled a
+disposable WPF target, rebuilt the native helper and main process, then invoked
+the real `AgentExecutor`/`ToolExecutors` against that separate target. Result:
+**passed**. The task selected the unique exact window, typed approved harmless
+text and read it back, toggled a checkbox and observed `On`, invoked the
+harmless button under one-time approval, then verified the completion label.
+The task finished `completed`, persisted three verification evidence items and
+75 task events, and restored the verified invocation from SQLite. Artifact:
+`artifacts/windows-acceptance/pixel-native-uia-e2e-2026-11-22T21-32-02-082Z.json`.
+
+The first WPF run stopped after the invoke because the general agent loop had
+an eight-turn ceiling; it never reached its queued `verify_ui_state` call. The
+bounded ceiling is now 12 so a multi-observation approved sequence can finish.
+The earlier WinForms fixture's TogglePattern provider exception is retained as
+a provider limitation; the helper reports recovery only after a fresh state
+read confirms the requested state. This fixture result verifies the native
+helper and agent pipeline only. It does not verify Pixel's Electron Workspace,
+Notepad, or other user applications. Actual Pixel GUI acceptance remains
+blocked by the pre-entry Electron `0x80000003` exit described above.
+
+Final automated checks after the routine-input follow-up: `npm run typecheck`
+and `npm run build` passed. Full Vitest passed **1,008 tests, 11 skipped, 0
+failed** (1,019 total; 77 files passed, 1 skipped), including 30/30 real
+Chromium tests. Skips: seven NSIS cases (`makensis` unavailable), three opt-in
+native foreground scenarios, and one symlink case denied by the sandbox.

@@ -1,15 +1,15 @@
 # Pixel progress
 
-Updated: 2026-11-22. Version: 0.2.1.
+Updated: 2026-11-23. Version: 0.2.1.
 
 ## New-chat recovery and current local checkpoint
 
 - Recovery began at `8288850ac825d5b5c1b79656f1432622a8129bf7`; current
-  committed HEAD and `origin/main` are `74f3973293992e3c44c5194f3f84b90f758d15f5`.
+  committed HEAD and `origin/main` are `4fe3ed658ca8ee59fefba9a19ee0834709b92f5a`.
   The last confirmed Windows CI run,
   [44916016724](https://github.com/cypskip-create/Pixel/actions/runs/44916016724),
   passed on `0780c18d22ce1c07ba195527f952ac9cb9f7d37d`. GitHub returned no
-  status records for `74f3973`, so CI for current HEAD is unverified. Current
+  status records for `4fe3ed6`, so CI for current HEAD is unverified. Current
   local edits are uncommitted and are not covered by that run.
 - REA `6.10.1` remains registered and its Codex config/skill identity checks are
   healthy. `codex mcp list` historically labels it **enabled / Unsupported**,
@@ -36,6 +36,14 @@ Updated: 2026-11-22. Version: 0.2.1.
   blocked later actions while the mutation lacked verification. The harness
   now re-observes after each state-changing step. This toggle scenario remains
   failed/unverified; see `docs/validation/PIXEL_WINDOWS_ACCEPTANCE.md`.
+- Restored the Ostrand-inspired warm matte tokens after comparing the live CSS
+  with the supplied screenshot; orange `#F28A43` is the restrained semantic
+  accent. Replaced shark-shaped artwork with small, low-contrast glyph clusters
+  while retaining the reviewed fixed-step, reduced-motion, visibility-pause,
+  and cleanup behavior. Final local checks: typecheck and production build
+  passed; focused Workspace tests **32/32** and theme/ambient tests **11/11**
+  passed. GUI screenshot comparison remains blocked by Electron's pre-Pixel
+  `0x80000003` startup failure.
 - Visual-preview follow-up: Vite started on `0.0.0.0:5200`, but local browser
   requests from the host sandbox were denied (`ERR_NETWORK_ACCESS_DENIED`) and
   the in-app browser timed out. A `file:` preview of the production renderer
@@ -143,8 +151,8 @@ Updated: 2026-11-22. Version: 0.2.1.
   again stopped before HTTP because `api.github.com` DNS returned `ENOTFOUND`.
   The adapter now rechecks cancellation after DNS and validates every returned
   IP family/address before its pinned TLS request; focused plugin tests pass
-  9/9, including unsupported API refusal and cancellation during DNS. The
-  complete permission/executor path is fixture-tested, not
+  12/12, including honest adapter-error health reporting, unsupported API
+  refusal and cancellation during DNS. The complete permission/executor path is fixture-tested, not
   live-provider verified.
 - Tasks & Activity can record a completed verified task into a project skill
   draft; review edits create a new version. Scheduled routines now invoke the
@@ -1205,3 +1213,48 @@ See [the release-readiness report](docs/validation/PIXEL_RELEASE_READINESS.md), 
   passes **29/29**, including actual upload selection and download read-back.
   Native Electron dialog, remote site acceptance, and real app-window/network
   acceptance remain unverified.
+
+## UI Automation acceptance follow-up (local, uncommitted)
+
+- Raised the agent model-turn ceiling from 8 to 12 after the real disposable
+  sequence showed the old limit stopped after an approved button invoke and
+  before `verify_ui_state`. This remains bounded and allows fresh observations
+  plus postcondition checks to finish in one run.
+- `npm run test:native-uia-fixture` passed on Windows. It compiled a harmless
+  WPF fixture and exercised exact-window targeting, approved text entry with
+  ValuePattern read-back, approved TogglePattern state/read-back, button
+  invocation, postcondition verification, SQLite task restoration and 75
+  persisted task events. Artifact:
+  `artifacts/windows-acceptance/pixel-native-uia-e2e-2026-11-22T21-32-02-082Z.json`.
+- The helper now handles a UIA provider exception only when a fresh exact-target
+  read proves the requested toggle state; it reports that recovery in the
+  result. Earlier WinForms provider limitation and current WPF pass are both
+  documented. This is helper integration evidence; Pixel's actual Electron GUI
+  remains blocked by the host's pre-entry `0x80000003` exit.
+- Test fixtures now create disposable file roots under `os.tmpdir()`, avoiding
+  sandbox-denied writes beneath the real home folder. The latest full run had
+  **1,006 passed, 1 failed, 11 skipped**; its one failure was a test-only
+  `homedir` import removed during that relocation. After restoring the import,
+  `tests/files.test.ts` and `tests/tasks.test.ts` passed **30/30**. Typecheck,
+  production build, native fixture integration, and `git diff --check` passed.
+  The full suite was not rerun after the one-line test-fixture correction.
+
+## Parameterized daily routine follow-up (local, uncommitted)
+
+- Daily routines now support active reviewed skills with declared inputs.
+  Migration 13 stores the supplied values with the local routine. The renderer
+  receives input names only; values stay in main-process routine state and are
+  redacted from task/audit history. Unknown, missing, oversized and
+  credential-like values are refused; this is not encrypted credential storage.
+- Routine creation exposes the skill's declared fields and clearly says the
+  values are saved locally. Scheduled execution still uses the immutable
+  reviewed tool plan, active project, current permission policy, emergency
+  stop, fresh observations and postcondition checks.
+- `tests/skill-plan.test.ts`, `tests/skills-routines.test.ts`, and
+  `tests/automation-panel-review.test.tsx` passed **20/20**, covering plan
+  substitution, validation, local persistence without renderer disclosure and
+  the UI form. `npm run typecheck` and `npm run build` passed. Full Vitest passed
+  **1,008 tests, 11 skipped, 0 failed** (1,019 total; 77 files passed, 1
+  skipped); all 30 real Chromium tests passed. Seven NSIS tests (`makensis`
+  missing), three native foreground cases and one sandbox-denied symlink test
+  account for the skips.

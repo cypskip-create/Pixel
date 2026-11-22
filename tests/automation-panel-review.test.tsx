@@ -41,20 +41,26 @@ function mount(skill = draft): {
   element: HTMLDivElement;
   createDraft: ReturnType<typeof vi.fn>;
   runSkill: ReturnType<typeof vi.fn>;
+  createRoutine: ReturnType<typeof vi.fn>;
 } {
   host = document.createElement('div');
   document.body.append(host);
   const revised = { ...skill, id: 'skill_draft2', version: skill.version + 1, purpose: 'Inspect the page after the user reviews it.' };
   const createDraft = vi.fn(async () => revised);
   const runSkill = vi.fn(async () => ({ id: 'task_run1', title: 'Run reviewed skill', status: 'completed' as const, steps: [], createdAt: 2 }));
+  const createRoutine = vi.fn(async (input: { skillId: string; inputValues: Record<string, string> }) => ({
+    id: 'routine_1', projectId: 'project_a', skillId: input.skillId, name: 'Daily status check',
+    localTime: '09:00', timezone: 'UTC', enabled: true, inputNames: Object.keys(input.inputValues),
+    retryPolicy: 'manual' as const, missedRunPolicy: 'skip' as const, createdAt: 3, updatedAt: 3,
+  }));
   const bridge = {
     skills: { list: vi.fn(async () => [skill]), run: runSkill, createDraft, activate: vi.fn(async (id: string) => ({ ...skill, id, status: 'active' as const })), delete: vi.fn(async () => true) },
-    routines: { list: vi.fn(async () => []) },
+    routines: { list: vi.fn(async () => []), create: createRoutine },
   } as unknown as CypsBridge;
   Object.defineProperty(window, 'cyps', { configurable: true, value: bridge });
   root = createRoot(host);
   act(() => root?.render(<AutomationPanel onBack={vi.fn()} />));
-  return { element: host, createDraft, runSkill };
+  return { element: host, createDraft, runSkill, createRoutine };
 }
 
 describe('AutomationPanel skill draft review', () => {
@@ -107,5 +113,31 @@ describe('AutomationPanel skill draft review', () => {
 
     expect(runSkill).toHaveBeenCalledWith('skill_active1', { step_1_url: 'https://example.test/page' });
     expect(element.textContent).toContain('Skill run completed');
+  });
+
+  it('collects declared non-credential values for a routine without rendering saved values', async () => {
+    const active = { ...draft, id: 'skill_active_routine', status: 'active' as const };
+    const { element, createRoutine } = mount(active);
+    await act(async () => { await Promise.resolve(); });
+
+    const input = element.querySelector<HTMLInputElement>('[aria-label="Routine input step_1_url"]');
+    expect(input).not.toBeNull();
+    act(() => {
+      if (!input) return;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'https://example.test/daily');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      [...element.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Schedule daily')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(createRoutine).toHaveBeenCalledWith(expect.objectContaining({
+      skillId: 'skill_active_routine',
+      inputValues: { step_1_url: 'https://example.test/daily' },
+    }));
+    expect(element.textContent).toContain('Saved inputs: step_1_url');
+    expect(element.textContent).not.toContain('https://example.test/daily');
   });
 });

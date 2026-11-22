@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgentExecutor } from '../src/main/agent/executor';
@@ -168,7 +168,7 @@ describe('task safe-point controls', () => {
 
 describe('durable file task integration', () => {
   it('creates a file, reads it back, and persists verified task evidence', async () => {
-    const root = mkdtempSync(join(homedir(), '.pixel-task-test-'));
+    const root = mkdtempSync(join(tmpdir(), 'pixel-task-test-'));
     const database = openDatabase(':memory:');
     try {
       const registry = new ToolRegistry([...BUILTIN_TOOLS, ...FILE_TOOL_DEFINITIONS]);
@@ -225,7 +225,7 @@ describe('durable file task integration', () => {
   });
 
   it('does not create the requested file when the user denies approval', async () => {
-    const root = mkdtempSync(join(homedir(), '.pixel-task-denied-'));
+    const root = mkdtempSync(join(tmpdir(), 'pixel-task-denied-'));
     const registry = new ToolRegistry([...BUILTIN_TOOLS, ...FILE_TOOL_DEFINITIONS]);
     const audit = new AuditLog();
     const tasks = new TaskManager(() => undefined);

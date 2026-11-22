@@ -452,6 +452,13 @@ export const MIGRATIONS: readonly Migration[] = [
         ON plugin_project_availability(project_id, plugin_id);
     `,
   },
+  {
+    version: 13,
+    name: 'routine-declared-input-values',
+    sql: `
+      ALTER TABLE routines ADD COLUMN input_values TEXT NOT NULL DEFAULT '{}';
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

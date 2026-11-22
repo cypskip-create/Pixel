@@ -1085,6 +1085,7 @@ internal static class Program
             throw new InvalidOperationException("The matching control is disabled or offscreen; no action was taken.");
 
         string observedState;
+        bool resultProviderErrorRecovered = false;
         switch (action)
         {
             case "select":
@@ -1127,12 +1128,16 @@ internal static class Program
                 {
                     throw new InvalidOperationException("TogglePattern state could not be read before action; no change was attempted. Provider error: " + ex.Message);
                 }
+                bool providerErrorRecovered = false;
                 if (before != desiredState)
                 {
                     try { pattern.Toggle(); }
-                    catch (Exception ex)
+                    catch (Exception)
                     {
-                        throw new InvalidOperationException("TogglePattern was rejected by the target UI Automation provider. The action may have partly completed; re-observe before retrying. Provider error: " + ex.Message);
+                        // A provider can throw after delivering the action. Do
+                        // not retry or report failure until a fresh proxy has
+                        // read the exact postcondition from the same target.
+                        providerErrorRecovered = true;
                     }
                 }
                 ToggleState observed;
@@ -1150,7 +1155,12 @@ internal static class Program
                     throw new InvalidOperationException("TogglePattern returned without a readable postcondition; the action outcome is unknown. Re-observe before retrying. Provider error: " + ex.Message);
                 }
                 if (observed != desiredState)
+                {
+                    if (providerErrorRecovered)
+                        throw new InvalidOperationException("TogglePattern raised an error and a fresh read-back did not confirm the requested state; the action outcome is not verified.");
                     throw new InvalidOperationException("TogglePattern did not reach the requested state; the result is not verified.");
+                }
+                if (providerErrorRecovered) resultProviderErrorRecovered = true;
                 observedState = observed == ToggleState.On ? "on" : "off";
                 break;
             }
@@ -1214,7 +1224,8 @@ internal static class Program
             { "element", DescribeActionElement(match) },
             { "action", action },
             { "observedState", observedState },
-            { "verified", true }
+            { "verified", true },
+            { "providerErrorRecovered", resultProviderErrorRecovered }
         };
     }
 

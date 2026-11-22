@@ -128,7 +128,14 @@ export interface NativeCommands {
       scrollAxis?: 'vertical' | 'horizontal';
       scrollDirection?: 'increment' | 'decrement';
     };
-    result: { window: WindowInfo; element: UiElement; action: string; observedState: string; verified: true };
+    result: {
+      window: WindowInfo;
+      element: UiElement;
+      action: string;
+      observedState: string;
+      verified: true;
+      providerErrorRecovered?: boolean;
+    };
   };
 }
 

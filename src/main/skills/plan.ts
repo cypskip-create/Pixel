@@ -1,5 +1,5 @@
 import type { ToolRegistry } from '../agent/tools';
-import type { SkillDefinition } from './schema';
+import type { SkillDefinition, SkillInput } from './schema';
 
 const SUPPORTED_EXPECTATIONS = new Set([
   'resultContains',
@@ -11,7 +11,6 @@ const SUPPORTED_EXPECTATIONS = new Set([
 
 /** Return whether a reviewed skill can currently run as a scheduled routine. */
 export function routineIncompatibility(skill: Pick<SkillDefinition, 'inputs' | 'steps' | 'requiredTools'>): string | null {
-  if (skill.inputs.length > 0) return 'Routines cannot run skills with interactive inputs yet; use a reviewed skill with no inputs.';
   if (skill.steps.length === 0 || skill.steps.length > 40) return 'A daily routine requires 1 to 40 reviewed tool steps.';
   if (skill.steps.some((step) => step.kind !== 'tool' || step.action !== step.locator || step.action === 'request_human_takeover')) {
     return 'Daily routines currently support only reviewed tool steps with direct tool names.';
@@ -30,10 +29,11 @@ export function buildRoutineToolPlan(
   skill: SkillDefinition,
   requestId: string,
   registry: ToolRegistry,
+  inputs: Record<string, string> = {},
 ): ReviewedToolCall[] {
   const incompatibility = routineIncompatibility(skill);
   if (incompatibility) throw new Error(incompatibility);
-  return buildSkillToolPlan(skill, requestId, registry, {});
+  return buildSkillToolPlan(skill, requestId, registry, inputs);
 }
 
 export interface ReviewedToolCall {
@@ -54,17 +54,8 @@ export function buildSkillToolPlan(
   if (skill.steps.some((step) => step.kind !== 'tool' || step.action !== step.locator || step.action === 'request_human_takeover')) {
     throw new Error('Manual runs currently support only reviewed tool steps with direct tool names.');
   }
+  const normalizedInputs = normalizeSkillInputValues(skill.inputs, inputs);
   const inputNames = new Map(skill.inputs.map((input) => [input.name, input]));
-  for (const [name, value] of Object.entries(inputs)) {
-    if (!inputNames.has(name)) throw new Error(`Unknown skill input "${name}" was refused.`);
-    if (typeof value !== 'string' || value.length > 2_000) throw new Error(`Skill input "${name}" must be text of at most 2,000 characters.`);
-    if (looksLikeCredential(value)) throw new Error(`Skill input "${name}" resembles credential material and was refused.`);
-  }
-  for (const [name, definition] of inputNames) {
-    if (definition.required && (!inputs[name] || inputs[name]?.trim().length === 0)) {
-      throw new Error(`Required skill input "${name}" was not provided.`);
-    }
-  }
   const substitute = (value: unknown): unknown => {
     if (typeof value === 'string') {
       const match = /^\$\{input\.([a-z][a-z0-9_]{0,39})\}$/.exec(value);
@@ -74,7 +65,7 @@ export function buildSkillToolPlan(
       }
       const name = match[1] ?? '';
       if (!inputNames.has(name)) throw new Error(`Unknown skill input "${name}" was refused.`);
-      return inputs[name] ?? '';
+      return normalizedInputs[name] ?? '';
     }
     if (Array.isArray(value)) return value.map(substitute);
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, substitute(child)]));
@@ -97,6 +88,32 @@ export function buildSkillToolPlan(
         approvalRequired: step.approvalRequired,
       };
     });
+}
+
+/** Validate declared values before a one-time run or local scheduled storage. */
+export function normalizeSkillInputValues(definitions: readonly SkillInput[], raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('Skill inputs must be a plain object of declared text values.');
+  }
+  const values = raw as Record<string, unknown>;
+  const declared = new Map(definitions.map((definition) => [definition.name, definition]));
+  const entries = Object.entries(values);
+  if (entries.length > 30) throw new Error('A skill run accepts at most 30 declared inputs.');
+  const normalized: Record<string, string> = {};
+  for (const [name, value] of entries) {
+    if (!declared.has(name)) throw new Error(`Unknown skill input "${name.slice(0, 40)}" was refused.`);
+    if (typeof value !== 'string' || value.length > 2_000) {
+      throw new Error(`Skill input "${name}" must be text of at most 2,000 characters.`);
+    }
+    if (looksLikeCredential(value)) throw new Error(`Skill input "${name}" resembles credential material and was refused.`);
+    normalized[name] = value;
+  }
+  for (const [name, definition] of declared) {
+    if (definition.required && (!normalized[name] || normalized[name]?.trim().length === 0)) {
+      throw new Error(`Required skill input "${name}" was not provided.`);
+    }
+  }
+  return normalized;
 }
 
 function looksLikeCredential(value: string): boolean {

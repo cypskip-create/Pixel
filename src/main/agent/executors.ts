@@ -1075,6 +1075,7 @@ export class ToolExecutors {
         action: result.action,
         observedState: result.observedState,
         verified: true,
+        ...(result.providerErrorRecovered ? { providerErrorRecovered: true } : {}),
         coordinateSpace: 'electron_dip',
       },
       verification: {

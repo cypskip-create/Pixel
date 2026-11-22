@@ -1,67 +1,83 @@
-// Disposable harmless desktop fixture for scripts/test-native-uia-e2e.mjs.
+// Disposable WPF fixture for scripts/test-native-uia-e2e.mjs.
 // It has no network, file, shell, or external side effects.
-using System;
-using System.Drawing;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
 
 internal static class UiAutomationFixture
 {
-    [STAThread]
+    [System.STAThread]
     private static void Main()
     {
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-
-        var form = new Form
+        var window = new Window
         {
-            Text = "Pixel UIA Harmless Fixture",
-            Name = "PixelUiaFixture",
-            StartPosition = FormStartPosition.CenterScreen,
-            ClientSize = new Size(520, 240),
-            MinimizeBox = false,
-            MaximizeBox = false,
+            Title = "Pixel UIA Harmless Fixture",
+            Width = 560,
+            Height = 300,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
         };
-        var editorLabel = new Label { Text = "Harmless test text:", AutoSize = true, Location = new Point(24, 24) };
+        AutomationProperties.SetAutomationId(window, "PixelUiaFixture");
+
+        var panel = new StackPanel
+        {
+            Margin = new Thickness(24),
+            Orientation = Orientation.Vertical,
+        };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Harmless test text:",
+            Margin = new Thickness(0, 0, 0, 6),
+        });
+
         var editor = new TextBox
         {
             Name = "PixelTestEditor",
-            AccessibleName = "Pixel test editor",
-            Location = new Point(24, 50),
-            Size = new Size(460, 28),
-            TabIndex = 0,
+            Height = 30,
+            Margin = new Thickness(0, 0, 0, 12),
         };
+        AutomationProperties.SetAutomationId(editor, "PixelTestEditor");
+        AutomationProperties.SetName(editor, "Pixel test editor");
+
         var toggle = new CheckBox
         {
             Name = "PixelHarmlessSwitch",
-            AccessibleName = "Pixel harmless switch",
-            Text = "Harmless test switch",
-            AutoSize = true,
-            Location = new Point(24, 94),
-            TabIndex = 1,
+            Content = "Harmless test switch",
+            Margin = new Thickness(0, 0, 0, 12),
         };
-        var result = new Label
-        {
-            Name = "PixelActionResult",
-            AccessibleName = "Pixel harmless action: pending",
-            Text = "Pixel harmless action: pending",
-            AutoSize = true,
-            Location = new Point(24, 166),
-        };
+        AutomationProperties.SetAutomationId(toggle, "PixelHarmlessSwitch");
+        AutomationProperties.SetName(toggle, "Pixel harmless switch");
+
         var action = new Button
         {
             Name = "PixelHarmlessAction",
-            AccessibleName = "Run harmless UIA action",
-            Text = "Run harmless UIA action",
-            Location = new Point(24, 126),
-            Size = new Size(200, 30),
-            TabIndex = 2,
+            Content = "Run harmless UIA action",
+            Width = 210,
+            Height = 32,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 12),
         };
+        AutomationProperties.SetAutomationId(action, "PixelHarmlessAction");
+        AutomationProperties.SetName(action, "Run harmless UIA action");
+
+        var result = new TextBlock
+        {
+            Name = "PixelActionResult",
+            Text = "Pixel harmless action: pending",
+        };
+        AutomationProperties.SetAutomationId(result, "PixelActionResult");
+        AutomationProperties.SetName(result, "Pixel harmless action: pending");
         action.Click += (_, __) =>
         {
-            result.AccessibleName = "Pixel harmless action: completed";
             result.Text = "Pixel harmless action: completed";
+            AutomationProperties.SetName(result, "Pixel harmless action: completed");
         };
-        form.Controls.AddRange(new Control[] { editorLabel, editor, toggle, action, result });
-        Application.Run(form);
+
+        panel.Children.Add(editor);
+        panel.Children.Add(toggle);
+        panel.Children.Add(action);
+        panel.Children.Add(result);
+        window.Content = panel;
+        new Application().Run(window);
     }
 }

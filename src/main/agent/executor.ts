@@ -46,7 +46,10 @@ import { describeScope, sessionGrantEligibility, standingGrantEligibility } from
 import { isSupportedSkillExpectation } from '../skills/plan';
 
 /** Hard ceiling on model turns per request. */
-export const MAX_STEPS = 8;
+// UI automation often needs several fresh observations between approved
+// mutations. Keep a bounded loop, while leaving room for the verified
+// observe → act → verify sequence to finish in one request.
+export const MAX_STEPS = 12;
 
 /** Wall clock ceiling for a whole request, including tool time. */
 export const TURN_TIMEOUT_MS = 5 * 60_000;

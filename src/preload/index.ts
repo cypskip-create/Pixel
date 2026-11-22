@@ -242,7 +242,7 @@ const bridge: CypsBridge = {
 
   routines: {
     list: () => ipcRenderer.invoke(CH.routinesList) as Promise<RoutineRecord[]>,
-    create: (input: { skillId: string; name: string; localTime: string; timezone: string }) =>
+    create: (input: { skillId: string; name: string; localTime: string; timezone: string; inputValues: Record<string, string> }) =>
       ipcRenderer.invoke(CH.routinesCreate, input) as Promise<RoutineRecord>,
     setEnabled: (routineId: string, enabled: boolean) =>
       ipcRenderer.invoke(CH.routinesSetEnabled, routineId, enabled) as Promise<boolean>,

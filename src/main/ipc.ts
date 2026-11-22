@@ -57,7 +57,7 @@ import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
-import { buildRoutineToolPlan, buildSkillToolPlan } from './skills/plan';
+import { buildRoutineToolPlan, buildSkillToolPlan, normalizeSkillInputValues } from './skills/plan';
 import { ToolExecutors } from './agent/executors';
 import { PermissionGrantStore } from './agent/permissionStore';
 import { BrowserSession, validateBrowserUploadFile } from './agent/browser';
@@ -758,14 +758,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       signal.addEventListener('abort', abortAgent, { once: true });
       try {
         const current = settings.get();
-        if (skill.inputs.length > 0 || skill.steps.some((step) =>
+        if (skill.steps.some((step) =>
           step.kind !== 'tool' || step.action !== step.locator ||
           (step.action === 'request_human_takeover'))) {
-          const failure = 'This skill needs interactive inputs or contains a step that is not supported by deterministic replay.';
+          const failure = 'This skill contains a step that is not supported by deterministic replay.';
           skillStore.finishRun(skillRunId, { status: 'failed', stepCount: 0, summary: failure });
           return { status: 'failed', failure };
         }
-        const toolPlan = buildRoutineToolPlan(skill, requestId, toolRegistry);
+        const toolPlan = buildRoutineToolPlan(skill, requestId, toolRegistry, routine.inputValues);
         const result = await agent.run({
           requestId,
           request: {
@@ -784,6 +784,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
           allowedTools: [...skill.requiredTools, 'request_human_takeover'],
           requireInitialObservation: true,
           toolPlan,
+          redactValues: Object.values(routine.inputValues),
         });
         const status = result.task.status === 'completed' ? 'completed'
           : result.task.status === 'cancelled' || signal.aborted ? 'cancelled'
@@ -904,15 +905,16 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.routinesList, (): RoutineRecord[] =>
     routineStore.list(projectId()) as RoutineRecord[],
   );
-  registerHandler(CHANNELS.routinesCreate, (_event, input: { skillId: string; name: string; localTime: string; timezone: string }): RoutineRecord => {
+  registerHandler(CHANNELS.routinesCreate, (_event, input: { skillId: string; name: string; localTime: string; timezone: string; inputValues?: unknown }): RoutineRecord => {
     if (!input || typeof input !== 'object' || typeof input.skillId !== 'string' ||
         typeof input.name !== 'string' || typeof input.localTime !== 'string' || typeof input.timezone !== 'string') {
       throw new Error('Routine settings are required.');
     }
     const skill = skillStore.getActive(input.skillId);
     if (!skill || skill.projectId !== projectId()) throw new Error('Choose an active skill in the current project.');
-    buildRoutineToolPlan(skill, 'routine-validation', toolRegistry);
-    return routineStore.create({ ...input, projectId: projectId() }) as RoutineRecord;
+    const inputValues = normalizeSkillInputValues(skill.inputs, input.inputValues ?? {});
+    buildRoutineToolPlan(skill, 'routine-validation', toolRegistry, inputValues);
+    return routineStore.toSummary(routineStore.create({ ...input, inputValues, projectId: projectId() })) as RoutineRecord;
   });
   registerHandler(CHANNELS.routinesSetEnabled, (_event, routineId: string, enabled: boolean): boolean => {
     if (typeof enabled !== 'boolean') return false;

@@ -191,4 +191,16 @@ describe('Pixel plugin foundation', () => {
     expect(broker.revokeForTool('github_repo_summary')).toBeGreaterThan(0);
     expect(registry.evaluate('github_repo_summary', 'agent', args).allowed).toBe(false);
   });
+
+  it('records a real adapter error as plugin health and never reports a false success', async () => {
+    const onPluginHealth = vi.fn();
+    const githubRepository = vi.fn(async () => { throw new Error('getaddrinfo ENOTFOUND api.github.com'); });
+    const result = await new ToolExecutors({ githubRepository, onPluginHealth }).run('github_repo_summary', {
+      owner: 'octocat', repository: 'Hello-World',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain('ENOTFOUND api.github.com');
+    expect(onPluginHealth).toHaveBeenCalledWith('pixel.github-public', 'getaddrinfo ENOTFOUND api.github.com');
+  });
 });

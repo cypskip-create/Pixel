@@ -51,7 +51,7 @@ describe('deterministic routine tool plans', () => {
     expect(() => buildRoutineToolPlan(activeSkill({ steps: [
       { ordinal: 0, kind: 'tool', locator: 'browser_navigate', action: 'browser_navigate', params: {}, expectation: {}, approvalRequired: true },
     ] }), 'r', registry)).toThrow(/invalid arguments/);
-    expect(() => buildRoutineToolPlan(activeSkill({ inputs: [{ name: 'url', description: 'Destination URL', required: true }] }), 'r', registry)).toThrow(/interactive inputs/);
+    expect(() => buildRoutineToolPlan(activeSkill({ inputs: [{ name: 'url', description: 'Destination URL', required: true }] }), 'r', registry)).toThrow(/Required skill input/);
     expect(() => buildRoutineToolPlan(activeSkill({ steps: [
       { ordinal: 0, kind: 'browser', locator: '#submit', action: 'browser_click', params: { selector: '#submit' }, expectation: {}, approvalRequired: true },
     ] }), 'r', registry)).toThrow(/tool steps/);
@@ -63,9 +63,13 @@ describe('deterministic routine tool plans', () => {
       steps: [{ ordinal: 0, kind: 'tool', locator: 'browser_navigate', action: 'browser_navigate', params: { url: '${input.destination}' }, expectation: { urlPrefix: 'https://example.test/' }, approvalRequired: true }],
       requiredTools: ['browser_navigate'],
     });
-    expect(() => buildRoutineToolPlan(skill, 'run', registry)).toThrow(/interactive inputs/);
+    expect(() => buildRoutineToolPlan(skill, 'run', registry)).toThrow(/Required skill input/);
     expect(() => buildSkillToolPlan(skill, 'run', registry, { destination: 'sk-abcdefghijklmnopqrstuvwxyz' })).toThrow(/credential material/);
     expect(buildSkillToolPlan(skill, 'run', registry, { destination: 'https://example.test/private' })[0]?.argumentsJson)
       .toBe('{"url":"https://example.test/private"}');
+    expect(buildRoutineToolPlan(skill, 'routine', registry, { destination: 'https://example.test/daily' })[0]?.argumentsJson)
+      .toBe('{"url":"https://example.test/daily"}');
+    expect(() => buildRoutineToolPlan(skill, 'routine', registry, { destination: 'Bearer abcdefghijklmnop' }))
+      .toThrow(/credential material/);
   });
 });

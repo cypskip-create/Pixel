@@ -51,6 +51,7 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
   const [localTime, setLocalTime] = useState('09:00');
   const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [selectedSkillId, setSelectedSkillId] = useState('');
+  const [routineInputValues, setRoutineInputValues] = useState<Record<string, Record<string, string>>>({});
   const [history, setHistory] = useState<Record<string, RoutineRunRecord[]>>({});
   const [retryConfirmation, setRetryConfirmation] = useState<string | null>(null);
   const [runSkillId, setRunSkillId] = useState<string | null>(null);
@@ -67,17 +68,24 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
     ]);
     setSkills(nextSkills);
     setRoutines(nextRoutines);
-    setSelectedSkillId((current) => current || nextSkills.find((skill) => skill.status === 'active' && skill.inputs.length === 0)?.id || '');
+    setSelectedSkillId((current) => current || nextSkills.find((skill) => skill.status === 'active')?.id || '');
   }, [bridge]);
 
   useEffect(() => {
     void refresh().catch((cause: unknown) => setError(messageOf(cause)));
   }, [refresh]);
 
-  const schedulableSkills = useMemo(
-    () => skills.filter((skill) => skill.status === 'active' && skill.inputs.length === 0),
-    [skills],
+  const schedulableSkills = useMemo(() => skills.filter((skill) => skill.status === 'active'), [skills]);
+  const selectedRoutineSkill = useMemo(
+    () => schedulableSkills.find((skill) => skill.id === selectedSkillId),
+    [schedulableSkills, selectedSkillId],
   );
+  const selectedRoutineInputs = useMemo(
+    () => routineInputValues[selectedSkillId] ?? {},
+    [routineInputValues, selectedSkillId],
+  );
+  const routineInputsComplete = selectedRoutineSkill?.inputs.every((input) =>
+    !input.required || (selectedRoutineInputs[input.name]?.trim().length ?? 0) > 0) ?? false;
 
   const createDraft = useCallback(async () => {
     if (bridge.kind !== 'ready') return;
@@ -178,14 +186,16 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
         name: routineName,
         localTime,
         timezone,
+        inputValues: selectedRoutineInputs,
       });
       setRoutines((current) => [...current, created].sort((a, b) => a.localTime.localeCompare(b.localTime)));
+      setRoutineInputValues((current) => { const next = { ...current }; delete next[selectedSkillId]; return next; });
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
       setBusy(false);
     }
-  }, [bridge, localTime, routineName, selectedSkillId, timezone]);
+  }, [bridge, localTime, routineName, selectedRoutineInputs, selectedSkillId, timezone]);
 
   const toggleRoutine = useCallback(async (routine: RoutineRecord) => {
     if (bridge.kind !== 'ready') return;
@@ -301,12 +311,34 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
           <option value="">Choose a reviewed skill</option>
           {schedulableSkills.map((skill) => <option key={skill.id} value={skill.id}>{skill.name}</option>)}
         </select>
+        {selectedRoutineSkill?.inputs.length ? (
+          <div className="mb-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
+            <p className="mb-1 text-[9px] text-[var(--color-ink-dim)]">Values are saved locally for this routine and redacted from run history. Credential-like values are refused.</p>
+            {selectedRoutineSkill.inputs.map((input) => (
+              <label key={input.name} className="mb-1 block text-[9px] text-[var(--color-ink-soft)]">
+                {input.description} · {input.name}{input.required ? ' · required' : ' · optional'}
+                <input
+                  aria-label={`Routine input ${input.name}`}
+                  autoComplete="off"
+                  maxLength={2_000}
+                  required={input.required}
+                  value={selectedRoutineInputs[input.name] ?? ''}
+                  onChange={(event) => setRoutineInputValues((current) => ({
+                    ...current,
+                    [selectedSkillId]: { ...current[selectedSkillId], [input.name]: event.target.value },
+                  }))}
+                  className="no-drag mt-0.5 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-app-bg)] px-1.5 py-1 text-[10px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </label>
+            ))}
+          </div>
+        ) : null}
         <div className="grid grid-cols-2 gap-1">
           <input aria-label="Routine name" value={routineName} onChange={(event) => setRoutineName(event.target.value)} className="no-drag min-w-0 rounded-lg border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-[var(--color-ink-soft)]" />
           <input aria-label="Daily run time" type="time" value={localTime} onChange={(event) => setLocalTime(event.target.value)} className="no-drag min-w-0 rounded-lg border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-[var(--color-ink-soft)]" />
         </div>
         <input aria-label="IANA timezone" value={timezone} onChange={(event) => setTimezone(event.target.value)} className="no-drag mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-[var(--color-ink-soft)]" />
-        <button disabled={busy || !selectedSkillId} type="button" onClick={() => void createRoutine()} className="mt-1 rounded-lg border border-neutral-300/25 bg-neutral-300/10 px-2 py-1 text-[10px] font-medium text-neutral-100 disabled:opacity-50">Schedule daily</button>
+        <button disabled={busy || !selectedSkillId || !routineInputsComplete} type="button" onClick={() => void createRoutine()} className="mt-1 rounded-lg border border-neutral-300/25 bg-neutral-300/10 px-2 py-1 text-[10px] font-medium text-neutral-100 disabled:opacity-50">Schedule daily</button>
       </section>
 
       <section className="mb-1 rounded-xl border border-[var(--color-border)] bg-white/4 p-2">
@@ -320,6 +352,7 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
             </div>
             <div className="mt-0.5 flex items-center gap-2">
               <span className="text-[9px] text-[var(--color-ink-dim)]">{routine.enabled ? 'Active while Pixel is open' : 'Paused'}</span>
+              {routine.inputNames.length ? <span className="truncate text-[9px] text-[var(--color-ink-dim)]">Saved inputs: {routine.inputNames.join(', ')}</span> : null}
               <button type="button" onClick={() => void loadHistory(routine)} className="text-[9px] text-neutral-200/80 hover:text-neutral-100">Refresh history</button>
               {history[routine.id]?.some((run) => run.status === 'running') ? <button type="button" onClick={() => void cancelRoutine(routine)} className="text-[9px] text-neutral-200">Stop current run</button> : null}
             </div>
