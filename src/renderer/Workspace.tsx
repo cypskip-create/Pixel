@@ -19,6 +19,7 @@ import { SettingsPanel, type SettingsPage } from '@/components/SettingsPanel';
 import type { PluginLifecycleAction, PluginProjectAvailability, PluginSettingChange } from '@/components/WorkspacePluginManager';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
+import { AgentActivityBar } from '@/components/AgentActivityBar';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
@@ -596,6 +597,13 @@ export function Workspace(): React.JSX.Element {
               {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
             </div>
             <WorkspacePixPlay state={assistantState} reducedMotion={settings.companion.reducedMotion} />
+            <AgentActivityBar
+              activeTask={activeTask}
+              streaming={chat.streaming}
+              hasStreamingText={chat.content.length > 0}
+              hasPermissionRequest={permission !== null}
+              onOpenTaskDetails={() => setContextOpen(true)}
+            />
             <WorkspaceComposer
               draft={draft}
               onDraftChange={setDraft}
@@ -631,6 +639,45 @@ export function Workspace(): React.JSX.Element {
           onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue this task.')); }}
         /> : null}
       </div>
+
+      <footer className="workspace-status-strip" aria-label="Workspace runtime status" data-status-strip>
+        <div className="workspace-status-group">
+          <span className="workspace-status-item">
+            <span
+              className={`workspace-status-dot${stopped ? ' is-stopped' : chat.streaming || activeTask ? ' is-busy' : ''}`}
+              aria-hidden="true"
+            />
+            <strong>{settings.agent?.runtimeEngine === 'python' ? 'Python v2' : 'TypeScript'}</strong>
+          </span>
+          <span className="workspace-status-sep" aria-hidden="true">·</span>
+          <span className="workspace-status-item">{getModeDescriptor(activeMode).label}</span>
+          {currentProject?.name && currentProject.name !== 'Default project' ? (
+            <>
+              <span className="workspace-status-sep" aria-hidden="true">·</span>
+              <span className="workspace-status-item truncate">{currentProject.name}</span>
+            </>
+          ) : null}
+        </div>
+        <div className="workspace-status-group">
+          {tasks.filter(isTaskActive).length > 0 ? (
+            <>
+              <span className="workspace-status-item">
+                {tasks.filter(isTaskActive).length} active {tasks.filter(isTaskActive).length === 1 ? 'task' : 'tasks'}
+              </span>
+              <span className="workspace-status-sep" aria-hidden="true">·</span>
+            </>
+          ) : null}
+          {plugins.filter((item) => item.enabled).length > 0 ? (
+            <>
+              <span className="workspace-status-item">
+                {plugins.filter((item) => item.enabled).length} {plugins.filter((item) => item.enabled).length === 1 ? 'plugin' : 'plugins'}
+              </span>
+              <span className="workspace-status-sep" aria-hidden="true">·</span>
+            </>
+          ) : null}
+          <span className="workspace-status-item">{settings.provider.primaryModel || 'Model unset'}</span>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -2,6 +2,14 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
+## Hermes-Level Desktop Experience Directive (2026-11-23 — Local Uncommitted)
+
+- **Permanent Design Spec:** Created `docs/design/PIXEL_DESKTOP_EXPERIENCE.md` defining Pixel's surface materiality layers, control-height scale (`28px`/`34px`/`40px`), Segoe UI Variable typography, tactile micro-interactions (`90ms` press / `150ms` UI, reduced-motion compliant), chat composer presence, honest live activity taxonomy, and per-phase user-visible checklist while preserving Pixel's matte charcoal + `#4299F5` blue identity, Pix mascot, and ASCII sharks.
+- **Materiality & Motion Tokens (`src/renderer/index.css`, `src/renderer/workspace-design-system.css`):** Added `--color-danger` alias (dark + light), layered downward-weighted elevation tokens (`--shadow-surface`, `--shadow-composer`, `--shadow-floating`, `--shadow-popover`), subtle top-edge inner highlight (`--highlight-top-edge`), standardized control-height tokens, and `--ease-tactile` / `--duration-press` / `--duration-ui` transitions (collapsed to `0ms` under `.reduce-motion` and `prefers-reduced-motion: reduce`). Upgraded composer presence, sidebar row weight/press feedback, and floating popover elevation.
+- **Visible Live Agent Activity & Runtime Status Strip:** Created `src/renderer/components/AgentActivityBar.tsx` (compact inline expandable pill mapping real `TaskRecord`/`TaskStep` tools and streaming state to honest labels like *Searching memory*, *Reading files*, *Editing files*, *Running Git*, *Calling GitHub*, *Checking Google Calendar*, *Calling MCP tool*, *Loading playbook*, *Awaiting approval* — zero fabricated state) and wired it with a quiet 26px native-desktop status strip (`Python v2` / `TypeScript`, active mode, active project, active task/plugin counts, and active model) in `src/renderer/Workspace.tsx`.
+- **Verification:** `npm run typecheck` PASS; `npm run build` PASS; `tests/agent-activity-bar.test.tsx` (5/5) & `tests/monochrome-theme.test.ts` (7/7) PASS; full `npm test` **1,022 passed, 27 skipped, 0 failed** (82 files passed, 1 skipped); Python `unittest` **26/26 PASS**.
+- **Unverified / Open:** Live interactive Windows Electron GUI visual acceptance remains open because Electron exits `0x80000003` before entry in this environment.
+
 ## Phase D — Plugin Architecture, MCP Client & Google Calendar Integration (2026-11-23 — Local Uncommitted)
 
 - **D0 CI Baseline:** Phase C Windows CI run `45195758066` (`6b73bbd`) passed 100% green on `windows-latest`.

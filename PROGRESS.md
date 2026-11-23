@@ -2,6 +2,13 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
+## Hermes-Level Desktop Experience Directive (Local Uncommitted)
+
+- Authored permanent desktop-experience specification in `docs/design/PIXEL_DESKTOP_EXPERIENCE.md`.
+- Upgraded `src/renderer/index.css` and `src/renderer/workspace-design-system.css` with layered elevation (`--shadow-surface`, `--shadow-composer`, `--shadow-floating`, `--shadow-popover`), top-edge micro-highlights (`--highlight-top-edge`), control-height tokens (`--control-h-sm/md/lg`), `--color-danger` alias, and reduced-motion-compliant tactile transitions (`90ms` press / `150ms` UI).
+- Added `src/renderer/components/AgentActivityBar.tsx` (strictly real-state inline expandable activity pill above the composer) and a quiet 26px native-desktop runtime status strip in `src/renderer/Workspace.tsx`.
+- Verified `npm run typecheck` PASS, `npm run build` PASS, `tests/monochrome-theme.test.ts` 7/7 PASS, `tests/agent-activity-bar.test.tsx` 5/5 PASS, full `npm test` **1,022 passed, 27 skipped, 0 failed**, and Python `unittest` **26/26 PASS**. Live Electron GUI visual inspection remains blocked (`0x80000003`).
+
 ## Phase D — Plugin Architecture, MCP Client & Google Calendar Integration (Local Uncommitted)
 
 - Confirmed Phase C Windows CI run `45195758066` (`6b73bbd`) passed 100% green on `windows-latest`.

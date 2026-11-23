@@ -36,6 +36,7 @@
   --color-accent-foreground: #09131F;
   --color-warning: #D5A353;
   --color-destructive: #E06C65;
+  --color-danger: var(--color-destructive);
   --color-brand-foreground: var(--color-icon);
   --color-focus: var(--color-accent);
   --color-disabled: #777E82;
@@ -92,6 +93,8 @@
   --color-disabled: #888888;
   --color-approval: #9A6B1E;
   --color-error: #B8423C;
+  --color-destructive: #B8423C;
+  --color-danger: var(--color-destructive);
   --color-success: #2F7D52;
   --color-user-message: #E8EEF6;
   --color-user-message-ink: #16181D;
@@ -123,10 +126,28 @@
     --cyps-duration-fast: 120ms;
     --cyps-duration: 220ms;
     --cyps-duration-slow: 460ms;
+
+    /* Hermes-inspired desktop materiality, control-height, and tactile motion tokens */
+    --control-h-sm: 28px;
+    --control-h-md: 34px;
+    --control-h-lg: 40px;
+    --ease-tactile: cubic-bezier(0.2, 0, 0, 1);
+    --duration-press: 90ms;
+    --duration-ui: 150ms;
+    --highlight-top-edge: inset 0 1px 0 rgb(255 255 255 / 0.045);
+    --shadow-surface: 0 1px 2px rgb(0 0 0 / 0.28), var(--highlight-top-edge);
+    --shadow-composer: 0 1px 2px rgb(0 0 0 / 0.34), 0 8px 24px -6px rgb(0 0 0 / 0.45), var(--highlight-top-edge);
+    --shadow-floating: 0 2px 6px rgb(0 0 0 / 0.32), 0 12px 28px -6px rgb(0 0 0 / 0.48), var(--highlight-top-edge);
+    --shadow-popover: 0 4px 10px rgb(0 0 0 / 0.36), 0 16px 36px -8px rgb(0 0 0 / 0.54), var(--highlight-top-edge);
   }
 
   .theme-light {
     color-scheme: light;
+    --highlight-top-edge: inset 0 1px 0 rgb(255 255 255 / 0.72);
+    --shadow-surface: 0 1px 2px rgb(0 0 0 / 0.06), var(--highlight-top-edge);
+    --shadow-composer: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 20px -6px rgb(0 0 0 / 0.1), var(--highlight-top-edge);
+    --shadow-floating: 0 2px 6px rgb(0 0 0 / 0.08), 0 12px 26px -6px rgb(0 0 0 / 0.12), var(--highlight-top-edge);
+    --shadow-popover: 0 4px 10px rgb(0 0 0 / 0.1), 0 16px 32px -8px rgb(0 0 0 / 0.14), var(--highlight-top-edge);
   }
 
   /* Reduced motion: kill durations AND, where relevant, iterations. */
@@ -134,6 +155,15 @@
     --cyps-duration-fast: 0ms;
     --cyps-duration: 0ms;
     --cyps-duration-slow: 0ms;
+    --duration-press: 0ms;
+    --duration-ui: 0ms;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --duration-press: 0ms;
+      --duration-ui: 0ms;
+    }
   }
 
   html,
