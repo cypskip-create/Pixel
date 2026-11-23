@@ -3,13 +3,17 @@ import {
   Maximize2, Minimize2, Minus, ShieldAlert, X,
 } from 'lucide-react';
 import type {
-  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryOpenResult, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
-  PermissionRequest, PluginView, ProjectView, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
+  AssistantState, AuditEntry, ConversationRecordView, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryOpenResult, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
+  PermissionRequest, PluginView, ProjectView, ProviderId, ReasoningEffort, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
 } from '@shared/types';
-import { getModeDescriptor } from '@shared/types';
+import { getModeDescriptor, getProviderDescriptor, PROVIDER_CATALOG } from '@shared/types';
 import { deriveAssistantState } from '@shared/companion-state';
 import { WorkspaceConversationHeader } from '@/components/WorkspaceConversationHeader';
 import { WorkspaceComposer } from '@/components/WorkspaceComposer';
+import { WorkspaceTabBar } from '@/components/WorkspaceTabBar';
+import { WorkspaceRightRail } from '@/components/WorkspaceRightRail';
+import { CommandPalette, type PaletteCommand } from '@/components/CommandPalette';
+import { ModelPickerPopover } from '@/components/ModelPickerPopover';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
@@ -27,6 +31,25 @@ import { useVoicePlaybackState } from '@/hooks/useVoicePlaybackState';
 import { safeSubscribe } from '@/lib/bridge';
 import { taskDisplayState, selectActiveTask, isTaskActive } from '@/lib/task-presentation';
 import { MicrophoneCapture } from '@/lib/audioCapture';
+import {
+  closeSessionTab,
+  createNewTab,
+  cycleSessionTab,
+  loadPersistedTabsState,
+  openConversationInTabs,
+  reopenLastClosedTab,
+  savePersistedTabsState,
+  updateTabById,
+  type WorkspaceTabsState,
+} from '@/lib/workspaceTabs';
+import {
+  clampRightRailWidth,
+  clampSplitRatio,
+  loadPersistedPaneLayout,
+  savePersistedPaneLayout,
+  type RightRailTab,
+  type WorkspacePaneLayout,
+} from '@/lib/workspaceLayout';
 
 const WorkspaceProjects = lazy(() => import('@/components/WorkspaceProjects').then((module) => ({ default: module.WorkspaceProjects })));
 const WorkspaceLibrary = lazy(() => import('@/components/WorkspaceLibrary').then((module) => ({ default: module.WorkspaceLibrary })));
@@ -67,6 +90,11 @@ export function Workspace(): React.JSX.Element {
   const speaking = useVoicePlaybackState();
   const [pushToTalkState, setPushToTalkState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'submitting'>('idle');
   const [recentOutcome, setRecentOutcome] = useState<TaskRecord | null>(null);
+  const [tabsState, setTabsState] = useState<WorkspaceTabsState>(() => loadPersistedTabsState(null));
+  const [paneLayout, setPaneLayout] = useState<WorkspacePaneLayout>(() => loadPersistedPaneLayout());
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [secondaryConversation, setSecondaryConversation] = useState<ConversationRecordView | null>(null);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottom = useRef(true);
   const knownTasks = useRef(new Map<string, TaskRecord>());
@@ -102,9 +130,119 @@ export function Workspace(): React.JSX.Element {
   }, [view]);
 
   useEffect(() => {
+    savePersistedTabsState(tabsState);
+  }, [tabsState]);
+
+  useEffect(() => {
+    savePersistedPaneLayout(paneLayout);
+  }, [paneLayout]);
+
+  // Keep active tab synced with active conversationId, title, and busy state.
+  useEffect(() => {
+    const convTitle = history.find((item) => item.id === chat.conversationId)?.title;
+    setTabsState((prev) =>
+      updateTabById(prev, prev.activeTabId, (tab) => ({
+        ...tab,
+        conversationId: chat.conversationId ?? tab.conversationId,
+        title: convTitle || tab.title || 'New chat',
+        busy: chat.streaming,
+        model: settings.provider.primaryModel,
+        provider: settings.provider.provider,
+      })),
+    );
+  }, [chat.conversationId, chat.streaming, history, settings.provider.primaryModel, settings.provider.provider]);
+
+  // Load secondary pane conversation when split view is active.
+  useEffect(() => {
+    if (!paneLayout.splitEnabled || !paneLayout.secondaryConversationId || bridge.kind !== 'ready') {
+      setSecondaryConversation(null);
+      return;
+    }
+    let cancelled = false;
+    void bridge.bridge.history
+      .open(paneLayout.secondaryConversationId)
+      .then((rec: ConversationRecordView | null) => {
+        if (!cancelled) setSecondaryConversation(rec);
+      })
+      .catch(() => {
+        if (!cancelled) setSecondaryConversation(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, paneLayout.secondaryConversationId, paneLayout.splitEnabled]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+      if (mod && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        setSidebarCollapsed((v) => !v);
+        return;
+      }
+      if (mod && event.key === '\\') {
+        event.preventDefault();
+        setPaneLayout((prev) => ({
+          ...prev,
+          splitEnabled: !prev.splitEnabled,
+          secondaryConversationId:
+            prev.secondaryConversationId ?? history.find((h) => h.id !== chat.conversationId)?.id ?? null,
+        }));
+        return;
+      }
+      if (mod && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        setPaneLayout((prev) => ({ ...prev, rightRailOpen: !prev.rightRailOpen }));
+        return;
+      }
+      if (mod && event.key === '`') {
+        event.preventDefault();
+        setPaneLayout((prev) => ({
+          ...prev,
+          rightRailOpen: prev.rightRailOpen && prev.rightRailTab === 'terminal' ? false : true,
+          rightRailTab: 'terminal',
+        }));
+        return;
+      }
+      if (mod && !event.shiftKey && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        setTabsState((prev) => {
+          const saved = updateTabById(prev, prev.activeTabId, (t) => ({
+            ...t,
+            draft,
+            scrollTop: scrollRef.current?.scrollTop ?? t.scrollTop,
+          }));
+          const created = createNewTab({
+            model: settings.provider.primaryModel,
+            provider: settings.provider.provider,
+          });
+          return { ...saved, tabs: [...saved.tabs, created], activeTabId: created.id };
+        });
+        setDraft('');
+        void chat.newConversation();
+        setView('chat');
+        return;
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        setTabsState((prev) => reopenLastClosedTab(prev));
+        return;
+      }
+      if (mod && event.key === 'Tab') {
+        event.preventDefault();
+        setTabsState((prev) => cycleSessionTab(prev, event.shiftKey ? -1 : 1));
+        return;
+      }
       if (event.key !== 'Escape') return;
-      if (pendingMode) {
+      if (paletteOpen) {
+        event.preventDefault();
+        setPaletteOpen(false);
+      } else if (pendingMode) {
         event.preventDefault();
         setPendingMode(null);
       } else if (contextOpen) {
@@ -114,7 +252,7 @@ export function Workspace(): React.JSX.Element {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [contextOpen, pendingMode]);
+  }, [chat, contextOpen, draft, history, paletteOpen, pendingMode, settings.provider.primaryModel, settings.provider.provider]);
   const activeTask = useMemo(() => selectActiveTask(tasks), [tasks]);
   const title = chat.historyLoading ? 'Restoring conversation…' : history.find((item) => item.id === chat.conversationId)?.title ?? 'New conversation';
   const recentTaskDisplay = recentOutcome ? taskDisplayState(recentOutcome) : null;
@@ -419,8 +557,157 @@ export function Workspace(): React.JSX.Element {
 
   const openConversation = useCallback(async (id: string) => {
     shouldStickToBottom.current = true;
+    const convTitle = history.find((item) => item.id === id)?.title ?? 'Conversation';
+    setTabsState((prev) => {
+      const saved = updateTabById(prev, prev.activeTabId, (t) => ({
+        ...t,
+        draft,
+        scrollTop: scrollRef.current?.scrollTop ?? t.scrollTop,
+      }));
+      return openConversationInTabs(saved, id, convTitle, {
+        model: settings.provider.primaryModel,
+        provider: settings.provider.provider,
+      });
+    });
     if (await chat.openConversation(id)) { setRecentOutcome(null); setContextOpen(false); setView('chat'); }
-  }, [chat.openConversation]);
+  }, [chat.openConversation, draft, history, settings.provider.primaryModel, settings.provider.provider]);
+
+  const selectSessionTab = useCallback(async (tabId: string) => {
+    const target = tabsState.tabs.find((t) => t.id === tabId);
+    if (!target || target.id === tabsState.activeTabId) return;
+    setTabsState((prev) => ({
+      ...updateTabById(prev, prev.activeTabId, (t) => ({
+        ...t,
+        draft,
+        scrollTop: scrollRef.current?.scrollTop ?? t.scrollTop,
+      })),
+      activeTabId: tabId,
+    }));
+    setDraft(target.draft);
+    chatScrollTop.current = target.scrollTop;
+    if (target.conversationId) {
+      await chat.openConversation(target.conversationId);
+    } else {
+      await chat.newConversation();
+    }
+    setView('chat');
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = target.scrollTop;
+    });
+  }, [chat, draft, tabsState.activeTabId, tabsState.tabs]);
+
+  const createSessionTab = useCallback(() => {
+    setTabsState((prev) => {
+      const saved = updateTabById(prev, prev.activeTabId, (t) => ({
+        ...t,
+        draft,
+        scrollTop: scrollRef.current?.scrollTop ?? t.scrollTop,
+      }));
+      const next = createNewTab({
+        model: settings.provider.primaryModel,
+        provider: settings.provider.provider,
+      });
+      return { ...saved, tabs: [...saved.tabs, next], activeTabId: next.id };
+    });
+    setDraft('');
+    void chat.newConversation();
+    setView('chat');
+  }, [chat, draft, settings.provider.primaryModel, settings.provider.provider]);
+
+  const closeTab = useCallback((tabId: string) => {
+    const nextState = closeSessionTab(tabsState, tabId);
+    setTabsState(nextState);
+    const nextActive = nextState.tabs.find((t) => t.id === nextState.activeTabId);
+    if (nextActive && tabId === tabsState.activeTabId) {
+      setDraft(nextActive.draft);
+      if (nextActive.conversationId) void chat.openConversation(nextActive.conversationId);
+      else void chat.newConversation();
+    }
+  }, [chat, tabsState]);
+
+  const toggleRightRail = useCallback((tab?: RightRailTab) => {
+    setPaneLayout((prev) => {
+      const nextOpen = tab ? (prev.rightRailOpen && prev.rightRailTab === tab ? false : true) : !prev.rightRailOpen;
+      const nextTab = tab ?? prev.rightRailTab;
+      if (nextOpen && (nextTab === 'files' || nextTab === 'preview')) {
+        void refreshLibrary();
+      }
+      return { ...prev, rightRailOpen: nextOpen, rightRailTab: nextTab };
+    });
+  }, []);
+
+  const toggleSplitPane = useCallback(() => {
+    setPaneLayout((prev) => ({
+      ...prev,
+      splitEnabled: !prev.splitEnabled,
+      secondaryConversationId:
+        prev.secondaryConversationId ?? history.find((h) => h.id !== chat.conversationId)?.id ?? null,
+    }));
+  }, [chat.conversationId, history]);
+
+  const startSplitResize = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const onMove = (moveEvent: MouseEvent): void => {
+      if (rect.width <= 0) return;
+      const ratio = (moveEvent.clientX - rect.left) / rect.width;
+      setPaneLayout((prev) => ({ ...prev, splitRatio: clampSplitRatio(ratio) }));
+    };
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
+  const startRailResize = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = paneLayout.rightRailWidth;
+    const onMove = (moveEvent: MouseEvent): void => {
+      const delta = startX - moveEvent.clientX;
+      setPaneLayout((prev) => ({ ...prev, rightRailWidth: clampRightRailWidth(startWidth + delta) }));
+    };
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [paneLayout.rightRailWidth]);
+
+  const runTerminalCommand = useCallback(async (command: string): Promise<string> => {
+    if (bridge.kind !== 'ready') return 'Pixel is not connected to its local services.';
+    setView('chat');
+    await chat.send({
+      text: `Run this project command through the authorized terminal tool and report its exact output:\n\`\`\`\n${command}\n\`\`\``,
+      images: [],
+      mode: activeMode,
+    });
+    return 'Dispatched through Pixel PermissionBroker. Review approval and streamed output in the active conversation.';
+  }, [bridge.kind, chat]);
+
+  const handleSelectModel = useCallback((provider: ProviderId, model: string) => {
+    const desc = getProviderDescriptor(provider);
+    void patch({
+      provider: {
+        provider,
+        primaryModel: model,
+        reasoningModel: desc.reasoningModel,
+      },
+    });
+  }, [patch]);
+
+  const handleSelectEffort = useCallback((effort: ReasoningEffort) => {
+    void patch({
+      provider: {
+        thinking: { enabled: effort !== 'none', effort },
+      },
+    });
+  }, [patch]);
 
   const renameConversation = useCallback(async (id: string, nextTitle: string): Promise<boolean> => {
     if (bridge.kind !== 'ready') return false;
@@ -495,9 +782,48 @@ export function Workspace(): React.JSX.Element {
   }, [bridge, refreshLibrary]);
 
   useEffect(() => {
-    if (view !== 'library' || bridge.kind !== 'ready') return;
+    if ((view !== 'library' && !(paneLayout.rightRailOpen && (paneLayout.rightRailTab === 'files' || paneLayout.rightRailTab === 'preview'))) || bridge.kind !== 'ready') return;
     void refreshLibrary();
-  }, [bridge, currentProject?.id, refreshLibrary, view]);
+  }, [bridge, currentProject?.id, paneLayout.rightRailOpen, paneLayout.rightRailTab, refreshLibrary, view]);
+
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const items: PaletteCommand[] = [
+      { id: 'new-tab', group: 'Conversations', label: 'New conversation tab', shortcut: 'Ctrl+T', onSelect: createSessionTab },
+      { id: 'toggle-split', group: 'Workspace', label: paneLayout.splitEnabled ? 'Close split pane' : 'Split workspace pane', shortcut: 'Ctrl+\\', onSelect: toggleSplitPane },
+      { id: 'toggle-files', group: 'Workspace', label: 'Toggle workspace file browser', shortcut: 'Ctrl+J', onSelect: () => toggleRightRail('files') },
+      { id: 'toggle-preview', group: 'Workspace', label: 'Open contextual preview pane', onSelect: () => toggleRightRail('preview') },
+      { id: 'toggle-terminal', group: 'Workspace', label: 'Toggle integrated terminal', shortcut: 'Ctrl+`', onSelect: () => toggleRightRail('terminal') },
+      { id: 'toggle-sidebar', group: 'Workspace', label: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar', shortcut: 'Ctrl+B', onSelect: () => setSidebarCollapsed((v) => !v) },
+      { id: 'nav-projects', group: 'Navigation', label: 'Open Projects', onSelect: () => openWorkspaceDestination('projects') },
+      { id: 'nav-tasks', group: 'Navigation', label: 'Open Running Tasks & Activity', onSelect: () => openWorkspaceDestination('tasks') },
+      { id: 'nav-board', group: 'Navigation', label: 'Open Pixel Board', onSelect: () => openWorkspaceDestination('board') },
+      { id: 'nav-library', group: 'Navigation', label: 'Open Document Library', onSelect: () => openWorkspaceDestination('library') },
+      { id: 'nav-notes', group: 'Navigation', label: 'Open Notes & Planning', onSelect: () => openWorkspaceDestination('notes') },
+      { id: 'nav-plugins', group: 'Navigation', label: 'Open Plugins & MCP', onSelect: () => openWorkspaceDestination('plugins') },
+      { id: 'nav-skills', group: 'Navigation', label: 'Open Skills & Routines', onSelect: () => openWorkspaceDestination('skills') },
+      { id: 'nav-memory', group: 'Navigation', label: 'Open Memory', onSelect: () => openWorkspaceDestination('memory') },
+      { id: 'nav-settings', group: 'Navigation', label: 'Open Settings', onSelect: () => openWorkspaceDestination('settings') },
+    ];
+    for (const conv of history.slice(0, 8)) {
+      items.push({
+        id: `conv:${conv.id}`,
+        group: 'Conversations',
+        label: conv.title || 'Untitled conversation',
+        subtitle: 'Open in tab',
+        onSelect: () => void openConversation(conv.id),
+      });
+    }
+    for (const p of PROVIDER_CATALOG) {
+      items.push({
+        id: `model:${p.id}:${p.defaultModel}`,
+        group: 'Models',
+        label: `Switch to ${p.defaultModel}`,
+        subtitle: p.label,
+        onSelect: () => handleSelectModel(p.id, p.defaultModel),
+      });
+    }
+    return items;
+  }, [createSessionTab, handleSelectModel, history, openConversation, openWorkspaceDestination, paneLayout.splitEnabled, sidebarCollapsed, toggleRightRail, toggleSplitPane]);
 
   const viewTitle: Record<WorkspaceView, string> = {
     chat: 'Workspace', projects: 'Projects', library: 'Library', tasks: 'Activity', notes: 'Notes & Planning',
@@ -577,7 +903,29 @@ export function Workspace(): React.JSX.Element {
           {pendingMode ? <div className="workspace-mode-confirm" role="alertdialog" aria-label="Confirm agent mode"><div><strong>Switch to {getModeDescriptor(pendingMode).label}?</strong><p>{getModeDescriptor(pendingMode).summary} Pixel will still ask before every consequential action.</p></div><button type="button" onClick={() => setPendingMode(null)}>Cancel</button><button type="button" onClick={() => { setMode(pendingMode); setPendingMode(null); }}>Switch mode</button></div> : null}
           {view !== 'chat' ? pendingApproval : null}
 
-          {view === 'chat' ? <section className="workspace-conversation">
+          {view === 'chat' ? <div className="workspace-chat-shell">
+            <WorkspaceTabBar
+              tabs={tabsState.tabs}
+              activeTabId={tabsState.activeTabId}
+              splitEnabled={paneLayout.splitEnabled}
+              rightRailOpen={paneLayout.rightRailOpen}
+              onSelectTab={(id) => void selectSessionTab(id)}
+              onNewTab={createSessionTab}
+              onCloseTab={closeTab}
+              onToggleSplit={toggleSplitPane}
+              onToggleRightRail={toggleRightRail}
+              onOpenCommandPalette={() => setPaletteOpen(true)}
+            />
+            <div className={`workspace-split-area ${paneLayout.splitEnabled ? 'is-split' : ''}`} ref={splitContainerRef}>
+            <section
+              className={`workspace-conversation ${paneLayout.activePane === 'primary' ? 'is-focused-pane' : ''}`}
+              style={paneLayout.splitEnabled ? { flex: `0 0 ${Math.round(paneLayout.splitRatio * 100)}%` } : undefined}
+              onMouseDown={() => {
+                if (paneLayout.activePane !== 'primary') {
+                  setPaneLayout((prev) => ({ ...prev, activePane: 'primary' }));
+                }
+              }}
+            >
             <AsciiSharkBackground
               mode={chat.messages.length === 0 && !chat.streaming ? 'empty' : 'active'}
               reducedMotion={settings.companion.reducedMotion}
@@ -643,7 +991,65 @@ export function Workspace(): React.JSX.Element {
               listening={listening}
               onNotice={setNotice}
             />
-          </section> : null}
+          </section>
+          {paneLayout.splitEnabled ? (
+            <>
+              <div
+                className="workspace-split-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize split panes"
+                onMouseDown={startSplitResize}
+                onDoubleClick={() => setPaneLayout((prev) => ({ ...prev, splitRatio: 0.54 }))}
+              />
+              <section
+                className={`workspace-secondary-pane ${paneLayout.activePane === 'secondary' ? 'is-focused-pane' : ''}`}
+                aria-label="Secondary conversation pane"
+                onMouseDown={() => setPaneLayout((prev) => ({ ...prev, activePane: 'secondary' }))}
+              >
+                <div className="workspace-secondary-header">
+                  <select
+                    aria-label="Secondary pane conversation"
+                    value={paneLayout.secondaryConversationId ?? ''}
+                    onChange={(e) => setPaneLayout((prev) => ({ ...prev, secondaryConversationId: e.target.value || null }))}
+                    className="workspace-secondary-select"
+                  >
+                    <option value="">Select conversation…</option>
+                    {history.map((item) => (
+                      <option key={item.id} value={item.id}>{item.title || 'Untitled'}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="workspace-rail-close"
+                    onClick={toggleSplitPane}
+                    aria-label="Close split pane"
+                  >
+                    <X size={13} aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="workspace-secondary-transcript selectable">
+                  {!secondaryConversation ? (
+                    <p className="workspace-rail-empty">Choose any conversation above to inspect it side-by-side.</p>
+                  ) : (
+                    secondaryConversation.messages.map((msg) => (
+                      <article key={msg.id} className={`workspace-message ${msg.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
+                        <div className="min-w-0 flex-1">
+                          <div className="workspace-message-meta">
+                            <span>{msg.role === 'user' ? 'You' : 'Pixel'}</span>
+                            <time>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                          </div>
+                          <MarkdownMessage text={msg.content || ''} />
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+            </>
+          ) : null}
+          </div>
+          </div> : null}
 
           {view === 'projects' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /></Suspense> : null}
           {view === 'library' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceLibrary documents={libraryDocuments} loading={libraryLoading} onRefresh={() => void refreshLibrary()} onIndexFolder={indexLibraryFolder} onRead={readLibraryDocument} onOpen={openLibraryDocument} onOpenFolder={openLibraryFolder} /></Suspense> : null}
@@ -652,6 +1058,37 @@ export function Workspace(): React.JSX.Element {
           {view === 'board' ? <Suspense fallback={<WorkspacePanelLoading />}><PixelBoard emergencyStopped={stopped} /></Suspense> : null}
           {view === 'settings' ? <div className="workspace-settings"><Suspense fallback={<WorkspacePanelLoading />}><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout initialPage={settingsInitialPage} tools={tools} plugins={plugins} onPluginChange={handlePluginChange} /></Suspense></div> : null}
         </main>
+
+        {paneLayout.rightRailOpen && view !== 'settings' ? (
+          <>
+            <div
+              className="workspace-split-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize right panel"
+              onMouseDown={startRailResize}
+              onDoubleClick={() => setPaneLayout((prev) => ({ ...prev, rightRailWidth: 360 }))}
+            />
+            <WorkspaceRightRail
+              activeTab={paneLayout.rightRailTab}
+              width={paneLayout.rightRailWidth}
+              projectName={currentProject?.name || 'Default project'}
+              documents={libraryDocuments}
+              documentsLoading={libraryLoading}
+              onSelectTab={(tab) => setPaneLayout((prev) => ({ ...prev, rightRailTab: tab }))}
+              onClose={() => setPaneLayout((prev) => ({ ...prev, rightRailOpen: false }))}
+              onRefreshDocuments={() => void refreshLibrary()}
+              onIndexFolder={() => void indexLibraryFolder()}
+              onReadDocument={(id) => readLibraryDocument(id, 0)}
+              onOpenExternal={async (id) => { await openLibraryDocument(id); }}
+              onRunTerminalCommand={runTerminalCommand}
+              onStopTerminal={chat.stop}
+              terminalBusy={chat.streaming}
+              tasks={tasks}
+              audit={audit}
+            />
+          </>
+        ) : null}
 
         {contextOpen ? <WorkspaceTaskDetails
           task={activeTask}
@@ -699,9 +1136,20 @@ export function Workspace(): React.JSX.Element {
               <span className="workspace-status-sep" aria-hidden="true">·</span>
             </>
           ) : null}
-          <span className="workspace-status-item">{settings.provider.primaryModel || 'Model unset'}</span>
+          <ModelPickerPopover
+            providerSettings={settings.provider}
+            hasApiKey={Boolean(hasApiKey)}
+            onSelectModel={handleSelectModel}
+            onSelectEffort={handleSelectEffort}
+          />
         </div>
       </footer>
+
+      <CommandPalette
+        open={paletteOpen}
+        commands={paletteCommands}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 }
