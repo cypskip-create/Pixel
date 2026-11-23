@@ -155,6 +155,13 @@ export const CHANNELS = {
   pluginsGitHubConnect: 'plugins:githubConnect',
   pluginsGitHubDisconnect: 'plugins:githubDisconnect',
 
+  proceduralSkillsList: 'skills:proceduralList',
+  proceduralSkillsCreateDraft: 'skills:proceduralCreateDraft',
+  proceduralSkillsActivate: 'skills:proceduralActivate',
+  proceduralSkillsDisable: 'skills:proceduralDisable',
+  proceduralSkillsSetPinned: 'skills:proceduralSetPinned',
+  proceduralSkillsDelete: 'skills:proceduralDelete',
+
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',
 

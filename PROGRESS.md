@@ -2,7 +2,14 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
-## Phase B — Git, Files, Rich Documents, GitHub Plugin & Secure Execution (Local Uncommitted)
+## Phase C — Memory, SQLite FTS5 Session Search & Procedural `SKILL.md` Playbooks (Local Uncommitted)
+
+- Investigated Phase B Windows CI run `45189965776`: failed at Step 9 (`Install NSIS for installer integration tests`, upstream Chocolatey/SourceForge mirror issue; did not reach tests).
+- Implemented SQLite Migration 14 (`session_messages` + `session_messages_fts` FTS5 triggers + `procedural_skills`), `SessionSearchIndex` + `session_search` tool (`src/main/history/sessionSearch.ts`), `SessionMemorySnapshotManager` (`src/main/memory/snapshot.ts`) with immediate invalidation on explicit user corrections, and enhanced `autoExtract.ts` contradiction/slot replacement.
+- Implemented Hermes-inspired procedural `SKILL.md` playbooks (`src/main/skills/procedural.ts`) + static security scanner (`src/main/skills/guard.ts`), progressive-disclosure prompt index, assisted drafting from verified tasks, user-pinned protection, `skills_list` / `skill_view` / `skill_draft_create` tools, IPC handlers, and flat UI controls under **Settings → Skills & Routines** (`AutomationPanel.tsx`).
+- Verified end-to-end through both TypeScript and Python `pixel-agent-v2` in `tests/phase-c-memory-skills.test.ts` and documented benchmarks/rollback in `docs/architecture/PIXEL_MEMORY_SKILLS_PHASE_C.md`.
+
+## Phase B — Git, Files, Rich Documents, GitHub Plugin & Secure Execution (Committed at `33d3549`)
 
 - Fixed the Windows CI regression from commit `1178401` (runs `45168522052` and `45175291910`): added injectable `allowedRoot` to `FileTools`, updated `tests/files.test.ts` and `tests/tasks.test.ts` to inject `{ allowedRoot: root }`, honored `PIXEL_PYTHON` in `PythonAgentBridge`, untracked 4 `__pycache__/*.pyc` files, and updated `.gitignore`.
 - Extended `src/main/git/toolset.ts` with `git_remote_list` (credential redaction), `git_repository_info`, `git_stage`, `git_unstage`, clone protocol/credential hardening, and structured Git error classification.

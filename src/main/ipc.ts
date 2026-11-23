@@ -65,10 +65,12 @@ import { BrowserSession, validateBrowserUploadFile } from './agent/browser';
 import { JsonlAuditSink } from './agent/auditStore';
 import { openDatabase } from './data/database';
 import { boot } from './startup/boot';
-import { selectMemoryContext } from './memory/context';
+import { SessionMemorySnapshotManager } from './memory/snapshot';
 import { looksLikeCredential, MemoryStore } from './memory/store';
 import { MemoryTools, MEMORY_TOOL_DEFINITIONS } from './memory/toolset';
 import { extractAutomaticMemoryCandidates, extractAutomaticMemoryForgetSlot, hasVerifiedTaskOutcome } from './memory/autoExtract';
+import { SessionSearchIndex, SessionSearchTools, SESSION_SEARCH_TOOL_DEFINITIONS } from './history/sessionSearch';
+import { ProceduralSkillStore, ProceduralSkillTools, PROCEDURAL_SKILL_TOOL_DEFINITIONS } from './skills/procedural';
 import { DocumentIndex } from './documents/indexer';
 import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
 import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
@@ -115,7 +117,7 @@ import type { BoardFileFormat } from './board/service';
 import { BOARD_TOOL_DEFINITIONS } from './board/tools';
 import { PluginStore } from './plugins/store';
 import { verifyGitHubToken } from './plugins/github';
-import type { GitHubConnectionStatus } from '../shared/types';
+import type { GitHubConnectionStatus, ProceduralSkillView } from '../shared/types';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -293,6 +295,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       history.save(record);
       record.persistence = 'persistent';
       sessionConversations.delete(record.id);
+      try { sessionSearchIndex.indexConversation(record); } catch { /* search indexing never blocks chat persistence */ }
     } catch {
       record.persistence = 'session';
       sessionConversations.set(record.id, record);
@@ -481,10 +484,30 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const permissionGrantStore = new PermissionGrantStore(database);
   const pluginStore = new PluginStore(database);
+  const sessionSearchIndex = new SessionSearchIndex(database);
+  try { sessionSearchIndex.backfillFromHistory(history); } catch { /* best-effort FTS5 backfill */ }
+  const sessionSearchTools = new SessionSearchTools(sessionSearchIndex, projectId);
+  const memorySnapshots = new SessionMemorySnapshotManager(memoryStore);
+  const proceduralSkillStore = new ProceduralSkillStore(database);
+  const proceduralSkillTools = new ProceduralSkillTools(proceduralSkillStore, projectId);
+
+  const buildTurnMemoryAndSkills = (request: ChatRequest): string => {
+    const convId = request.conversationId ?? activeConversationId ?? 'ephemeral';
+    const mem = memorySnapshots.buildTurnContext({
+      conversationId: convId,
+      projectId: projectId(),
+      text: request.text,
+    }).text;
+    const skillIndex = proceduralSkillStore.buildSkillIndexPrompt(projectId());
+    return [mem, skillIndex].filter(Boolean).join('\n\n');
+  };
+
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
     ...BOARD_TOOL_DEFINITIONS,
     ...MEMORY_TOOL_DEFINITIONS.filter((definition) => definition.name !== 'memory_save'),
+    ...SESSION_SEARCH_TOOL_DEFINITIONS,
+    ...PROCEDURAL_SKILL_TOOL_DEFINITIONS,
     ...DOCUMENT_TOOL_DEFINITIONS,
     ...FILE_TOOL_DEFINITIONS,
     ...GIT_TOOL_DEFINITIONS,
@@ -557,11 +580,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     isStopped: (): boolean => emergency.isStopped(),
     emit: emitChatEvent,
     toolsFor: (mode) => toolRegistry.schemasFor(mode),
-    memoryContextFor: (request) =>
-      selectMemoryContext(memoryStore, {
-        projectId: projectId(),
-        text: request.text,
-      }).text,
+    memoryContextFor: (request) => buildTurnMemoryAndSkills(request),
   });
 
   const emergency: EmergencyController = new EmergencyController({
@@ -641,6 +660,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     searchProvider: () => settings.get().browserSearchProvider,
     systemDiagnostics: readSystemDiagnostics,
     memory: memoryTools,
+    sessionSearch: sessionSearchTools,
+    proceduralSkills: proceduralSkillTools,
     documents: documentTools,
     productivity: productivityTools,
     files: fileTools,
@@ -705,11 +726,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       baseUrl: 'https://api.deepseek.com/v1',
       model,
     }),
-    memoryContextFor: (request) =>
-      selectMemoryContext(memoryStore, {
-        projectId: projectId(),
-        text: request.text,
-      }).text,
+    memoryContextFor: (request) => buildTurnMemoryAndSkills(request),
     getProjectId: () => memoryStore.getActiveProject(),
     fallbackToTypescript: (opts) => agent.run(opts),
   });
@@ -999,12 +1016,16 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (patch.tags !== undefined && (!Array.isArray(patch.tags) || patch.tags.some((tag) => typeof tag !== 'string' || tag.length > 64))) {
       throw new Error('Memory tags must be short text values.');
     }
-    return memoryStore.update(id, patch) as MemoryRecordView;
+    const updated = memoryStore.update(id, patch) as MemoryRecordView;
+    memorySnapshots.invalidateProject(projectId());
+    return updated;
   });
   registerHandler(CHANNELS.memoryDelete, (_event, id: string): boolean => {
     const existing = memoryStore.get(id);
     if (!existing || existing.projectId !== projectId()) return false;
-    return memoryStore.delete(id) && memoryStore.get(id) === null;
+    const ok = memoryStore.delete(id) && memoryStore.get(id) === null;
+    if (ok) memorySnapshots.invalidateProject(projectId());
+    return ok;
   });
   registerHandler(CHANNELS.memoryHistory, (_event, id: string) => {
     const existing = memoryStore.get(id);
@@ -1352,6 +1373,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     const forgetSlot = request.text.trim() ? extractAutomaticMemoryForgetSlot(request.text) : null;
     if (forgetSlot) {
       const removed = memoryStore.deleteAutomaticSlot(projectId(), forgetSlot);
+      if (removed) memorySnapshots.invalidateProject(projectId());
       audit.record('system', removed ? 'Automatic preference forgotten' : 'No matching automatic preference to forget', 'ok', `${forgetSlot} · ${removed} record(s)`);
     }
     if (request.text.trim()) {
@@ -1370,6 +1392,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
             ...(candidate.slot ? { slot: candidate.slot } : {}),
             ...(candidate.replaceSlot ? { replaceSlot: true } : {}),
           });
+          if (!saved.duplicate || candidate.replaceSlot) memorySnapshots.invalidateProject(projectId());
           audit.record('system', saved.duplicate ? 'Automatic memory already existed' : 'Automatic memory saved', 'ok', `${saved.memory.id} · ${candidate.kind}`);
         } catch {
           audit.record('system', 'Automatic memory was not saved', 'error', 'The candidate failed local validation or persistence.');
@@ -1499,6 +1522,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (!record || (record.projectId && record.projectId !== projectId())) return false;
     sessionConversations.delete(id);
     history.delete(id);
+    try { sessionSearchIndex.deleteConversation(id); } catch { /* ignore */ }
+    memorySnapshots.invalidateConversation(id);
     if (activeConversationId === id) {
       activeConversationId = null;
     }
@@ -1509,6 +1534,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.historyClear, (): void => {
     if (isAgentBusy()) throw new Error('Cancel or finish the active task before clearing chat history.');
     history.clear();
+    try { sessionSearchIndex.clearAll(); } catch { /* ignore */ }
+    memorySnapshots.clearAll();
     sessionConversations.clear();
     activeConversationId = null;
     broadcastActiveConversation();
@@ -1997,6 +2024,38 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     settings.clearGitHubToken();
     audit.record('system', 'Disconnected local GitHub token', 'ok', 'Removed encrypted local token; revoke on github.com separately if desired.');
     return { connected: false, encryptionAvailable: settings.isEncryptionAvailable() };
+  });
+
+  /* ----------------------- procedural skills ------------------------- */
+
+  registerHandler(CHANNELS.proceduralSkillsList, (): ProceduralSkillView[] =>
+    proceduralSkillStore.list(projectId()),
+  );
+  registerHandler(CHANNELS.proceduralSkillsCreateDraft, (_event, markdown: unknown): ProceduralSkillView => {
+    if (typeof markdown !== 'string') throw new Error('SKILL.md markdown text is required.');
+    const draft = proceduralSkillStore.createDraft({ projectId: projectId(), markdown, source: 'user:settings' });
+    audit.record('system', `Created procedural skill draft ${draft.name} v${draft.version}`, 'ok', `scan=${draft.scanStatus}`);
+    return draft;
+  });
+  registerHandler(CHANNELS.proceduralSkillsActivate, (_event, id: string): ProceduralSkillView => {
+    const active = proceduralSkillStore.activate(id);
+    audit.record('system', `Activated procedural skill ${active.name} v${active.version}`, 'ok');
+    return active;
+  });
+  registerHandler(CHANNELS.proceduralSkillsDisable, (_event, id: string): ProceduralSkillView => {
+    const disabled = proceduralSkillStore.setDisabled(id);
+    audit.record('system', `Disabled procedural skill ${disabled.name} v${disabled.version}`, 'ok');
+    return disabled;
+  });
+  registerHandler(CHANNELS.proceduralSkillsSetPinned, (_event, id: string, pinned: boolean): ProceduralSkillView => {
+    const updated = proceduralSkillStore.setPinned(id, Boolean(pinned));
+    audit.record('system', `${updated.pinned ? 'Pinned' : 'Unpinned'} procedural skill ${updated.name}`, 'ok');
+    return updated;
+  });
+  registerHandler(CHANNELS.proceduralSkillsDelete, (_event, id: string): boolean => {
+    const deleted = proceduralSkillStore.delete(id);
+    if (deleted) audit.record('system', `Deleted procedural skill ${id}`, 'ok');
+    return deleted;
   });
 
   /* -------------------------------- app ------------------------------ */

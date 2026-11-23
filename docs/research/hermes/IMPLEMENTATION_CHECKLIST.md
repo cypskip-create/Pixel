@@ -18,9 +18,9 @@ Use this checklist to execute the next implementation phase in dependency order.
 - [x] Verify Agent-mode scoped autonomy and 5-step real-repo developer workflow through Python `pixel-agent-v2`
 
 ## Phase C — Memory & Skills
-- [ ] Add SQLite FTS5 migration over `messages` + `session_search` agent tool
-- [ ] Freeze per-session memory snapshot (User Profile + Project Knowledge char-capped blocks)
-- [ ] Add progressive-disclosure `SKILL.md` procedural playbooks with static threat scanner and review gate
+- [x] Add SQLite FTS5 migration (v14) over persisted conversation messages + `session_search` agent tool
+- [x] Freeze per-session memory snapshot (User Profile + Project Knowledge char-capped blocks) with immediate invalidation on explicit corrections
+- [x] Add progressive-disclosure `SKILL.md` procedural playbooks with static threat scanner (`guard.ts`), user-pinned protection, and review gate in Settings → Skills & Routines
 
 ## Phase D — Plugin System & MCP
 - [ ] Implement Python MCP client (`stdio` + `Streamable HTTP` + 12s OSV preflight)

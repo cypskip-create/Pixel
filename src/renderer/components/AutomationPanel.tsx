@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Check, Clock3, Pause, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import type { RoutineRecord, RoutineRunRecord, SkillDraftRequest, SkillRecord } from '@shared/types';
+import type { ProceduralSkillView, RoutineRecord, RoutineRunRecord, SkillDraftRequest, SkillRecord } from '@shared/types';
 import { readBridge } from '@/lib/bridge';
 
 interface AutomationPanelProps {
@@ -371,7 +371,111 @@ export function AutomationPanel({ onBack, returnLabel = 'Back to settings' }: Au
           </div>
         ))}
       </section>
+
+      <ProceduralSkillsSection />
     </div>
+  );
+}
+
+function ProceduralSkillsSection(): React.JSX.Element | null {
+  const status = readBridge();
+  const api = status.kind === 'ready' ? status.bridge.proceduralSkills : undefined;
+  const [items, setItems] = useState<ProceduralSkillView[]>([]);
+  const [draftMarkdown, setDraftMarkdown] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!api) return;
+    try {
+      setItems(await api.list());
+    } catch (err) {
+      setError(messageOf(err));
+    }
+  }, [api]);
+
+  useEffect(() => { void reload(); }, [reload]);
+  if (!api) return null;
+
+  const createDraft = async (): Promise<void> => {
+    if (!draftMarkdown.trim()) return;
+    setError(null);
+    try {
+      await api.createDraft(draftMarkdown);
+      setDraftMarkdown('');
+      setCreating(false);
+      await reload();
+    } catch (err) {
+      setError(messageOf(err));
+    }
+  };
+
+  return (
+    <section className="mt-3 border-t border-[var(--color-border)] pt-3" aria-label="Procedural SKILL.md playbooks">
+      <div className="mb-2 flex items-center justify-between">
+        <div>
+          <h3 className="text-[11px] font-semibold text-[var(--color-ink)]">Procedural Playbooks (SKILL.md)</h3>
+          <p className="text-[9.5px] text-[var(--color-ink-dim)]">Reviewed Markdown guidance loaded on demand via progressive disclosure.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreating((v) => !v)}
+          className="rounded-lg border border-[var(--color-border)] px-2 py-1 text-[9.5px] font-medium text-[var(--color-ink)] hover:bg-white/6"
+        >
+          {creating ? 'Close' : 'New SKILL.md draft'}
+        </button>
+      </div>
+      {error ? <p className="mb-1.5 text-[9.5px] text-[var(--color-danger)]" role="status">{error}</p> : null}
+      {creating ? (
+        <div className="mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+          <textarea
+            aria-label="SKILL.md content"
+            rows={6}
+            value={draftMarkdown}
+            onChange={(e) => setDraftMarkdown(e.target.value)}
+            placeholder={'---\nname: my-workflow\ndescription: Concise description\n---\n\n## Steps\n1. Inspect state first.'}
+            className="w-full rounded border border-[var(--color-border)] bg-black/20 p-1.5 font-mono text-[10px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+          />
+          <button
+            type="button"
+            onClick={() => void createDraft()}
+            className="mt-1.5 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-[10px] font-medium text-white"
+          >
+            Scan & save draft
+          </button>
+        </div>
+      ) : null}
+      {items.length === 0 ? (
+        <p className="text-[9.5px] text-[var(--color-ink-dim)]">No procedural playbooks saved in this project yet.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((skill) => (
+            <div key={skill.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-[10.5px] font-medium text-[var(--color-ink)]">
+                    {skill.name} <span className="text-[9px] text-[var(--color-ink-dim)]">v{skill.version} · {skill.status}{skill.pinned ? ' · pinned' : ''} · scan:{skill.scanStatus}</span>
+                  </p>
+                  <p className="truncate text-[9.5px] text-[var(--color-ink-dim)]">{skill.description}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5 text-[9px]">
+                  {skill.status !== 'active' && skill.scanStatus !== 'blocked' ? (
+                    <button type="button" onClick={() => void api.activate(skill.id).then(reload).catch((e: unknown) => setError(messageOf(e)))} className="text-[var(--color-accent)] hover:underline">Activate</button>
+                  ) : null}
+                  {skill.status === 'active' ? (
+                    <button type="button" onClick={() => void api.disable(skill.id).then(reload).catch((e: unknown) => setError(messageOf(e)))} className="text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">Disable</button>
+                  ) : null}
+                  <button type="button" onClick={() => void api.setPinned(skill.id, !skill.pinned).then(reload).catch((e: unknown) => setError(messageOf(e)))} className="text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">{skill.pinned ? 'Unpin' : 'Pin'}</button>
+                  {!skill.pinned ? (
+                    <button type="button" onClick={() => void api.delete(skill.id).then(reload).catch((e: unknown) => setError(messageOf(e)))} className="text-[var(--color-danger)] hover:underline">Delete</button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

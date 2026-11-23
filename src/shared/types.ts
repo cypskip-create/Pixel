@@ -870,6 +870,22 @@ export interface ToolCatalogEntry {
   availabilityReason?: string;
 }
 
+export interface ProceduralSkillView {
+  id: string;
+  projectId: string;
+  name: string;
+  version: number;
+  status: 'draft' | 'active' | 'disabled';
+  pinned: boolean;
+  description: string;
+  markdown: string;
+  source: string;
+  scanStatus: 'clean' | 'warning' | 'blocked';
+  scanFindings: Array<{ severity: 'high' | 'medium'; rule: string; message: string }>;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface GitHubConnectionStatus {
   connected: boolean;
   encryptionAvailable: boolean;
@@ -1141,6 +1157,14 @@ export interface CypsBridge {
     githubStatus?(): Promise<GitHubConnectionStatus>;
     githubConnect?(token: string): Promise<GitHubConnectionStatus>;
     githubDisconnect?(): Promise<GitHubConnectionStatus>;
+  };
+  proceduralSkills?: {
+    list(): Promise<ProceduralSkillView[]>;
+    createDraft(markdown: string): Promise<ProceduralSkillView>;
+    activate(id: string): Promise<ProceduralSkillView>;
+    disable(id: string): Promise<ProceduralSkillView>;
+    setPinned(id: string, pinned: boolean): Promise<ProceduralSkillView>;
+    delete(id: string): Promise<boolean>;
   };
   app: {
     getVersion(): Promise<string>;

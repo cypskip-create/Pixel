@@ -459,6 +459,73 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE routines ADD COLUMN input_values TEXT NOT NULL DEFAULT '{}';
     `,
   },
+  {
+    version: 14,
+    name: 'session-search-fts5-and-procedural-skills',
+    sql: `
+      CREATE TABLE session_messages (
+        message_id         TEXT NOT NULL,
+        conversation_id    TEXT NOT NULL,
+        project_id         TEXT NOT NULL,
+        conversation_title TEXT NOT NULL DEFAULT '',
+        role               TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content            TEXT NOT NULL,
+        created_at         INTEGER NOT NULL,
+        UNIQUE (conversation_id, message_id)
+      );
+
+      CREATE INDEX idx_session_messages_project_time
+        ON session_messages(project_id, created_at DESC);
+      CREATE INDEX idx_session_messages_conversation
+        ON session_messages(conversation_id);
+
+      CREATE VIRTUAL TABLE session_messages_fts USING fts5(
+        conversation_title,
+        content,
+        content='session_messages',
+        content_rowid='rowid',
+        tokenize='unicode61'
+      );
+
+      CREATE TRIGGER session_messages_fts_insert AFTER INSERT ON session_messages BEGIN
+        INSERT INTO session_messages_fts(rowid, conversation_title, content)
+        VALUES (new.rowid, new.conversation_title, new.content);
+      END;
+
+      CREATE TRIGGER session_messages_fts_delete AFTER DELETE ON session_messages BEGIN
+        INSERT INTO session_messages_fts(session_messages_fts, rowid, conversation_title, content)
+        VALUES ('delete', old.rowid, old.conversation_title, old.content);
+      END;
+
+      CREATE TRIGGER session_messages_fts_update AFTER UPDATE ON session_messages BEGIN
+        INSERT INTO session_messages_fts(session_messages_fts, rowid, conversation_title, content)
+        VALUES ('delete', old.rowid, old.conversation_title, old.content);
+        INSERT INTO session_messages_fts(rowid, conversation_title, content)
+        VALUES (new.rowid, new.conversation_title, new.content);
+      END;
+
+      CREATE TABLE procedural_skills (
+        id                 TEXT PRIMARY KEY,
+        project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name               TEXT NOT NULL,
+        version            INTEGER NOT NULL,
+        status             TEXT NOT NULL CHECK (status IN ('draft', 'active', 'disabled')),
+        pinned             INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+        description        TEXT NOT NULL,
+        markdown           TEXT NOT NULL,
+        content_hash       TEXT NOT NULL,
+        source             TEXT NOT NULL,
+        scan_status        TEXT NOT NULL CHECK (scan_status IN ('clean', 'warning', 'blocked')),
+        scan_findings_json TEXT NOT NULL DEFAULT '[]',
+        created_at         INTEGER NOT NULL,
+        updated_at         INTEGER NOT NULL,
+        UNIQUE (project_id, name, version)
+      );
+
+      CREATE INDEX idx_procedural_skills_project
+        ON procedural_skills(project_id, status, updated_at DESC);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

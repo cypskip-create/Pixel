@@ -24,6 +24,8 @@ import { BrowserSession } from './browser';
 import type { BrowserSemanticTarget, BrowserUploadFile } from './browser';
 import { DesktopInputLease } from './inputLease';
 import type { MemoryTools } from '../memory/toolset';
+import type { SessionSearchTools } from '../history/sessionSearch';
+import type { ProceduralSkillTools } from '../skills/procedural';
 import type { DocumentTools } from '../documents/toolset';
 import type { FileTools } from '../files/toolset';
 import type { GitTools } from '../git/toolset';
@@ -124,6 +126,10 @@ export interface ExecutorDeps {
   chooseBrowserDownload?: (suggestedName: string) => Promise<string | null>;
   /** Wave 3 memory tools, scoped to the active project. */
   memory?: MemoryTools;
+  /** SQLite FTS5 cross-session conversation search tool. */
+  sessionSearch?: SessionSearchTools;
+  /** Procedural SKILL.md discovery, viewing, and draft tools. */
+  proceduralSkills?: ProceduralSkillTools;
   /** Wave 3 document tools. */
   documents?: DocumentTools;
   /** Project-scoped notes and personal task planning tools. */
@@ -255,6 +261,12 @@ export class ToolExecutors {
       // agent loop keeps a single execution entry point.
       if (this.deps.memory?.handles(name)) {
         return this.deps.memory.run(name, args);
+      }
+      if (this.deps.sessionSearch?.handles(name)) {
+        return this.deps.sessionSearch.run(name, args);
+      }
+      if (this.deps.proceduralSkills?.handles(name)) {
+        return this.deps.proceduralSkills.run(name, args);
       }
       if (this.deps.documents?.handles(name)) {
         return await this.deps.documents.run(name, args, signal);

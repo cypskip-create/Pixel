@@ -320,6 +320,19 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.pluginsGitHubDisconnect) as Promise<import('../shared/types').GitHubConnectionStatus>,
   },
 
+  proceduralSkills: {
+    list: () => ipcRenderer.invoke(CH.proceduralSkillsList) as Promise<import('../shared/types').ProceduralSkillView[]>,
+    createDraft: (markdown: string) =>
+      ipcRenderer.invoke(CH.proceduralSkillsCreateDraft, markdown) as Promise<import('../shared/types').ProceduralSkillView>,
+    activate: (id: string) =>
+      ipcRenderer.invoke(CH.proceduralSkillsActivate, id) as Promise<import('../shared/types').ProceduralSkillView>,
+    disable: (id: string) =>
+      ipcRenderer.invoke(CH.proceduralSkillsDisable, id) as Promise<import('../shared/types').ProceduralSkillView>,
+    setPinned: (id: string, pinned: boolean) =>
+      ipcRenderer.invoke(CH.proceduralSkillsSetPinned, id, pinned) as Promise<import('../shared/types').ProceduralSkillView>,
+    delete: (id: string) => ipcRenderer.invoke(CH.proceduralSkillsDelete, id) as Promise<boolean>,
+  },
+
   app: {
     getVersion: () => ipcRenderer.invoke(CH.appGetVersion) as Promise<string>,
     quit: () => ipcRenderer.invoke(CH.appQuit) as Promise<void>,

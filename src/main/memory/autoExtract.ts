@@ -25,11 +25,12 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
   const text = input.trim().replace(/\s+/g, ' ');
   if (!text || text.length > 2_000 || hasUnsafeMemoryContent(text) || isLowValueNoise(text)) return [];
 
-  const correction = text.match(/^(?:pixel[, :]\s*)?(?:that(?:'s| is) wrong[,;:. ]+)?(?:change|update|correct) my (theme|response style|workflow) (?:preference|settings?) to (.+)$/i);
+  const correction = text.match(/^(?:pixel[, :]\s*)?(?:that(?:'s| is) wrong[,;:. ]+)?(?:change|update|correct) my (theme|response style|workflow|accent|layout|permissions?) (?:preference|settings?) to (.+)$/i);
   if (correction?.[1] && correction[2]) {
     const fact = cleanCandidate(correction[2]);
     if (!fact) return [];
-    const slot = correction[1].toLowerCase().replace(/\s+/g, '-');
+    const rawSlot = correction[1].toLowerCase().replace(/\s+/g, '-');
+    const slot = rawSlot === 'accent' ? 'theme' : rawSlot === 'layout' ? 'ui-layout' : rawSlot.startsWith('permission') ? 'permissions' : rawSlot;
     return [{
       kind: 'preference',
       content: `The user prefers ${stripTerminalPunctuation(fact)}.`,
@@ -38,6 +39,22 @@ export function extractAutomaticMemoryCandidates(input: string): AutomaticMemory
       replaceSlot: true,
       relevanceScore: 0.98,
       confidence: 0.98,
+    }];
+  }
+
+  const naturalCorrection = text.match(/^(?:actually|correction)[,: ]+i\s+(?:prefer|want|use)\s+(.+)$/i);
+  if (naturalCorrection?.[1]) {
+    const fact = cleanCandidate(naturalCorrection[1]);
+    if (!fact || isLowValueNoise(fact)) return [];
+    const slot = preferenceSlot(fact);
+    return [{
+      kind: 'preference',
+      content: `The user prefers ${stripTerminalPunctuation(fact)}.`,
+      tags: ['automatic', 'user-confirmed', 'auto-correction', `auto-slot:${slot}`],
+      slot,
+      replaceSlot: true,
+      relevanceScore: 0.96,
+      confidence: 0.96,
     }];
   }
 
@@ -158,7 +175,7 @@ export function hasVerifiedTaskOutcome(task: {
 function hasUnsafeMemoryContent(text: string): boolean {
   return /```|<\/?(?:system|assistant|developer|tool)[^>]*>|\b(?:ignore|override|bypass)\s+(?:all\s+)?(?:previous|prior|system|safety)\s+instructions\b/i.test(text)
     || /\b(?:password|passwd|passphrase|api[_ -]?key|access[_ -]?token|secret|authorization)\b\s*(?:=|:|\bis\b)\s*\S+/i.test(text)
-    || /\bsk-[A-Za-z0-9_-]{12,}\b|\bAKIA[0-9A-Z]{16}\b|\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/i.test(text)
+    || /\bsk-[A-Za-z0-9_-]{12,}\b|\bghp_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bAKIA[0-9A-Z]{16}\b|\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/i.test(text)
     || /\b(?:webpage|website|document|screenshot|screen)\s+(?:says|said|instructs|tells pixel|contains instructions)\b/i.test(text);
 }
 
@@ -169,7 +186,9 @@ function cleanCandidate(value: string): string | null {
 }
 
 function preferenceSlot(value: string): string {
-  if (/\b(theme|interface|colour|color|dark|light|monochrome|charcoal|black)\b/i.test(value)) return 'theme';
+  if (/\b(theme|interface|colour|color|accent|blue|orange|dark|light|monochrome|charcoal|black)\b/i.test(value)) return 'theme';
+  if (/\b(layout|settings|sidebar|flat|card)\b/i.test(value)) return 'ui-layout';
+  if (/\b(permission|approval|autonomy)\b/i.test(value)) return 'permissions';
   if (/\b(format|formatting|bullet|concise|detail|tone|writing|response)\b/i.test(value)) return 'response-style';
   if (/\b(workflow|procedure|always|usually|default|prefer)\b/i.test(value)) return 'workflow';
   return `preference-${value.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 36)}`;
