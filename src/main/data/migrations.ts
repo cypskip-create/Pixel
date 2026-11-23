@@ -526,6 +526,29 @@ export const MIGRATIONS: readonly Migration[] = [
         ON procedural_skills(project_id, status, updated_at DESC);
     `,
   },
+  {
+    version: 15,
+    name: 'mcp-servers-registry',
+    sql: `
+      CREATE TABLE mcp_servers (
+        id                    TEXT PRIMARY KEY,
+        name                  TEXT NOT NULL,
+        transport             TEXT NOT NULL CHECK (transport IN ('stdio', 'http')),
+        command_json          TEXT,
+        url                   TEXT,
+        trust_tier            TEXT NOT NULL DEFAULT 'external_untrusted' CHECK (trust_tier IN ('bundled', 'external_untrusted')),
+        enabled               INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+        allowed_projects_json TEXT NOT NULL DEFAULT '["*"]',
+        status                TEXT NOT NULL DEFAULT 'disconnected',
+        last_health_at        INTEGER,
+        last_error            TEXT,
+        created_at            INTEGER NOT NULL,
+        updated_at            INTEGER NOT NULL
+      );
+
+      CREATE INDEX idx_mcp_servers_enabled ON mcp_servers(enabled, updated_at DESC);
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

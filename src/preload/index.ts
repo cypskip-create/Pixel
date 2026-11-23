@@ -318,6 +318,21 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.pluginsGitHubConnect, token) as Promise<import('../shared/types').GitHubConnectionStatus>,
     githubDisconnect: () =>
       ipcRenderer.invoke(CH.pluginsGitHubDisconnect) as Promise<import('../shared/types').GitHubConnectionStatus>,
+    googleCalendarStatus: () =>
+      ipcRenderer.invoke(CH.googleCalendarStatus) as Promise<import('../shared/types').GoogleCalendarConnectionStatus>,
+    googleCalendarDisconnect: () =>
+      ipcRenderer.invoke(CH.googleCalendarDisconnect) as Promise<import('../shared/types').GoogleCalendarConnectionStatus>,
+  },
+
+  mcp: {
+    list: () => ipcRenderer.invoke(CH.mcpServersList) as Promise<import('../shared/types').McpServerSummaryView[]>,
+    add: (input: { id: string; name: string; transport: 'stdio' | 'http'; command?: string[]; url?: string; allowedProjects?: string[] }) =>
+      ipcRenderer.invoke(CH.mcpServersAdd, input) as Promise<import('../shared/types').McpServerSummaryView>,
+    enable: (id: string) => ipcRenderer.invoke(CH.mcpServersEnable, id) as Promise<import('../shared/types').McpServerSummaryView>,
+    disable: (id: string) => ipcRenderer.invoke(CH.mcpServersDisable, id) as Promise<import('../shared/types').McpServerSummaryView>,
+    setProjects: (id: string, allowedProjects: string[]) =>
+      ipcRenderer.invoke(CH.mcpServersSetProjects, id, allowedProjects) as Promise<import('../shared/types').McpServerSummaryView>,
+    remove: (id: string) => ipcRenderer.invoke(CH.mcpServersRemove, id) as Promise<boolean>,
   },
 
   proceduralSkills: {

@@ -886,6 +886,32 @@ export interface ProceduralSkillView {
   updatedAt: number;
 }
 
+export interface McpServerSummaryView {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'http';
+  command?: string[];
+  url?: string;
+  trustTier: 'bundled' | 'external_untrusted';
+  enabled: boolean;
+  allowedProjects: string[];
+  status: 'disconnected' | 'connecting' | 'connected' | 'degraded' | 'disabled' | 'auth_required' | 'error';
+  protocolVersion?: string;
+  toolCount: number;
+  tools: string[];
+  lastHealthAt?: number;
+  lastError?: string;
+}
+
+export interface GoogleCalendarConnectionStatus {
+  connected: boolean;
+  encryptionAvailable: boolean;
+  oauthClientConfigured: boolean;
+  scopes?: string[];
+  expiresAt?: number;
+  error?: string;
+}
+
 export interface GitHubConnectionStatus {
   connected: boolean;
   encryptionAvailable: boolean;
@@ -1157,6 +1183,16 @@ export interface CypsBridge {
     githubStatus?(): Promise<GitHubConnectionStatus>;
     githubConnect?(token: string): Promise<GitHubConnectionStatus>;
     githubDisconnect?(): Promise<GitHubConnectionStatus>;
+    googleCalendarStatus?(): Promise<GoogleCalendarConnectionStatus>;
+    googleCalendarDisconnect?(): Promise<GoogleCalendarConnectionStatus>;
+  };
+  mcp?: {
+    list(): Promise<McpServerSummaryView[]>;
+    add(input: { id: string; name: string; transport: 'stdio' | 'http'; command?: string[]; url?: string; allowedProjects?: string[] }): Promise<McpServerSummaryView>;
+    enable(id: string): Promise<McpServerSummaryView>;
+    disable(id: string): Promise<McpServerSummaryView>;
+    setProjects(id: string, allowedProjects: string[]): Promise<McpServerSummaryView>;
+    remove(id: string): Promise<boolean>;
   };
   proceduralSkills?: {
     list(): Promise<ProceduralSkillView[]>;

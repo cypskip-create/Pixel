@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { GitHubConnectionStatus, PluginView } from '@shared/types';
+import type { GitHubConnectionStatus, GoogleCalendarConnectionStatus, McpServerSummaryView, PluginView } from '@shared/types';
 
 export type PluginLifecycleAction = 'install' | 'update' | 'uninstall' | 'enable' | 'project-availability' | 'setting';
 export type PluginProjectAvailability = 'inherit' | 'enabled' | 'disabled';
@@ -175,5 +175,198 @@ export function WorkspacePluginManager({ plugins, onChange }: WorkspacePluginMan
       <h2 className="workspace-section-title mt-6">Installed Plugins</h2>
       {installed.length ? <div className="workspace-plugin-grid">{installed.map(renderPlugin)}</div> : <div className="workspace-empty-card">No plugins installed. Pixel’s built-in tools remain available.</div>}
     </section>
+    <ConnectionsAndMcpSection />
   </section>;
+}
+
+function ConnectionsAndMcpSection(): React.JSX.Element | null {
+  const mcpApi = typeof window !== 'undefined' ? window.cyps?.mcp : undefined;
+  const pluginsApi = typeof window !== 'undefined' ? window.cyps?.plugins : undefined;
+  const [servers, setServers] = useState<McpServerSummaryView[]>([]);
+  const [gcalStatus, setGcalStatus] = useState<GoogleCalendarConnectionStatus | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [serverId, setServerId] = useState('');
+  const [serverName, setServerName] = useState('');
+  const [transport, setTransport] = useState<'stdio' | 'http'>('stdio');
+  const [endpoint, setEndpoint] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const reload = async (): Promise<void> => {
+    if (mcpApi) {
+      try { setServers(await mcpApi.list()); } catch { /* ignore */ }
+    }
+    if (pluginsApi?.googleCalendarStatus) {
+      try { setGcalStatus(await pluginsApi.googleCalendarStatus()); } catch { /* ignore */ }
+    }
+  };
+
+  useEffect(() => { void reload(); }, []);
+  if (!mcpApi) return null;
+
+  const handleAdd = async (): Promise<void> => {
+    setError(null);
+    try {
+      await mcpApi.add({
+        id: serverId.trim(),
+        name: serverName.trim(),
+        transport,
+        ...(transport === 'stdio' ? { command: endpoint.trim().split(/\s+/).filter(Boolean) } : { url: endpoint.trim() }),
+      });
+      setServerId('');
+      setServerName('');
+      setEndpoint('');
+      setAdding(false);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const toggleServer = async (srv: McpServerSummaryView): Promise<void> => {
+    setBusyId(srv.id);
+    setError(null);
+    try {
+      if (srv.enabled) await mcpApi.disable(srv.id);
+      else await mcpApi.enable(srv.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <section aria-label="Connections and MCP Servers" className="mt-6">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="workspace-section-title">Connections &amp; MCP Servers</h2>
+        <button
+          type="button"
+          onClick={() => setAdding((v) => !v)}
+          className="rounded-lg border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-ink)] hover:bg-white/6"
+        >
+          {adding ? 'Close' : 'Add MCP server'}
+        </button>
+      </div>
+
+      {gcalStatus ? (
+        <div className="mb-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[11.5px]">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <strong className="text-[var(--color-ink)]">Google Calendar (OAuth 2.0 PKCE)</strong>
+              <p className="text-[11px] text-[var(--color-ink-dim)]">
+                {gcalStatus.connected
+                  ? `Connected · Scopes: ${(gcalStatus.scopes ?? []).join(', ') || 'calendar.readonly'}`
+                  : gcalStatus.oauthClientConfigured
+                    ? 'Disconnected · OAuth client configured.'
+                    : 'Not connected · Configure PIXEL_GOOGLE_OAUTH_CLIENT_ID to authorize live Google Calendar access.'}
+              </p>
+            </div>
+            {gcalStatus.connected && pluginsApi?.googleCalendarDisconnect ? (
+              <button
+                type="button"
+                onClick={() => void pluginsApi.googleCalendarDisconnect!().then(setGcalStatus)}
+                className="rounded border border-[var(--color-border)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)]"
+              >
+                Disconnect
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {error ? <p className="workspace-plugin-error mb-2" role="alert">{error}</p> : null}
+
+      {adding ? (
+        <div className="mb-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-[11.5px]">
+          <p className="mb-2 text-[11px] text-[var(--color-ink-dim)]">
+            External local MCP servers run as separate OS processes without kernel sandboxing. Only add servers you trust.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              aria-label="MCP server id"
+              placeholder="server-id (e.g. local-docs)"
+              value={serverId}
+              onChange={(e) => setServerId(e.target.value)}
+              className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-1 text-[11.5px] text-[var(--color-ink)]"
+            />
+            <input
+              type="text"
+              aria-label="MCP server name"
+              placeholder="Display name"
+              value={serverName}
+              onChange={(e) => setServerName(e.target.value)}
+              className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-1 text-[11.5px] text-[var(--color-ink)]"
+            />
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              aria-label="MCP transport"
+              value={transport}
+              onChange={(e) => setTransport(e.target.value === 'http' ? 'http' : 'stdio')}
+              className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-1 text-[11.5px] text-[var(--color-ink)]"
+            >
+              <option value="stdio">Stdio (local process)</option>
+              <option value="http">Streamable HTTP (HTTPS)</option>
+            </select>
+            <input
+              type="text"
+              aria-label="MCP command or URL"
+              placeholder={transport === 'stdio' ? 'python path/to/server.py' : 'https://mcp.example.com/mcp'}
+              value={endpoint}
+              onChange={(e) => setEndpoint(e.target.value)}
+              className="flex-1 rounded border border-[var(--color-border)] bg-black/20 px-2 py-1 text-[11.5px] text-[var(--color-ink)]"
+            />
+            <button
+              type="button"
+              onClick={() => void handleAdd()}
+              className="rounded bg-[var(--color-accent)] px-2.5 py-1 text-[11px] font-medium text-white"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {servers.length === 0 ? (
+        <div className="workspace-empty-card">No external MCP servers configured yet.</div>
+      ) : (
+        <div className="space-y-2">
+          {servers.map((srv) => (
+            <div key={srv.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[11.5px]">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <strong className="text-[var(--color-ink)]">{srv.name}</strong>{' '}
+                  <span className="text-[10.5px] text-[var(--color-ink-dim)]">
+                    ({srv.id} · {srv.transport} · {srv.status} · {srv.toolCount} tool(s))
+                  </span>
+                  {srv.lastError ? <p className="mt-0.5 text-[10.5px] text-[var(--color-danger)]">{srv.lastError}</p> : null}
+                </div>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    disabled={busyId === srv.id}
+                    onClick={() => void toggleServer(srv)}
+                    className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]"
+                  >
+                    {busyId === srv.id ? 'Working…' : srv.enabled ? 'Disable' : 'Enable'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === srv.id}
+                    onClick={() => void mcpApi.remove(srv.id).then(reload)}
+                    className="text-[var(--color-danger)] hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }

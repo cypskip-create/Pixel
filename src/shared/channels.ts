@@ -162,6 +162,15 @@ export const CHANNELS = {
   proceduralSkillsSetPinned: 'skills:proceduralSetPinned',
   proceduralSkillsDelete: 'skills:proceduralDelete',
 
+  mcpServersList: 'mcp:list',
+  mcpServersAdd: 'mcp:add',
+  mcpServersEnable: 'mcp:enable',
+  mcpServersDisable: 'mcp:disable',
+  mcpServersSetProjects: 'mcp:setProjects',
+  mcpServersRemove: 'mcp:remove',
+  googleCalendarStatus: 'plugins:googleCalendarStatus',
+  googleCalendarDisconnect: 'plugins:googleCalendarDisconnect',
+
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',
 

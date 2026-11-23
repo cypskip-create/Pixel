@@ -2,7 +2,15 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
-## Phase C — Memory, SQLite FTS5 Session Search & Procedural `SKILL.md` Playbooks (Local Uncommitted)
+## Phase D — Plugin Architecture, MCP Client & Google Calendar Integration (Local Uncommitted)
+
+- Confirmed Phase C Windows CI run `45195758066` (`6b73bbd`) passed 100% green on `windows-latest`.
+- Implemented Python MCP client (`python/pixel_agent/mcp_client.py`) and 12s OSV/command supply-chain preflight (`python/pixel_agent/osv_preflight.py`) supporting Stdio and Streamable HTTP (`2025-03-26` / `2024-11-05`).
+- Added SQLite Migration 15 (`mcp_servers`) and Electron `McpServerManager` (`src/main/plugins/mcpManager.ts`) with collision-safe `mcp.<serverId>.<toolName>` registration, per-project isolation, automatic grant revocation on disable/remove, SSRF/redirect blocking, and clean shutdown disposal.
+- Implemented OAuth 2.0 PKCE (`src/main/plugins/oauth.ts`), DPAPI provider secret storage in `SettingsStore`, Google Calendar REST v3 adapter (`src/main/plugins/googleCalendar.ts`, 7 registered tools in `GOOGLE_CALENDAR_PLUGIN`), and flat **Connections & MCP Servers** management in **Settings → Plugins & Connections** (`WorkspacePluginManager.tsx`).
+- Verified live stdio & Streamable HTTP MCP servers, OAuth/Calendar fixtures, and dual-runtime (TypeScript + Python `pixel-agent-v2`) MCP tool invocation through `PermissionBroker` in `tests/phase-d-mcp-plugins.test.ts`. Live Google OAuth (requires user-owned `PIXEL_GOOGLE_OAUTH_CLIENT_ID`) and Electron GUI launch remain open.
+
+## Phase C — Memory, SQLite FTS5 Session Search & Procedural `SKILL.md` Playbooks (Committed at `6b73bbd`)
 
 - Investigated Phase B Windows CI run `45189965776`: failed at Step 9 (`Install NSIS for installer integration tests`, upstream Chocolatey/SourceForge mirror issue; did not reach tests).
 - Implemented SQLite Migration 14 (`session_messages` + `session_messages_fts` FTS5 triggers + `procedural_skills`), `SessionSearchIndex` + `session_search` tool (`src/main/history/sessionSearch.ts`), `SessionMemorySnapshotManager` (`src/main/memory/snapshot.ts`) with immediate invalidation on explicit user corrections, and enhanced `autoExtract.ts` contradiction/slot replacement.

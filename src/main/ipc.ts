@@ -117,7 +117,10 @@ import type { BoardFileFormat } from './board/service';
 import { BOARD_TOOL_DEFINITIONS } from './board/tools';
 import { PluginStore } from './plugins/store';
 import { verifyGitHubToken } from './plugins/github';
-import type { GitHubConnectionStatus, ProceduralSkillView } from '../shared/types';
+import { McpServerManager } from './plugins/mcpManager';
+import { GoogleCalendarClient } from './plugins/googleCalendar';
+import type { OAuthTokenRecord } from './plugins/oauth';
+import type { GitHubConnectionStatus, GoogleCalendarConnectionStatus, McpServerSummaryView, ProceduralSkillView } from '../shared/types';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -502,6 +505,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return [mem, skillIndex].filter(Boolean).join('\n\n');
   };
 
+  const readGoogleCalendarToken = (): OAuthTokenRecord | null => {
+    const raw = settings.getProviderSecret('google-calendar');
+    if (!raw) return null;
+    try { return JSON.parse(raw) as OAuthTokenRecord; } catch { return null; }
+  };
+  const googleCalendarClient = new GoogleCalendarClient(readGoogleCalendarToken);
+
+  let mcpManager: McpServerManager | null = null;
   const toolRegistry = new ToolRegistry([
     ...BUILTIN_TOOLS,
     ...BOARD_TOOL_DEFINITIONS,
@@ -515,7 +526,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     ...pluginStore.installedTools(),
   ], (grant) => {
     try { permissionGrantStore.markUsed(grant); } catch { /* persistence failure must not change the authorization decision */ }
-  }, (toolName) => pluginStore.isToolAvailable(projectId(), toolName));
+  }, (toolName) => pluginStore.isToolAvailable(projectId(), toolName) && (mcpManager ? mcpManager.isToolAvailable(projectId(), toolName) : true));
   const taskStore = new TaskStore(database);
   const skillStore = new SkillStore(database);
   const routineStore = new RoutineStore(database, skillStore);
@@ -535,6 +546,15 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     (requestId) => context.sendToRenderer(CHANNELS.permissionsResolved, requestId),
     permissionGrantStore,
   );
+  mcpManager = new McpServerManager(database, {
+    onToolsChanged: (added, removedNames) => {
+      for (const name of removedNames) toolRegistry.unregister(name);
+      for (const def of added) {
+        if (!toolRegistry.get(def.name)) toolRegistry.register(def);
+      }
+    },
+    onRevokeTool: (toolName) => permissions.revokeForTool(toolName),
+  });
   const voice = new VoiceService(pythonWorker, voiceModelManager);
   let activePtt: {
     id: number;
@@ -692,6 +712,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     onPluginHealth: (pluginId, error) => pluginStore.recordHealth(pluginId, error),
     getPluginSetting: (pluginId, key) => pluginStore.getSetting(pluginId, key),
     getGitHubToken: () => settings.getGitHubToken(),
+    mcp: mcpManager,
+    googleCalendar: googleCalendarClient,
   });
 
   const agent = new AgentExecutor({
@@ -2058,6 +2080,56 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return deleted;
   });
 
+  /* ----------------------- MCP & Google Calendar --------------------- */
+
+  registerHandler(CHANNELS.mcpServersList, (): McpServerSummaryView[] =>
+    mcpManager!.listServers(),
+  );
+  registerHandler(CHANNELS.mcpServersAdd, (_event, input: Parameters<McpServerManager['addServer']>[0]): McpServerSummaryView => {
+    const created = mcpManager!.addServer(input);
+    audit.record('system', `Added MCP server ${created.id} (${created.transport})`, 'ok', created.trustTier);
+    return created;
+  });
+  registerHandler(CHANNELS.mcpServersEnable, async (_event, id: string): Promise<McpServerSummaryView> => {
+    const view = await mcpManager!.enableServer(id);
+    audit.record('system', `Enabled MCP server ${id}`, 'ok', `${view.toolCount} tool(s) discovered`);
+    return view;
+  });
+  registerHandler(CHANNELS.mcpServersDisable, async (_event, id: string): Promise<McpServerSummaryView> => {
+    const view = await mcpManager!.disableServer(id);
+    audit.record('system', `Disabled MCP server ${id}`, 'ok', 'Connections closed and tool grants revoked.');
+    return view;
+  });
+  registerHandler(CHANNELS.mcpServersSetProjects, (_event, id: string, allowedProjects: string[]): McpServerSummaryView => {
+    const view = mcpManager!.setAllowedProjects(id, allowedProjects);
+    audit.record('system', `Updated project scope for MCP server ${id}`, 'ok', view.allowedProjects.join(', '));
+    return view;
+  });
+  registerHandler(CHANNELS.mcpServersRemove, async (_event, id: string): Promise<boolean> => {
+    const removed = await mcpManager!.removeServer(id);
+    if (removed) audit.record('system', `Removed MCP server ${id}`, 'ok');
+    return removed;
+  });
+  registerHandler(CHANNELS.googleCalendarStatus, (): GoogleCalendarConnectionStatus => {
+    const token = readGoogleCalendarToken();
+    const oauthClientConfigured = Boolean(process.env.PIXEL_GOOGLE_OAUTH_CLIENT_ID?.trim());
+    return {
+      connected: Boolean(token),
+      encryptionAvailable: settings.isEncryptionAvailable(),
+      oauthClientConfigured,
+      ...(token ? { scopes: token.scopes, expiresAt: token.expiresAt } : {}),
+    };
+  });
+  registerHandler(CHANNELS.googleCalendarDisconnect, (): GoogleCalendarConnectionStatus => {
+    settings.clearProviderSecret('google-calendar');
+    audit.record('system', 'Disconnected local Google Calendar OAuth credentials', 'ok');
+    return {
+      connected: false,
+      encryptionAvailable: settings.isEncryptionAvailable(),
+      oauthClientConfigured: Boolean(process.env.PIXEL_GOOGLE_OAUTH_CLIENT_ID?.trim()),
+    };
+  });
+
   /* -------------------------------- app ------------------------------ */
 
   registerHandler(CHANNELS.appGetVersion, (): string => app.getVersion());
@@ -2082,6 +2154,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       voice.cancelAll();
       void pythonWorker.shutdown();
       void pythonAgentBridge.dispose();
+      void mcpManager?.disposeAll();
       executors.killAll();
       nativeHelper.dispose();
     },

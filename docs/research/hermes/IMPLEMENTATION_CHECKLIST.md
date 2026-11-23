@@ -23,10 +23,10 @@ Use this checklist to execute the next implementation phase in dependency order.
 - [x] Add progressive-disclosure `SKILL.md` procedural playbooks with static threat scanner (`guard.ts`), user-pinned protection, and review gate in Settings → Skills & Routines
 
 ## Phase D — Plugin System & MCP
-- [ ] Implement Python MCP client (`stdio` + `Streamable HTTP` + 12s OSV preflight)
-- [ ] Wire MCP server management & health states into Settings → Plugins & Connections
-- [ ] Enforce per-project availability & automatic grant revocation on disable/uninstall
-- [ ] Research & implement first real external productivity plugin (Drive / Calendar / Email) with real OAuth
+- [x] Implement MCP client (`stdio` + `Streamable HTTP` + 12s OSV/command preflight) in Python (`python/pixel_agent/mcp_client.py`, `osv_preflight.py`) and Electron main (`src/main/plugins/mcpManager.ts`, Migration 15)
+- [x] Wire MCP server management & health states into Settings → Plugins & Connections (`WorkspacePluginManager.tsx`)
+- [x] Enforce per-project availability & automatic grant revocation on disable/uninstall/project-narrowing
+- [x] Implement OAuth 2.0 PKCE (`oauth.ts`) + first real external productivity plugin (`GOOGLE_CALENDAR_PLUGIN` / `googleCalendar.ts`, 7 tools) with deterministic test suite (live OAuth requires user-owned `PIXEL_GOOGLE_OAUTH_CLIENT_ID`)
 
 ## Phase E — Background Tasks & Delegation
 - [ ] Add `execution_scope`, `checkpoint_json`, `lease_pid`, `cron_expression` DB migration

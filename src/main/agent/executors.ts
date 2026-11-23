@@ -38,6 +38,8 @@ import type { BoardDiagramEdge, BoardObject, BoardOperation, BoardSnapshot } fro
 import type { BoardFileFormat, PixelBoardService } from '../board/service';
 import { isBoardTool } from '../board/tools';
 import type { ProductivityTools } from '../productivity/toolset';
+import type { McpServerManager } from '../plugins/mcpManager';
+import type { GoogleCalendarClient } from '../plugins/googleCalendar';
 import {
   commentGitHubIssue,
   compareGitHubCommits,
@@ -155,6 +157,10 @@ export interface ExecutorDeps {
   githubRepository?: (owner: unknown, repository: unknown, signal?: AbortSignal, authToken?: string | null) => Promise<GitHubRepositorySummary>;
   /** Optional DPAPI-decrypted GitHub token resolver (main process only). */
   getGitHubToken?: () => string | null;
+  /** External MCP server manager (executes only after PermissionBroker approval). */
+  mcp?: McpServerManager;
+  /** Optional Google Calendar REST v3 adapter. */
+  googleCalendar?: GoogleCalendarClient;
   /** Main-process, manifest-validated non-secret plugin configuration. */
   getPluginSetting?: (pluginId: string, key: string) => string | undefined;
   onPluginHealth?: (pluginId: string, error?: string) => void;
@@ -267,6 +273,9 @@ export class ToolExecutors {
       }
       if (this.deps.proceduralSkills?.handles(name)) {
         return this.deps.proceduralSkills.run(name, args);
+      }
+      if (this.deps.mcp?.handles(name)) {
+        return await this.deps.mcp.executeTool(name, args, signal);
       }
       if (this.deps.documents?.handles(name)) {
         return await this.deps.documents.run(name, args, signal);
@@ -517,6 +526,101 @@ export class ToolExecutors {
             content: `Created Pull Request #${pr.number}: ${pr.title} (${pr.url})`,
             detail: pr,
             verification: { summary: `GitHub created PR #${pr.number}.`, source: 'HTTPS POST to api.github.com' },
+          };
+        }
+        case 'gcal_list_calendars': {
+          if (!this.deps.googleCalendar) return { ok: false, content: 'Google Calendar plugin is unavailable.', errorCode: 'UNAVAILABLE' };
+          const cals = await this.deps.googleCalendar.listCalendars(signal);
+          return {
+            ok: true,
+            content: cals.length
+              ? `Google Calendars (${cals.length}):\n${cals.map((c) => `- ${c.summary} (id: ${c.id}, tz: ${c.timeZone}${c.primary ? ', primary' : ''})`).join('\n')}`
+              : 'No calendars found.',
+            detail: { calendars: cals },
+          };
+        }
+        case 'gcal_list_events':
+        case 'gcal_search_events': {
+          if (!this.deps.googleCalendar) return { ok: false, content: 'Google Calendar plugin is unavailable.', errorCode: 'UNAVAILABLE' };
+          const events = await this.deps.googleCalendar.listEvents({
+            calendarId: typeof args.calendarId === 'string' ? args.calendarId : undefined,
+            timeMin: typeof args.timeMin === 'string' ? args.timeMin : undefined,
+            timeMax: typeof args.timeMax === 'string' ? args.timeMax : undefined,
+            timeZone: typeof args.timeZone === 'string' ? args.timeZone : undefined,
+            query: typeof args.query === 'string' ? args.query : undefined,
+            maxResults: typeof args.maxResults === 'number' ? args.maxResults : undefined,
+          }, signal);
+          return {
+            ok: true,
+            content: events.length
+              ? `Google Calendar events (${events.length}, untrusted external data):\n${events.map((e) => `- [${e.start}${e.allDay ? ' all-day' : ''}] ${e.summary} (id: ${e.id})`).join('\n')}`
+              : 'No matching calendar events found.',
+            detail: { events },
+          };
+        }
+        case 'gcal_get_event': {
+          if (!this.deps.googleCalendar) return { ok: false, content: 'Google Calendar plugin is unavailable.', errorCode: 'UNAVAILABLE' };
+          const ev = await this.deps.googleCalendar.getEvent(
+            typeof args.calendarId === 'string' ? args.calendarId : undefined,
+            String(args.eventId ?? ''),
+            signal,
+          );
+          return {
+            ok: true,
+            content: `Event "${ev.summary}" (${ev.start} → ${ev.end}${ev.location ? `, @ ${ev.location}` : ''})\n${ev.description ?? ''}`.trim(),
+            detail: { event: ev },
+          };
+        }
+        case 'gcal_create_event': {
+          if (!this.deps.googleCalendar) return { ok: false, content: 'Google Calendar plugin is unavailable.', errorCode: 'UNAVAILABLE' };
+          const created = await this.deps.googleCalendar.createEvent({
+            calendarId: typeof args.calendarId === 'string' ? args.calendarId : undefined,
+            summary: String(args.summary ?? ''),
+            start: String(args.start ?? ''),
+            end: String(args.end ?? ''),
+            allDay: args.allDay === true,
+            description: typeof args.description === 'string' ? args.description : undefined,
+            location: typeof args.location === 'string' ? args.location : undefined,
+            timeZone: typeof args.timeZone === 'string' ? args.timeZone : undefined,
+          }, signal);
+          return {
+            ok: true,
+            content: `Created Google Calendar event "${created.summary}" (${created.start} → ${created.end}, id: ${created.id}).`,
+            detail: { event: created },
+            verification: { summary: `Google Calendar created event ${created.id}.`, source: 'HTTPS POST to www.googleapis.com' },
+          };
+        }
+        case 'gcal_update_event': {
+          if (!this.deps.googleCalendar) return { ok: false, content: 'Google Calendar plugin is unavailable.', errorCode: 'UNAVAILABLE' };
+          const updated = await this.deps.googleCalendar.updateEvent({
+            calendarId: typeof args.calendarId === 'string' ? args.calendarId : undefined,
+            eventId: String(args.eventId ?? ''),
+            summary: typeof args.summary === 'string' ? args.summary : undefined,
+            start: typeof args.start === 'string' ? args.start : undefined,
+            end: typeof args.end === 'string' ? args.end : undefined,
+            allDay: typeof args.allDay === 'boolean' ? args.allDay : undefined,
+            description: typeof args.description === 'string' ? args.description : undefined,
+            location: typeof args.location === 'string' ? args.location : undefined,
+          }, signal);
+          return {
+            ok: true,
+            content: `Updated Google Calendar event "${updated.summary}" (id: ${updated.id}).`,
+            detail: { event: updated },
+            verification: { summary: `Google Calendar updated event ${updated.id}.`, source: 'HTTPS PATCH to www.googleapis.com' },
+          };
+        }
+        case 'gcal_delete_event': {
+          if (!this.deps.googleCalendar) return { ok: false, content: 'Google Calendar plugin is unavailable.', errorCode: 'UNAVAILABLE' };
+          const res = await this.deps.googleCalendar.deleteEvent(
+            typeof args.calendarId === 'string' ? args.calendarId : undefined,
+            String(args.eventId ?? ''),
+            signal,
+          );
+          return {
+            ok: true,
+            content: `Deleted Google Calendar event ${res.eventId}.`,
+            detail: res,
+            verification: { summary: `Google Calendar deleted event ${res.eventId}.`, source: 'HTTPS DELETE to www.googleapis.com' },
           };
         }
         default:

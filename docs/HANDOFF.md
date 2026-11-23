@@ -2,7 +2,19 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
-## Phase C — Memory, SQLite FTS5 Session Search & Procedural `SKILL.md` Playbooks (2026-11-23 — Local Uncommitted)
+## Phase D — Plugin Architecture, MCP Client & Google Calendar Integration (2026-11-23 — Local Uncommitted)
+
+- **D0 CI Baseline:** Phase C Windows CI run `45195758066` (`6b73bbd`) passed 100% green on `windows-latest`.
+- **D2–D5 MCP Client, Manager & Supply-Chain Preflight:**
+  - Implemented zero-dependency Python MCP client (`python/pixel_agent/mcp_client.py`: Stdio + Streamable HTTP, `2025-03-26` & `2024-11-05`, restricted env, SSE parsing, redirect blocking, cancellation) and 12s OSV + command preflight (`python/pixel_agent/osv_preflight.py`), verified in `python/tests/test_mcp_client.py` (26/26 Python tests pass).
+  - Added SQLite Migration 15 (`mcp_servers`) in `src/main/data/migrations.ts` and Electron `McpServerManager` (`src/main/plugins/mcpManager.ts`) with collision-safe `mcp.<serverId>.<toolName>` registration, SSRF/redirect/shell guards, per-project enforcement, automatic grant revocation on disable/remove, and clean child disposal on shutdown.
+- **D6–D9 OAuth PKCE, Google Calendar, Settings UI & Dual-Runtime Parity:**
+  - Implemented standards-based OAuth 2.0 PKCE (`src/main/plugins/oauth.ts`), DPAPI `setProviderSecret`/`getProviderSecret`/`clearProviderSecret` in `SettingsStore`, and official Google Calendar REST v3 adapter (`src/main/plugins/googleCalendar.ts`, `GOOGLE_CALENDAR_PLUGIN` with 7 tools in `manifest.ts` & `executors.ts`).
+  - Extended **Settings → Plugins & Connections** (`WorkspacePluginManager.tsx`) with a flat **Connections & MCP Servers** section (Google Calendar status/disconnect, Add/Enable/Disable/Remove MCP servers with explicit non-sandboxed process trust warning).
+  - Verified both TypeScript `AgentExecutor` and Python `pixel-agent-v2` invoking a live disposable local stdio MCP tool through Electron's `PermissionBroker` in `tests/phase-d-mcp-plugins.test.ts`. Measured MCP benchmarks: cold startup + discovery **314.8 ms**, warm tool call **2.6 ms**, teardown **0.9 ms**.
+- **Unverified / Open:** Live Google Calendar OAuth (requires user-owned `PIXEL_GOOGLE_OAUTH_CLIENT_ID`), post-push Windows CI run, and interactive Electron GUI launch (`0x80000003` pre-entry exit). Docs: `docs/architecture/PIXEL_PLUGIN_MCP_PHASE_D.md` & `docs/architecture/PIXEL_MCP_SECURITY.md`.
+
+## Phase C — Memory, SQLite FTS5 Session Search & Procedural `SKILL.md` Playbooks (Committed at `6b73bbd`)
 
 - **C0 Windows CI Finding (Run `45189965776`):** Failed at Step 9 (`Install NSIS for installer integration tests`), an upstream Chocolatey/SourceForge download failure — did not reach the test suite (zero Phase B test regressions).
 - **C2 SQLite Migration 14 & FTS5 `session_search`:** Added additive Migration 14 (`session_messages`, `session_messages_fts` with insert/update/delete triggers, and `procedural_skills`) in `src/main/data/migrations.ts`, implemented `SessionSearchIndex` + `SessionSearchTools` (`session_search`) in `src/main/history/sessionSearch.ts`, backfilled `HistoryStore` on startup, and synced saves/deletes/clears in `src/main/ipc.ts`.

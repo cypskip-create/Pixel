@@ -26,17 +26,20 @@ export class SettingsStore {
   private readonly settingsPath: string;
   private readonly keyPath: string;
   private readonly githubKeyPath: string;
+  private readonly credentialsDir: string;
   private cache: AppSettings | null = null;
   /** Decrypted key, held in memory only for the lifetime of the process. */
   private apiKeyCache: string | null = null;
   private apiKeyLoaded = false;
   private githubTokenCache: string | null = null;
   private githubTokenLoaded = false;
+  private readonly oauthTokenCache = new Map<string, string | null>();
 
   constructor(userDataDir: string) {
     this.settingsPath = join(userDataDir, 'settings.json');
-    this.keyPath = join(userDataDir, 'credentials', 'deepseek.key');
-    this.githubKeyPath = join(userDataDir, 'credentials', 'github.key');
+    this.credentialsDir = join(userDataDir, 'credentials');
+    this.keyPath = join(this.credentialsDir, 'deepseek.key');
+    this.githubKeyPath = join(this.credentialsDir, 'github.key');
   }
 
   /* ----------------------------- settings ----------------------------- */
@@ -206,6 +209,55 @@ export class SettingsStore {
     }
     this.githubTokenCache = null;
     this.githubTokenLoaded = true;
+  }
+
+  /** Encrypt and store a JSON OAuth token record for a named provider via DPAPI. */
+  setProviderSecret(providerId: string, serializedJson: string): { ok: boolean; error?: string } {
+    const safeId = providerId.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{2,40}$/.test(safeId)) return { ok: false, error: 'Invalid provider identifier.' };
+    if (!this.isEncryptionAvailable()) {
+      return { ok: false, error: 'Windows credential encryption is unavailable; Pixel will not store plaintext tokens.' };
+    }
+    try {
+      const encrypted = safeStorage.encryptString(serializedJson);
+      mkdirSync(this.credentialsDir, { recursive: true });
+      const target = join(this.credentialsDir, `oauth-${safeId}.key`);
+      writeFileSync(target, JSON.stringify({ encrypted: encrypted.toString('base64') }), { encoding: 'utf8', mode: 0o600 });
+      this.oauthTokenCache.set(safeId, serializedJson);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Pixel could not save the provider credentials securely.' };
+    }
+  }
+
+  /** Decrypt a provider's OAuth token JSON record (main process only). */
+  getProviderSecret(providerId: string): string | null {
+    const safeId = providerId.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{2,40}$/.test(safeId)) return null;
+    if (this.oauthTokenCache.has(safeId)) return this.oauthTokenCache.get(safeId) ?? null;
+    const target = join(this.credentialsDir, `oauth-${safeId}.key`);
+    if (!existsSync(target) || !this.isEncryptionAvailable()) {
+      this.oauthTokenCache.set(safeId, null);
+      return null;
+    }
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(target, 'utf8'));
+      if (!isKeyFile(parsed)) return null;
+      const decrypted = safeStorage.decryptString(Buffer.from(parsed.encrypted, 'base64'));
+      this.oauthTokenCache.set(safeId, decrypted);
+      return decrypted;
+    } catch {
+      this.oauthTokenCache.set(safeId, null);
+      return null;
+    }
+  }
+
+  clearProviderSecret(providerId: string): void {
+    const safeId = providerId.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{2,40}$/.test(safeId)) return;
+    const target = join(this.credentialsDir, `oauth-${safeId}.key`);
+    if (existsSync(target)) rmSync(target, { force: true });
+    this.oauthTokenCache.set(safeId, null);
   }
 }
 
