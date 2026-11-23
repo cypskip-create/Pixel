@@ -2,6 +2,13 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
+## Phase H1 — Hermes Agent Reverse-Engineering & Blueprint (2026-11-23)
+
+- **Research Complete (No Production Code Modified in Phase H1):** Completed 10-pass reverse-engineering of `NousResearch/hermes-agent` at pinned commit `0f602c5f6f18615632535251d62a2db74ce93b69` (MIT, local research clone `C:\dev\pixel-research\hermes-agent`).
+- **REA MCP Verified (`6.10.1`):** Bounded `analyze_javascript_application` runs succeeded on Hermes Desktop Electron (`ev_845b4b88b06113608ed413514591952f5137e8f2658c76e58331b87405e534de` / `ev_a1dd461517ef623229ab5ea3a60355fd5ea98c94a3f490cf28cfb6858bfdd939`) and Renderer (`ev_07250be5667d16cb33969a3a7bb250b5968018183af58c8bd73a6b246ced4d05` / `ev_9a9c678827f3b621ee945a9bf9eafb7b453a7d0676e92ec52e1e81ecca4cc904`). Full Python AST + `git ls-files` scan indexed all 27,462 tracked files and registered tools.
+- **Permanent Knowledge Base & Blueprint:** Stored under `docs/research/hermes/` (22 documents including `README.md`, `RESEARCH_STATUS.md`, `SOURCE_INVENTORY.md`, `REA_EVIDENCE_INDEX.md`, `TOOL_INVENTORY.json`, subsystem analyses, `HERMES_VS_PIXEL.md`, `PIXEL_TARGET_ARCHITECTURE.md`, `PIXEL_MIGRATION_PLAN.md`, and `IMPLEMENTATION_CHECKLIST.md`).
+- **Ready for Phase H2 (Implementation):** Start with Phase A (`pixel-agent-v2` Python agent engine) and Phase B (Git/Files/GitHub completion) per `docs/research/hermes/PIXEL_MIGRATION_PLAN.md`.
+
 ## Latest Checkpoint (2026-11-23 — Local Uncommitted)
 
 Latest validation follow-up: the disposable WPF UIA agent workflow passed on
