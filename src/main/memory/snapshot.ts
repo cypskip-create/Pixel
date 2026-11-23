@@ -65,12 +65,22 @@ export class SessionMemorySnapshotManager {
 
   constructor(
     private readonly store: MemoryStore,
-    private readonly budgets: {
+    private budgets: {
       userProfileChars?: number;
       projectKnowledgeChars?: number;
       dynamicContextChars?: number;
     } = {},
   ) {}
+
+  /** Updates runtime memory character budgets (Hermes `memory.memory_char_limit` & `memory.user_char_limit`) and invalidates cached snapshots. */
+  updateBudgets(next: {
+    userProfileChars?: number;
+    projectKnowledgeChars?: number;
+    dynamicContextChars?: number;
+  }): void {
+    this.budgets = { ...this.budgets, ...next };
+    this.snapshots.clear();
+  }
 
   /** Returns the frozen snapshot for (conversationId, projectId), building it lazily once per session. */
   getOrCreateSnapshot(conversationId: string, projectId: string): FrozenSessionSnapshot {

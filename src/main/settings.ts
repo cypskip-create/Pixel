@@ -34,6 +34,7 @@ export class SettingsStore {
   private githubTokenCache: string | null = null;
   private githubTokenLoaded = false;
   private readonly oauthTokenCache = new Map<string, string | null>();
+  private readonly providerKeyCache = new Map<string, string | null>();
 
   constructor(userDataDir: string) {
     this.settingsPath = join(userDataDir, 'settings.json');
@@ -150,6 +151,80 @@ export class SettingsStore {
     }
     this.apiKeyCache = null;
     this.apiKeyLoaded = true;
+  }
+
+  private providerKeyPath(providerId: string): string {
+    const safe = providerId.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (!safe || safe.length > 48) throw new Error('Invalid provider id.');
+    return join(this.credentialsDir, `provider-${safe}.key`);
+  }
+
+  /** Encrypt and persist an API key for any configured provider via DPAPI. */
+  setProviderApiKey(providerId: string, key: string): { ok: boolean; error?: string } {
+    if (providerId === 'deepseek') return this.setApiKey(key);
+    const trimmed = key.trim();
+    if (!trimmed) return { ok: false, error: 'The API key is empty.' };
+    if (!this.isEncryptionAvailable()) {
+      return {
+        ok: false,
+        error: 'Windows credential encryption is unavailable on this account, so Pixel will not store the key.',
+      };
+    }
+    try {
+      const targetPath = this.providerKeyPath(providerId);
+      const encrypted = safeStorage.encryptString(trimmed);
+      mkdirSync(dirname(targetPath), { recursive: true });
+      const payload: KeyFile = { encrypted: encrypted.toString('base64') };
+      writeFileSync(targetPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
+      this.providerKeyCache.set(providerId, trimmed);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: `Pixel could not save the ${providerId} API key securely.` };
+    }
+  }
+
+  getProviderApiKey(providerId: string): string | null {
+    if (providerId === 'deepseek') return this.getApiKey();
+    if (this.providerKeyCache.has(providerId)) return this.providerKeyCache.get(providerId) ?? null;
+    let targetPath: string;
+    try {
+      targetPath = this.providerKeyPath(providerId);
+    } catch {
+      return null;
+    }
+    if (!existsSync(targetPath) || !this.isEncryptionAvailable()) {
+      this.providerKeyCache.set(providerId, null);
+      return null;
+    }
+    try {
+      const raw = readFileSync(targetPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (!isKeyFile(parsed)) return null;
+      const decrypted = safeStorage.decryptString(Buffer.from(parsed.encrypted, 'base64'));
+      this.providerKeyCache.set(providerId, decrypted);
+      return decrypted;
+    } catch {
+      this.providerKeyCache.set(providerId, null);
+      return null;
+    }
+  }
+
+  hasProviderApiKey(providerId: string): boolean {
+    return this.getProviderApiKey(providerId) !== null;
+  }
+
+  clearProviderApiKey(providerId: string): void {
+    if (providerId === 'deepseek') {
+      this.clearApiKey();
+      return;
+    }
+    const targetPath = this.providerKeyPath(providerId);
+    try {
+      if (existsSync(targetPath)) rmSync(targetPath, { force: true });
+    } catch {
+      throw new Error(`Pixel could not remove the saved ${providerId} API key.`);
+    }
+    this.providerKeyCache.set(providerId, null);
   }
 
   /** Encrypt and persist an optional GitHub Personal Access Token via DPAPI. */

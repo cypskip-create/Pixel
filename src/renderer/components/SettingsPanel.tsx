@@ -4,10 +4,11 @@ import {
   ListChecks, Mic, Palette, Plug, ShieldCheck, Sparkles, Terminal, Wrench, X,
 } from 'lucide-react';
 import type {
-  AppSettings, AssistantState, ConnectionTestResult, CypsErrorCode, DiagnosticsSnapshot,
-  Mode, PluginView, ToolCatalogEntry, VoiceModelInfo, VoiceModelProgress,
+  AppSettings, AssistantState, ConnectionTestResult, CustomEndpointConfig, CypsErrorCode,
+  DiagnosticsSnapshot, FallbackProviderEntry, Mode, PluginView, ProviderId, ReasoningEffort,
+  ToolCatalogEntry, VoiceModelInfo, VoiceModelProgress,
 } from '@shared/types';
-import { getModeDescriptor } from '@shared/types';
+import { getModeDescriptor, getProviderDescriptor, PROVIDER_CATALOG } from '@shared/types';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { AutomationPanel } from '@/components/AutomationPanel';
@@ -820,23 +821,87 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
         <Group icon={Cpu} title="Provider & API key" category="ai-models">
           <Row label="Provider">
-            <span className="text-[11px] font-medium text-[var(--color-ink)]">{settings.provider.provider}</span>
-          </Row>
-          <Row label="Primary model">
             <select
-              aria-label="Primary model"
-              value={settings.provider.primaryModel}
-              onChange={(event) => onPatch({ provider: { primaryModel: event.target.value } })}
+              aria-label="Active model provider"
+              value={settings.provider.provider}
+              onChange={(event) => {
+                const nextProvider = event.target.value as ProviderId;
+                const desc = getProviderDescriptor(nextProvider);
+                void onPatch({
+                  provider: {
+                    provider: nextProvider,
+                    primaryModel: desc.defaultModel,
+                    reasoningModel: desc.reasoningModel,
+                    baseUrl: nextProvider === 'custom' || nextProvider === 'ollama' ? desc.defaultBaseUrl : '',
+                  },
+                });
+              }}
               className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)]"
             >
-              <option value="deepseek-flash">DeepSeek Flash (default)</option>
-              <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-              <option value="deepseek-chat">DeepSeek Chat</option>
-              <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+              {PROVIDER_CATALOG.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
             </select>
           </Row>
+          <Row label="Primary model">
+            {settings.provider.provider === 'deepseek' ? (
+              <select
+                aria-label="Primary model"
+                value={settings.provider.primaryModel}
+                onChange={(event) => onPatch({ provider: { primaryModel: event.target.value } })}
+                className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)]"
+              >
+                <option value="deepseek-flash">DeepSeek Flash (default)</option>
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                <option value="deepseek-chat">DeepSeek Chat</option>
+                <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+              </select>
+            ) : (
+              <input
+                aria-label="Primary model"
+                type="text"
+                value={settings.provider.primaryModel}
+                onChange={(event) => onPatch({ provider: { primaryModel: event.target.value } })}
+                placeholder={getProviderDescriptor(settings.provider.provider).defaultModel}
+                className="no-drag w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+              />
+            )}
+          </Row>
           <Row label="Reasoning model">
-            <span className="text-[11px] text-[var(--color-ink-dim)]">{settings.provider.reasoningModel}</span>
+            <input
+              aria-label="Reasoning model"
+              type="text"
+              value={settings.provider.reasoningModel}
+              onChange={(event) => onPatch({ provider: { reasoningModel: event.target.value } })}
+              className="no-drag w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)] outline-none focus:border-[var(--color-accent)]"
+            />
+          </Row>
+          <Row label="Base URL override">
+            <input
+              aria-label="Provider base URL"
+              type="text"
+              value={settings.provider.baseUrl ?? ''}
+              onChange={(event) => onPatch({ provider: { baseUrl: event.target.value } })}
+              placeholder={getProviderDescriptor(settings.provider.provider).defaultBaseUrl}
+              className="no-drag w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)] outline-none focus:border-[var(--color-accent)]"
+            />
+          </Row>
+          <Row label="Context length">
+            <input
+              aria-label="Model context length"
+              type="number"
+              min={4096}
+              max={2000000}
+              step={4096}
+              value={settings.provider.contextLength ?? 128000}
+              onChange={(event) => {
+                const parsed = Number.parseInt(event.target.value, 10);
+                if (Number.isFinite(parsed)) {
+                  void onPatch({ provider: { contextLength: Math.min(2_000_000, Math.max(4096, parsed)) } });
+                }
+              }}
+              className="no-drag w-28 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+            />
           </Row>
           <ApiKeyManager
             hasApiKey={hasApiKey}
@@ -845,6 +910,142 @@ export function SettingsPanel(props: SettingsPanelProps) {
             onTestConnection={onTestConnection}
             resetToken={keyEditorReset}
           />
+          <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] font-medium text-[var(--color-ink)]">Fallback model chain</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const next: FallbackProviderEntry[] = [
+                    ...(settings.provider.fallbackProviders ?? []),
+                    { provider: 'openrouter', model: 'anthropic/claude-sonnet-4', enabled: true },
+                  ];
+                  void onPatch({ provider: { fallbackProviders: next } });
+                }}
+                className="no-drag rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
+              >
+                + Add fallback
+              </button>
+            </div>
+            {(settings.provider.fallbackProviders ?? []).length === 0 ? (
+              <p className="text-[10px] text-[var(--color-ink-dim)]">
+                No fallback models configured. Add one to switch automatically on rate limits or outages.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {(settings.provider.fallbackProviders ?? []).map((fb, idx) => (
+                  <div key={`${fb.provider}-${fb.model}-${idx}`} className="flex items-center gap-1.5">
+                    <select
+                      aria-label={`Fallback provider ${idx + 1}`}
+                      value={fb.provider}
+                      onChange={(event) => {
+                        const list = [...(settings.provider.fallbackProviders ?? [])];
+                        const provider = event.target.value as ProviderId;
+                        list[idx] = { ...fb, provider, model: getProviderDescriptor(provider).defaultModel };
+                        void onPatch({ provider: { fallbackProviders: list } });
+                      }}
+                      className="no-drag rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+                    >
+                      {PROVIDER_CATALOG.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label={`Fallback model ${idx + 1}`}
+                      type="text"
+                      value={fb.model}
+                      onChange={(event) => {
+                        const list = [...(settings.provider.fallbackProviders ?? [])];
+                        list[idx] = { ...fb, model: event.target.value };
+                        void onPatch({ provider: { fallbackProviders: list } });
+                      }}
+                      className="no-drag min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[10.5px] text-[var(--color-ink)]"
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Remove fallback ${idx + 1}`}
+                      onClick={() => {
+                        const list = (settings.provider.fallbackProviders ?? []).filter((_, i) => i !== idx);
+                        void onPatch({ provider: { fallbackProviders: list } });
+                      }}
+                      className="no-drag rounded-md border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] font-medium text-[var(--color-ink)]">Custom endpoints</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const list: CustomEndpointConfig[] = [
+                    ...(settings.provider.customEndpoints ?? []),
+                    {
+                      id: `custom-${(settings.provider.customEndpoints?.length ?? 0) + 1}`,
+                      name: `Local Endpoint ${(settings.provider.customEndpoints?.length ?? 0) + 1}`,
+                      baseUrl: 'http://127.0.0.1:8080/v1',
+                      model: 'local-model',
+                      enabled: true,
+                    },
+                  ];
+                  void onPatch({ provider: { customEndpoints: list } });
+                }}
+                className="no-drag rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
+              >
+                + Add endpoint
+              </button>
+            </div>
+            {(settings.provider.customEndpoints ?? []).length === 0 ? (
+              <p className="text-[10px] text-[var(--color-ink-dim)]">
+                Add OpenAI-compatible endpoints (HTTPS or localhost).
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {(settings.provider.customEndpoints ?? []).map((ep, idx) => (
+                  <div key={ep.id} className="flex items-center gap-1.5">
+                    <input
+                      aria-label={`Custom endpoint name ${idx + 1}`}
+                      type="text"
+                      value={ep.name}
+                      onChange={(event) => {
+                        const list = [...(settings.provider.customEndpoints ?? [])];
+                        list[idx] = { ...ep, name: event.target.value };
+                        void onPatch({ provider: { customEndpoints: list } });
+                      }}
+                      className="no-drag w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[10.5px] text-[var(--color-ink)]"
+                    />
+                    <input
+                      aria-label={`Custom endpoint URL ${idx + 1}`}
+                      type="text"
+                      value={ep.baseUrl}
+                      onChange={(event) => {
+                        const list = [...(settings.provider.customEndpoints ?? [])];
+                        list[idx] = { ...ep, baseUrl: event.target.value };
+                        void onPatch({ provider: { customEndpoints: list } });
+                      }}
+                      className="no-drag min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Remove endpoint ${idx + 1}`}
+                      onClick={() => {
+                        const list = (settings.provider.customEndpoints ?? []).filter((_, i) => i !== idx);
+                        void onPatch({ provider: { customEndpoints: list } });
+                      }}
+                      className="no-drag rounded-md border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </Group>
 
         <Group icon={ShieldCheck} title="Mode & Permissions" category="agent-permissions">
@@ -965,6 +1166,61 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <Row label="Ambient chat background">
                 <span className="text-[11px] text-[var(--color-ink-dim)]">ASCII sharks ({settings.companion.reducedMotion ? 'static · reduced motion' : 'active'})</span>
               </Row>
+              <Row label="UI scale">
+                <select
+                  aria-label="UI scale"
+                  value={String(settings.display?.uiScale ?? 100)}
+                  onChange={(event) => void onPatch({ display: { uiScale: Number.parseInt(event.target.value, 10) } })}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="90">90% (compact)</option>
+                  <option value="100">100% (default)</option>
+                  <option value="110">110%</option>
+                  <option value="120">120% (large)</option>
+                </select>
+              </Row>
+              <Row label="Chat text scale">
+                <select
+                  aria-label="Chat text scale"
+                  value={String(settings.display?.chatTextScale ?? 100)}
+                  onChange={(event) => void onPatch({ display: { chatTextScale: Number.parseInt(event.target.value, 10) } })}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="90">90%</option>
+                  <option value="100">100% (default)</option>
+                  <option value="115">115%</option>
+                  <option value="130">130%</option>
+                </select>
+              </Row>
+              <Row label="Sidebar density">
+                <select
+                  aria-label="Sidebar density"
+                  value={settings.display?.sessionDensity ?? 'comfortable'}
+                  onChange={(event) => void onPatch({ display: { sessionDensity: event.target.value === 'compact' ? 'compact' : 'comfortable' } })}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="comfortable">Comfortable</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </Row>
+              <Toggle
+                label="Collapse reasoning blocks by default"
+                hint="Keep model reasoning collapsed in chat until you expand it."
+                checked={settings.display?.reasoningCollapsed ?? true}
+                onChange={(value) => onPatch({ display: { reasoningCollapsed: value } })}
+              />
+              <Toggle
+                label="Hide inline code diffs"
+                hint="Keep file patch previews compact inside conversation turns."
+                checked={settings.display?.hideCodeDiffs ?? false}
+                onChange={(value) => onPatch({ display: { hideCodeDiffs: value } })}
+              />
+              <Toggle
+                label="Mute UI sounds"
+                hint="Silence completion chimes and notification audio cues."
+                checked={settings.display?.muteSounds ?? false}
+                onChange={(value) => onPatch({ display: { muteSounds: value } })}
+              />
             </Group>
 
             <Group icon={Terminal} title="Diagnostics & Runtime" category="advanced">
@@ -1014,6 +1270,160 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   <option value="2">2 concurrent</option>
                   <option value="3">3 concurrent (max)</option>
                 </select>
+              </Row>
+              <Row label="Subagent turn limit">
+                <input
+                  aria-label="Subagent turn limit"
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={settings.agent?.delegationMaxIterations ?? 12}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { delegationMaxIterations: Math.min(30, Math.max(2, parsed)) } });
+                  }}
+                  className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Subagent timeout (s)">
+                <input
+                  aria-label="Subagent timeout seconds"
+                  type="number"
+                  min={15}
+                  max={600}
+                  value={settings.agent?.delegationChildTimeoutSec ?? 180}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { delegationChildTimeoutSec: Math.min(600, Math.max(15, parsed)) } });
+                  }}
+                  className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Delegation provider">
+                <select
+                  aria-label="Delegation provider override"
+                  value={settings.agent?.delegationProvider ?? ''}
+                  onChange={(event) => void onPatch({ agent: { delegationProvider: event.target.value as ProviderId | '' } })}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="">Inherit active provider</option>
+                  {PROVIDER_CATALOG.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </Row>
+              <Row label="Delegation model">
+                <input
+                  aria-label="Delegation model override"
+                  type="text"
+                  value={settings.agent?.delegationModel ?? ''}
+                  onChange={(event) => void onPatch({ agent: { delegationModel: event.target.value } })}
+                  placeholder="Inherit primary model"
+                  className="no-drag w-44 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Delegation effort">
+                <select
+                  aria-label="Delegation reasoning effort"
+                  value={settings.agent?.delegationReasoningEffort ?? 'inherit'}
+                  onChange={(event) => void onPatch({ agent: { delegationReasoningEffort: event.target.value as ReasoningEffort | 'inherit' } })}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="inherit">Inherit</option>
+                  <option value="none">None</option>
+                  <option value="low">Low</option>
+                  <option value="high">High</option>
+                  <option value="max">Max</option>
+                </select>
+              </Row>
+              <Row label="API retries">
+                <input
+                  aria-label="API retries"
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={settings.agent?.apiMaxRetries ?? 2}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { apiMaxRetries: Math.min(5, Math.max(0, parsed)) } });
+                  }}
+                  className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Memory budget (chars)">
+                <input
+                  aria-label="Memory budget characters"
+                  type="number"
+                  min={300}
+                  max={4000}
+                  step={100}
+                  value={settings.agent?.memoryCharLimit ?? 900}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { memoryCharLimit: Math.min(4000, Math.max(300, parsed)) } });
+                  }}
+                  className="no-drag w-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Profile budget (chars)">
+                <input
+                  aria-label="Profile budget characters"
+                  type="number"
+                  min={200}
+                  max={3000}
+                  step={100}
+                  value={settings.agent?.userProfileCharLimit ?? 700}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { userProfileCharLimit: Math.min(3000, Math.max(200, parsed)) } });
+                  }}
+                  className="no-drag w-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Toggle
+                label="Auto-compression"
+                hint="Summarize older middle turns when conversations approach the context limit."
+                checked={settings.agent?.compressionEnabled ?? true}
+                onChange={(value) => onPatch({ agent: { compressionEnabled: value } })}
+              />
+              <Row label="Compression threshold">
+                <input
+                  aria-label="Compression threshold"
+                  type="number"
+                  min={0.4}
+                  max={0.95}
+                  step={0.05}
+                  value={settings.agent?.compressionThreshold ?? 0.75}
+                  onChange={(event) => {
+                    const parsed = Number.parseFloat(event.target.value);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { compressionThreshold: Math.min(0.95, Math.max(0.4, parsed)) } });
+                  }}
+                  className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Protected recent messages">
+                <input
+                  aria-label="Protected recent messages"
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={settings.agent?.compressionProtectLastN ?? 6}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) void onPatch({ agent: { compressionProtectLastN: Math.min(20, Math.max(2, parsed)) } });
+                  }}
+                  className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Default timezone">
+                <input
+                  aria-label="Default timezone"
+                  type="text"
+                  placeholder="System default (e.g. America/New_York)"
+                  value={settings.agent?.defaultTimezone ?? ''}
+                  onChange={(event) => void onPatch({ agent: { defaultTimezone: event.target.value } })}
+                  className="no-drag w-56 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
               </Row>
               <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
                 Choose the TypeScript executor (default) or the Hermes-inspired Python agent engine (pixel-agent-v2). Electron’s PermissionBroker remains authoritative in both modes.

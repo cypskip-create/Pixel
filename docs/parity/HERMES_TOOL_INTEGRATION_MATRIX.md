@@ -1,0 +1,15 @@
+# Hermes Tool Integration Matrix
+
+**Reference Commit:** `352b249f67fb6a4a7d7904acaca9dd410db229e0` (`C:\dev\pixel-research\hermes-agent\tools\`)
+
+| Category | Hermes Tools | Pixel Equivalent | Status | Test Evidence |
+| :--- | :--- | :--- | :--- | :--- |
+| **Files & Patching** | `read_file`, `write_file`, `patch`, `search_files` | `file_read` (incl. DOCX/PPTX/XLSX/PDF), `file_write`, `file_patch`, `file_list`, `file_search_content` | **Implemented and tested** | `tests/files.test.ts`, `tests/phase-b-git-files-github.test.ts` |
+| **Git & GitHub** | `terminal` git flows + GitHub MCP/tools | `git_status`, `git_diff`, `git_log`, `git_branch_*`, `git_stage`, `git_unstage`, `git_commit`, `git_push`, `git_remote_list`, `git_repository_info`, 13 `github_*` tools | **Implemented and tested** | `tests/git-and-agent-autonomy.test.ts`, `tests/phase-b-git-files-github.test.ts` |
+| **Memory & Search** | `memory`, `session_search` | `memory_search`, `memory_list`, `memory_update`, `session_search` | **Implemented and tested** | `tests/memory.test.ts`, `tests/phase-c-memory-skills.test.ts` |
+| **Skills** | `skills_list`, `skill_view`, `skill_manage` | `skills_list`, `skill_view`, `skill_draft_create` | **Implemented and tested** | `tests/phase-c-memory-skills.test.ts` |
+| **MCP & Calendar** | `mcp_*` dynamic tools | `mcp.<serverId>.<toolName>` + 7 `gcal_*` tools | **Implemented and tested** | `tests/phase-d-mcp-plugins.test.ts` |
+| **Delegation** | `delegate_task` | `SpecialistCoordinator.delegate` / `delegateParallel` | **Implemented and tested** | `tests/phase-e-durable-tasks-scheduler-delegation.test.ts` |
+| **Browser** | `browser_navigate`, `browser_click`, `browser_type`, `browser_vision` | `browser_open_search`, `browser_navigate`, `browser_inspect`, `browser_click`, `browser_type`, `browser_scroll`, `browser_verify`, `browser_screenshot` | **Implemented and tested** | `tests/browser.test.ts` |
+| **Terminal & Processes** | `terminal`, `process` (persistent PTY/SSH/Docker) | Bounded command tools only (persistent PTY/Docker missing) | **Partially implemented (Stage 4–5)** | `tests/safety.test.ts` |
+| **Messaging & Webhooks** | `send_message`, `cronjob` tool | `LocalRoutineScheduler` IPC (agent-callable `cronjob` & messaging tools missing) | **Missing (Stage 8)** | — |

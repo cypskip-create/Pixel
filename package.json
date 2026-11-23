@@ -37,7 +37,8 @@
     "pack": "npm run build && npm run build:native && npm run build:voice-worker && electron-builder --win --dir --publish never",
     "dist": "npm run pack && electron-builder --win --publish never",
     "diagnose:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-installer.ps1",
-    "repair:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/repair-install-state.ps1"
+    "repair:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/repair-install-state.ps1",
+    "check:scope": "node scripts/check-no-bulk-import.mjs"
   },
   "dependencies": {
     "playwright": "^1.65.0",

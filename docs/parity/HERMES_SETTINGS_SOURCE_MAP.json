@@ -2,9 +2,9 @@
   "hermes_upstream_commit": "0f602c5f6f18615632535251d62a2db74ce93b69",
   "total_entries": 161,
   "counts_by_classification": {
-    "Partially implemented": 24,
-    "Missing": 61,
-    "Implemented and verified": 34,
+    "Implemented and verified": 53,
+    "Missing": 53,
+    "Partially implemented": 13,
     "Not applicable": 6,
     "Blocked by external credentials/platform": 31,
     "Platform-specific": 5
@@ -27,12 +27,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "provider.maxTokens (partial)",
-      "gap_classification": "Partially implemented",
+      "pixel_equivalent": "provider.contextLength (4096-2000000, default 128000)",
+      "gap_classification": "Implemented and verified",
       "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
-      "test_reference": "tests/settings-api-key.test.tsx",
-      "acceptance_status": "Open",
-      "notes": "Pixel exposes maxTokens; dedicated context-window override not yet split."
+      "test_reference": "tests/hermes-stage2-multiprovider-fallback.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 2: Dedicated context-window override clamped in mergeSettings and exposed in SettingsPanel."
     },
     {
       "id": "HSET-002",
@@ -51,12 +51,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "None (single primary + reasoning model)",
-      "gap_classification": "Missing",
-      "implementation_files": "-",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Pixel currently supports DeepSeek primary + reasoning model only."
+      "pixel_equivalent": "provider.fallbackProviders (ordered, deduplicated chain)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/main/providers/catalog.ts, src/main/providers/runtime.ts, python/pixel_agent/providers.py, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage2-multiprovider-fallback.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 2: Deduplicated Hermes-style fallback chain wired in both TypeScript RuntimeProvider and Python stream_with_fallback."
     },
     {
       "id": "HSET-003",
@@ -75,12 +75,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "None (inherits main model)",
-      "gap_classification": "Missing",
-      "implementation_files": "src/main/agents/coordinator.ts",
-      "test_reference": "tests/phase-e-durable-tasks-scheduler-delegation.test.ts",
-      "acceptance_status": "Open",
-      "notes": "SpecialistCoordinator uses active model; per-specialist model override planned."
+      "pixel_equivalent": "agent.delegationModel (optional string override)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage2-multiprovider-fallback.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 2: Optional specialist model override persisted in AppSettings and configurable in SettingsPanel."
     },
     {
       "id": "HSET-004",
@@ -99,12 +99,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "None (inherits active provider)",
-      "gap_classification": "Missing",
-      "implementation_files": "src/main/agents/coordinator.ts",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Multi-provider delegation routing planned."
+      "pixel_equivalent": "agent.delegationProvider (optional ProviderId override)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage2-multiprovider-fallback.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 2: Optional specialist provider override persisted in AppSettings and configurable in SettingsPanel."
     },
     {
       "id": "HSET-005",
@@ -123,12 +123,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "SPECIALISTS[id].limits.maxSteps (hardcoded)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/main/agents/coordinator.ts",
-      "test_reference": "tests/phase-e-durable-tasks-scheduler-delegation.test.ts",
-      "acceptance_status": "Open",
-      "notes": "Enforced in backend; not yet user-configurable in Settings."
+      "pixel_equivalent": "agent.delegationMaxIterations (2-30, default 12)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/main/agents/coordinator.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Clamped in mergeSettings, wired into planDelegation and SettingsPanel."
     },
     {
       "id": "HSET-006",
@@ -171,12 +171,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "SPECIALISTS[id].limits.timeoutMs (hardcoded)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/main/agents/coordinator.ts",
-      "test_reference": "tests/phase-e-durable-tasks-scheduler-delegation.test.ts",
-      "acceptance_status": "Open",
-      "notes": "Enforced per specialist; UI slider planned."
+      "pixel_equivalent": "agent.delegationChildTimeoutSec (15-600, default 180)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/main/agents/coordinator.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Clamped in mergeSettings, wired into planDelegation and SettingsPanel."
     },
     {
       "id": "HSET-008",
@@ -195,12 +195,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to model runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "provider.thinking.effort",
-      "gap_classification": "Partially implemented",
+      "pixel_equivalent": "agent.delegationReasoningEffort (inherit|none|low|high|max)",
+      "gap_classification": "Implemented and verified",
       "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
-      "test_reference": "tests/settings-api-key.test.tsx",
-      "acceptance_status": "Open",
-      "notes": "Global reasoning effort exists; separate subagent effort planned."
+      "test_reference": "tests/hermes-stage2-multiprovider-fallback.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 2: Dedicated delegation reasoning effort setting persisted in AppSettings and exposed in SettingsPanel."
     },
     {
       "id": "HSET-009",
@@ -243,12 +243,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to chat runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "routines[].timezone (per-routine IANA)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/main/routines/cron.ts, src/main/routines/index.ts",
-      "test_reference": "tests/phase-e-durable-tasks-scheduler-delegation.test.ts",
-      "acceptance_status": "Open",
-      "notes": "Per-routine IANA TZ supported; global default TZ setting planned."
+      "pixel_equivalent": "agent.defaultTimezone (IANA string, default system)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Default IANA timezone persisted in AppSettings and configurable in SettingsPanel."
     },
     {
       "id": "HSET-011",
@@ -795,12 +795,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to memory runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "SessionMemorySnapshotManager char budget (hardcoded)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/main/memory/snapshot.ts",
-      "test_reference": "tests/phase-c-memory-skills.test.ts",
-      "acceptance_status": "Open",
-      "notes": "Enforced in backend; UI budget slider planned."
+      "pixel_equivalent": "agent.memoryCharLimit (300-4000, default 900)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/main/memory/snapshot.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Applied dynamically via SessionMemorySnapshotManager.updateBudgets."
     },
     {
       "id": "HSET-034",
@@ -819,12 +819,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to memory runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "SessionMemorySnapshotManager profile budget (hardcoded)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/main/memory/snapshot.ts",
-      "test_reference": "tests/phase-c-memory-skills.test.ts",
-      "acceptance_status": "Open",
-      "notes": "Enforced in backend; UI budget slider planned."
+      "pixel_equivalent": "agent.userProfileCharLimit (200-3000, default 700)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/main/memory/snapshot.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Applied dynamically via SessionMemorySnapshotManager.updateBudgets."
     },
     {
       "id": "HSET-035",
@@ -891,12 +891,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to memory runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "Python pixel-agent-v2 compressor (always on)",
+      "pixel_equivalent": "agent.compressionEnabled (boolean, default true)",
       "gap_classification": "Implemented and verified",
-      "implementation_files": "python/pixel_agent/compressor.py",
-      "test_reference": "python/tests/test_pixel_agent.py",
+      "implementation_files": "src/shared/types.ts, python/pixel_agent/compressor.py, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
       "acceptance_status": "Verified",
-      "notes": "Active in Python runtime; explicit UI toggle planned."
+      "notes": "Stage 1A: User-toggleable in SettingsPanel and honored by Python compress_messages."
     },
     {
       "id": "HSET-038",
@@ -915,12 +915,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to memory runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "compressor.py threshold (hardcoded)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "python/pixel_agent/compressor.py",
-      "test_reference": "python/tests/test_pixel_agent.py",
-      "acceptance_status": "Open",
-      "notes": "Implemented in Python compressor; UI slider planned."
+      "pixel_equivalent": "agent.compressionThreshold (0.40-0.95, default 0.75)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, python/pixel_agent/compressor.py, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Configurable ratio honored by Python compress_messages."
     },
     {
       "id": "HSET-039",
@@ -987,12 +987,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to memory runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "compressor.py protect_recent (hardcoded)",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "python/pixel_agent/compressor.py",
-      "test_reference": "python/tests/test_pixel_agent.py",
-      "acceptance_status": "Open",
-      "notes": "Implemented in Python compressor; UI field planned."
+      "pixel_equivalent": "agent.compressionProtectLastN (2-20, default 6)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, python/pixel_agent/compressor.py, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Configurable keep_recent count honored by Python compress_messages."
     },
     {
       "id": "HSET-042",
@@ -2475,12 +2475,12 @@
       "persistence_behavior": "Persisted in Hermes config.yaml",
       "runtime_side_effects": "Applies to advanced runtime subsystem",
       "required_permissions": "Local settings write",
-      "pixel_equivalent": "TaskBudget.maxRetries",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/shared/types.ts, src/main/agent/budget.ts",
-      "test_reference": "tests/tasks.test.ts",
-      "acceptance_status": "Open",
-      "notes": "Enforced in TaskBudget; UI control planned."
+      "pixel_equivalent": "agent.apiMaxRetries (0-5, default 2)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1A: Configurable API retry ceiling clamped in mergeSettings and exposed in SettingsPanel."
     },
     {
       "id": "HSET-104",
@@ -2739,12 +2739,12 @@
       "persistence_behavior": "Client desktop store / localStorage / IPC",
       "runtime_side_effects": "Updates appearance desktop experience",
       "required_permissions": "Local desktop preference",
-      "pixel_equivalent": "None",
-      "gap_classification": "Missing",
-      "implementation_files": "-",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Desktop UI preference not yet implemented in Pixel."
+      "pixel_equivalent": "display.uiScale (85-125, default 100)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/Workspace.tsx, src/renderer/workspace-design-system.css, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1B: Applied via --pixel-ui-scale CSS custom property."
     },
     {
       "id": "HSET-115",
@@ -2763,12 +2763,12 @@
       "persistence_behavior": "Client desktop store / localStorage / IPC",
       "runtime_side_effects": "Updates appearance desktop experience",
       "required_permissions": "Local desktop preference",
-      "pixel_equivalent": "None",
-      "gap_classification": "Missing",
-      "implementation_files": "-",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Desktop UI preference not yet implemented in Pixel."
+      "pixel_equivalent": "display.chatTextScale (85-130, default 100)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/Workspace.tsx, src/renderer/workspace-design-system.css, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1B: Applied via --pixel-chat-scale CSS custom property."
     },
     {
       "id": "HSET-116",
@@ -2859,12 +2859,12 @@
       "persistence_behavior": "Client desktop store / localStorage / IPC",
       "runtime_side_effects": "Updates appearance desktop experience",
       "required_permissions": "Local desktop preference",
-      "pixel_equivalent": "None",
-      "gap_classification": "Missing",
-      "implementation_files": "-",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Desktop UI preference not yet implemented in Pixel."
+      "pixel_equivalent": "display.sessionDensity (comfortable|compact, default comfortable)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/Workspace.tsx, src/renderer/workspace-design-system.css, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1B: Applied via data-density attribute on workspace root."
     },
     {
       "id": "HSET-120",
@@ -3195,12 +3195,12 @@
       "persistence_behavior": "Client desktop store / localStorage / IPC",
       "runtime_side_effects": "Updates appearance desktop experience",
       "required_permissions": "Local desktop preference",
-      "pixel_equivalent": "None",
-      "gap_classification": "Missing",
-      "implementation_files": "-",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Desktop UI preference not yet implemented in Pixel."
+      "pixel_equivalent": "display.hideCodeDiffs (boolean, default false)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/Workspace.tsx, src/renderer/workspace-design-system.css, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1B: Applied via data-hide-code-diffs attribute on workspace root."
     },
     {
       "id": "HSET-134",
@@ -3219,12 +3219,12 @@
       "persistence_behavior": "Client desktop store / localStorage / IPC",
       "runtime_side_effects": "Updates appearance desktop experience",
       "required_permissions": "Local desktop preference",
-      "pixel_equivalent": "Expandable <details class='workspace-reasoning'> (collapsed by default)",
+      "pixel_equivalent": "display.reasoningCollapsed (boolean, default true)",
       "gap_classification": "Implemented and verified",
-      "implementation_files": "src/renderer/Workspace.tsx",
-      "test_reference": "tests/workspace-components.test.tsx",
+      "implementation_files": "src/shared/types.ts, src/renderer/Workspace.tsx, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
       "acceptance_status": "Verified",
-      "notes": "Reasoning collapsed by default."
+      "notes": "Stage 1B: User-configurable default open state for workspace-reasoning details."
     },
     {
       "id": "HSET-135",
@@ -3507,12 +3507,12 @@
       "persistence_behavior": "Client desktop store / localStorage / IPC",
       "runtime_side_effects": "Updates notifications desktop experience",
       "required_permissions": "Local desktop preference",
-      "pixel_equivalent": "None",
-      "gap_classification": "Missing",
-      "implementation_files": "-",
-      "test_reference": "-",
-      "acceptance_status": "Open",
-      "notes": "Desktop UI preference not yet implemented in Pixel."
+      "pixel_equivalent": "display.muteSounds (boolean, default false)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage1-runtime-display-parity.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 1B: Persisted UI sound mute toggle in AppSettings and SettingsPanel."
     },
     {
       "id": "HSET-147",
@@ -3675,12 +3675,12 @@
       "persistence_behavior": "View-backed store",
       "runtime_side_effects": "Manages Model Providers",
       "required_permissions": "Local main-process IPC",
-      "pixel_equivalent": "Single provider (DeepSeek) implemented; multi-provider hub missing",
-      "gap_classification": "Partially implemented",
-      "implementation_files": "src/main/providers/deepseek.ts",
-      "test_reference": "tests/settings-api-key.test.tsx",
-      "acceptance_status": "Open",
-      "notes": "Single provider (DeepSeek) implemented; multi-provider hub missing"
+      "pixel_equivalent": "Multi-provider selector + custom endpoints + fallback chain in SettingsPanel (ai-models)",
+      "gap_classification": "Implemented and verified",
+      "implementation_files": "src/shared/types.ts, src/main/providers/catalog.ts, src/main/providers/runtime.ts, src/main/settings.ts, src/renderer/components/SettingsPanel.tsx",
+      "test_reference": "tests/hermes-stage2-multiprovider-fallback.test.ts",
+      "acceptance_status": "Verified",
+      "notes": "Stage 2: Full 8-provider catalog (DeepSeek, OpenAI, OpenRouter, Anthropic, Gemini, xAI, Ollama, Custom), per-provider DPAPI keys, custom OpenAI-compatible endpoints, and fallback chain UI."
     },
     {
       "id": "HSET-154",

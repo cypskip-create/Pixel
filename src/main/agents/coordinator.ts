@@ -123,6 +123,10 @@ export interface DelegationRequest {
    * never unrestricted access.
    */
   explicitToolAllowlist?: string[];
+  /** Optional step limit override (clamped 2–30; Hermes `delegation.max_iterations`). */
+  maxIterationsOverride?: number;
+  /** Optional timeout override in seconds (clamped 15–600; Hermes `delegation.child_timeout_seconds`). */
+  childTimeoutSecOverride?: number;
 }
 
 export interface DelegationPlan {
@@ -243,6 +247,18 @@ export function planDelegation(
     });
   }
 
+  const effectiveLimits = definition.limits.maxSteps === 0
+    ? definition.limits
+    : {
+        maxSteps: request.maxIterationsOverride !== undefined
+          ? Math.max(2, Math.min(30, Math.round(request.maxIterationsOverride)))
+          : definition.limits.maxSteps,
+        maxTokens: definition.limits.maxTokens,
+        timeoutMs: request.childTimeoutSecOverride !== undefined
+          ? Math.max(15, Math.min(600, Math.round(request.childTimeoutSecOverride))) * 1_000
+          : definition.limits.timeoutMs,
+      };
+
   return {
     specialist: request.specialist,
     objective: request.objective,
@@ -250,7 +266,7 @@ export function planDelegation(
     parentTaskId: request.parentTaskId,
     tools,
     approvalTools,
-    limits: definition.limits,
+    limits: effectiveLimits,
     withheld,
   };
 }

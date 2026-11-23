@@ -1,0 +1,15 @@
+# Hermes Desktop UI Integration Matrix
+
+**Reference Commit:** `352b249f67fb6a4a7d7904acaca9dd410db229e0` (`C:\dev\pixel-research\hermes-agent\apps\desktop\src\app\`)
+
+| Hermes Desktop Surface | Pixel Target | Status | Test / Visual Evidence |
+| :--- | :--- | :--- | :--- |
+| **Chat Composer & Streaming** | `src/renderer/components/WorkspaceComposer.tsx`, `Workspace.tsx` | **Implemented, live verification pending** | `tests/workspace-components.test.tsx`, `tests/monochrome-theme.test.ts` |
+| **Inline Expandable Tool Activity Pill** | `src/renderer/components/AgentActivityBar.tsx` | **Implemented and tested** | `tests/agent-activity-bar.test.tsx` |
+| **Bottom Runtime Status Strip** | `src/renderer/Workspace.tsx` (`.workspace-status-strip`) | **Implemented and tested** | `tests/workspace-components.test.tsx` |
+| **Running Tasks & Delegation Hierarchy** | `src/renderer/components/WorkspaceTasks.tsx` | **Implemented and tested** | `tests/phase-e-durable-tasks-scheduler-delegation.test.ts` |
+| **Display Scale, Chat Scale, Density & Reasoning/Diff Toggles** | `src/renderer/Workspace.tsx`, `SettingsPanel.tsx`, `workspace-design-system.css` | **Implemented and tested** | `tests/hermes-stage1-runtime-display-parity.test.ts` |
+| **Plugins, GitHub, MCP & Google Calendar Settings** | `src/renderer/components/WorkspacePluginManager.tsx` | **Implemented and tested** | `tests/phase-d-mcp-plugins.test.ts` |
+| **Session Tabs, Split Panes & Command Palette** | `src/renderer/Workspace.tsx` | **Missing (Stage 3)** | — |
+| **Right-Side File Browser & Integrated Terminal Pane** | `src/renderer/Workspace.tsx` | **Missing (Stage 3)** | — |
+| **Command Center, Capabilities, Messaging, Artifacts & Profiles Views** | `src/renderer/Workspace.tsx` | **Missing (Stage 9)** | — |

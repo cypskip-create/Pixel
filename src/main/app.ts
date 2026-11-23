@@ -272,7 +272,10 @@ export async function start(): Promise<void> {
   });
   void captureAuthorized;
 
-  const provider = new RuntimeProvider(() => store.getApiKey());
+  const provider = new RuntimeProvider(() => store.getApiKey(), {
+    getSettings: () => store.get(),
+    getProviderApiKey: (providerId) => store.getProviderApiKey(providerId),
+  });
 
   const controller = await registerIpcHandlers({
     settings: store,

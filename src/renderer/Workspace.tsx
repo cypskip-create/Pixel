@@ -531,7 +531,16 @@ export function Workspace(): React.JSX.Element {
   ) : null;
 
   return (
-    <div className={`workspace-shell${settings.companion.reducedMotion ? ' reduce-motion' : ''}`} data-workspace>
+    <div
+      className={`workspace-shell${settings.companion.reducedMotion ? ' reduce-motion' : ''}`}
+      data-workspace
+      data-density={settings.display?.sessionDensity ?? 'comfortable'}
+      data-hide-code-diffs={settings.display?.hideCodeDiffs ? 'true' : 'false'}
+      style={{
+        ['--pixel-ui-scale' as string]: String((settings.display?.uiScale ?? 100) / 100),
+        ['--pixel-chat-scale' as string]: String((settings.display?.chatTextScale ?? 100) / 100),
+      }}
+    >
       <header className="workspace-titlebar drag">
         <div className="flex min-w-0 items-center gap-2"><PixelMark size={22} /><span className="pixel-wordmark pixel-wordmark-large">PIXEL</span>
           {view !== 'chat' ? <><span className="workspace-title-divider" /><span className="truncate text-[13px] text-[var(--color-ink-soft)]">{viewTitle[view]}</span></> : null}
@@ -608,7 +617,7 @@ export function Workspace(): React.JSX.Element {
               {chat.messages.map((message) => <article key={message.id} className={`workspace-message ${message.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
                 <div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>{message.role === 'user' ? 'You' : 'Pixel'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{message.aborted ? <span>Stopped</span> : null}</div>{message.error && !message.content ? <p role="alert" className="text-neutral-200">{message.error}</p> : <MarkdownMessage text={message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')} />}{message.error && message.content ? <p role="alert" className="mt-2 text-neutral-200">{message.error}</p> : null}</div>
               </article>)}
-              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning"><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
+              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning" open={settings.display?.reasoningCollapsed === false}><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
               {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
             </div>
             <WorkspacePixPlay state={assistantState} reducedMotion={settings.companion.reducedMotion} />

@@ -92,8 +92,134 @@ export type Surface = (typeof SURFACES)[number];
  * Providers and models
  * ------------------------------------------------------------------ */
 
-export const PROVIDER_IDS = ['deepseek'] as const;
+export const PROVIDER_IDS = [
+  'deepseek',
+  'openai',
+  'openrouter',
+  'anthropic',
+  'gemini',
+  'xai',
+  'ollama',
+  'custom',
+] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+export interface ProviderDescriptor {
+  id: ProviderId;
+  label: string;
+  defaultBaseUrl: string;
+  requiresApiKey: boolean;
+  defaultModel: string;
+  reasoningModel: string;
+}
+
+export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    defaultBaseUrl: 'https://api.deepseek.com',
+    requiresApiKey: true,
+    defaultModel: 'deepseek-flash',
+    reasoningModel: 'deepseek-v4-pro',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    requiresApiKey: true,
+    defaultModel: 'gpt-4o',
+    reasoningModel: 'o3-mini',
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    requiresApiKey: true,
+    defaultModel: 'anthropic/claude-sonnet-4',
+    reasoningModel: 'deepseek/deepseek-r1',
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic (OpenAI-compat)',
+    defaultBaseUrl: 'https://api.anthropic.com/v1',
+    requiresApiKey: true,
+    defaultModel: 'claude-sonnet-4-20250514',
+    reasoningModel: 'claude-opus-4-20250514',
+  },
+  {
+    id: 'gemini',
+    label: 'Google Gemini',
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    requiresApiKey: true,
+    defaultModel: 'gemini-2.5-flash',
+    reasoningModel: 'gemini-2.5-pro',
+  },
+  {
+    id: 'xai',
+    label: 'xAI (Grok)',
+    defaultBaseUrl: 'https://api.x.ai/v1',
+    requiresApiKey: true,
+    defaultModel: 'grok-3',
+    reasoningModel: 'grok-3-mini',
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama (Local)',
+    defaultBaseUrl: 'http://127.0.0.1:11434/v1',
+    requiresApiKey: false,
+    defaultModel: 'llama3.2',
+    reasoningModel: 'deepseek-r1:14b',
+  },
+  {
+    id: 'custom',
+    label: 'Custom OpenAI-Compatible',
+    defaultBaseUrl: 'http://127.0.0.1:8080/v1',
+    requiresApiKey: false,
+    defaultModel: 'local-model',
+    reasoningModel: 'local-model',
+  },
+] as const;
+
+export function getProviderDescriptor(providerId: string): ProviderDescriptor {
+  return PROVIDER_CATALOG.find((p) => p.id === providerId) ?? PROVIDER_CATALOG[0]!;
+}
+
+/**
+ * Validate a provider base URL. Requires HTTPS for remote hosts; allows plain
+ * HTTP only on loopback (localhost / 127.0.0.1 / [::1]) so credentials never
+ * cross untrusted networks in plaintext.
+ */
+export function isSafeProviderBaseUrl(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 512) return false;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:') return Boolean(parsed.hostname);
+    if (parsed.protocol === 'http:') {
+      const host = parsed.hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export interface CustomEndpointConfig {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+}
+
+export interface FallbackProviderEntry {
+  provider: ProviderId;
+  model: string;
+  baseUrl?: string;
+  customEndpointId?: string;
+  enabled: boolean;
+}
 
 /**
  * Exactly two DeepSeek models exist. Do not add speculative names.
@@ -190,6 +316,14 @@ export interface ProviderSettings {
   primaryModel: string;
   /** Deeper reasoning model for demanding text-only requests. */
   reasoningModel: string;
+  /** Optional explicit base URL override (required for custom endpoints). */
+  baseUrl?: string;
+  /** Optional explicit context window override (4,096–2,000,000). Matches Hermes `model_context_length`. */
+  contextLength?: number;
+  /** Named custom OpenAI-compatible endpoints (Hermes `custom_providers`). */
+  customEndpoints?: CustomEndpointConfig[];
+  /** Ordered fallback model chain (Hermes `fallback_providers`). */
+  fallbackProviders?: FallbackProviderEntry[];
   thinking: ThinkingConfig;
   temperature: number;
   maxTokens: number;
@@ -301,6 +435,45 @@ export interface AgentRuntimeSettings {
   maxTurns: number;
   /** Maximum parallel child specialists (1–3, default 3). Matches Hermes `delegation.max_concurrent_children`. */
   maxConcurrentSpecialists: number;
+  /** Per-specialist step limit override (2–30, default 12). Matches Hermes `delegation.max_iterations`. */
+  delegationMaxIterations: number;
+  /** Per-specialist timeout in seconds (15–600, default 180). Matches Hermes `delegation.child_timeout_seconds`. */
+  delegationChildTimeoutSec: number;
+  /** Provider API retry ceiling (0–5, default 2). Matches Hermes `agent.api_max_retries`. */
+  apiMaxRetries: number;
+  /** Frozen project memory character budget (300–4000, default 900). Matches Hermes `memory.memory_char_limit`. */
+  memoryCharLimit: number;
+  /** Frozen user profile character budget (200–3000, default 700). Matches Hermes `memory.user_char_limit`. */
+  userProfileCharLimit: number;
+  /** Auto-compression toggle for long conversations. Matches Hermes `compression.enabled`. */
+  compressionEnabled: boolean;
+  /** Context utilization threshold (0.40–0.95, default 0.75). Matches Hermes `compression.threshold`. */
+  compressionThreshold: number;
+  /** Protected tail messages never summarized (2–20, default 6). Matches Hermes `compression.protect_last_n`. */
+  compressionProtectLastN: number;
+  /** Default IANA timezone for schedules & prompts (empty = system timezone). Matches Hermes `timezone`. */
+  defaultTimezone: string;
+  /** Optional provider override for delegated specialist tasks (empty = inherit active provider). Matches Hermes `delegation.provider`. */
+  delegationProvider?: ProviderId | '';
+  /** Optional model override for delegated specialist tasks (empty = inherit primary model). Matches Hermes `delegation.model`. */
+  delegationModel?: string;
+  /** Optional reasoning effort override for delegated specialist tasks. Matches Hermes `delegation.reasoning_effort`. */
+  delegationReasoningEffort?: ReasoningEffort | 'inherit';
+}
+
+export interface DisplayPreferences {
+  /** Workspace UI scale percentage (85–125, default 100). Matches Hermes `appearance.uiScale`. */
+  uiScale: number;
+  /** Chat message text scale percentage (85–130, default 100). Matches Hermes `appearance.chatTextScale`. */
+  chatTextScale: number;
+  /** Sidebar & list density. Matches Hermes `appearance.sessionDensity`. */
+  sessionDensity: 'comfortable' | 'compact';
+  /** Collapse reasoning blocks by default. Matches Hermes `appearance.reasoningCollapsed`. */
+  reasoningCollapsed: boolean;
+  /** Hide inline code diffs in chat tool previews. Matches Hermes `appearance.hideCodeDiffs`. */
+  hideCodeDiffs: boolean;
+  /** Mute completion chimes and UI sound cues. Matches Hermes `notifications.muteSounds`. */
+  muteSounds: boolean;
 }
 
 export interface AppSettings {
@@ -311,6 +484,7 @@ export interface AppSettings {
   companion: CompanionSettings;
   voice: VoiceSettings;
   privacy: PrivacySettings;
+  display: DisplayPreferences;
   /** Global shortcut to summon/hide the assistant. */
   globalAccelerator: string;
   /** Global shortcut for emergency stop. */
@@ -335,6 +509,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     provider: 'deepseek',
     primaryModel: 'deepseek-flash',
     reasoningModel: 'deepseek-v4-pro',
+    baseUrl: '',
+    contextLength: 128_000,
+    customEndpoints: [],
+    fallbackProviders: [],
     thinking: { ...DEFAULT_THINKING },
     temperature: 1,
     maxTokens: 8192,
@@ -344,6 +522,18 @@ export const DEFAULT_SETTINGS: AppSettings = {
     runtimeEngine: 'typescript',
     maxTurns: 12,
     maxConcurrentSpecialists: 3,
+    delegationMaxIterations: 12,
+    delegationChildTimeoutSec: 180,
+    apiMaxRetries: 2,
+    memoryCharLimit: 900,
+    userProfileCharLimit: 700,
+    compressionEnabled: true,
+    compressionThreshold: 0.75,
+    compressionProtectLastN: 6,
+    defaultTimezone: '',
+    delegationProvider: '',
+    delegationModel: '',
+    delegationReasoningEffort: 'inherit',
   },
   companion: {
     mode: DEFAULT_MODE,
@@ -377,6 +567,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
     persistHistory: true,
     automaticMemory: true,
     historyRetentionDays: 0,
+  },
+  display: {
+    uiScale: 100,
+    chatTextScale: 100,
+    sessionDensity: 'comfortable',
+    reasoningCollapsed: true,
+    hideCodeDiffs: false,
+    muteSounds: false,
   },
   globalAccelerator: 'CommandOrControl+Shift+C',
   emergencyStopAccelerator: 'CommandOrControl+Shift+Escape',
@@ -441,6 +639,129 @@ export function mergeSettings(partial: unknown): AppSettings {
   base.agent.maxConcurrentSpecialists = Math.round(
     finiteWithin(base.agent.maxConcurrentSpecialists, 1, 3, DEFAULT_SETTINGS.agent.maxConcurrentSpecialists),
   );
+  base.agent.delegationMaxIterations = Math.round(
+    finiteWithin(base.agent.delegationMaxIterations, 2, 30, DEFAULT_SETTINGS.agent.delegationMaxIterations),
+  );
+  base.agent.delegationChildTimeoutSec = Math.round(
+    finiteWithin(base.agent.delegationChildTimeoutSec, 15, 600, DEFAULT_SETTINGS.agent.delegationChildTimeoutSec),
+  );
+  base.agent.apiMaxRetries = Math.round(
+    finiteWithin(base.agent.apiMaxRetries, 0, 5, DEFAULT_SETTINGS.agent.apiMaxRetries),
+  );
+  base.agent.memoryCharLimit = Math.round(
+    finiteWithin(base.agent.memoryCharLimit, 300, 4_000, DEFAULT_SETTINGS.agent.memoryCharLimit),
+  );
+  base.agent.userProfileCharLimit = Math.round(
+    finiteWithin(base.agent.userProfileCharLimit, 200, 3_000, DEFAULT_SETTINGS.agent.userProfileCharLimit),
+  );
+  base.agent.compressionEnabled = base.agent.compressionEnabled !== false;
+  base.agent.compressionThreshold = Math.round(
+    finiteWithin(base.agent.compressionThreshold, 0.4, 0.95, DEFAULT_SETTINGS.agent.compressionThreshold) * 100,
+  ) / 100;
+  base.agent.compressionProtectLastN = Math.round(
+    finiteWithin(base.agent.compressionProtectLastN, 2, 20, DEFAULT_SETTINGS.agent.compressionProtectLastN),
+  );
+  if (typeof base.agent.defaultTimezone !== 'string' || base.agent.defaultTimezone.length > 100) {
+    base.agent.defaultTimezone = '';
+  } else {
+    base.agent.defaultTimezone = base.agent.defaultTimezone.trim();
+  }
+  if (!base.agent.delegationProvider || !PROVIDER_IDS.includes(base.agent.delegationProvider)) {
+    base.agent.delegationProvider = '';
+  }
+  if (typeof base.agent.delegationModel !== 'string' || base.agent.delegationModel.length > 160) {
+    base.agent.delegationModel = '';
+  } else {
+    base.agent.delegationModel = base.agent.delegationModel.trim();
+  }
+  if (
+    base.agent.delegationReasoningEffort !== 'inherit' &&
+    base.agent.delegationReasoningEffort !== 'none' &&
+    base.agent.delegationReasoningEffort !== 'low' &&
+    base.agent.delegationReasoningEffort !== 'high' &&
+    base.agent.delegationReasoningEffort !== 'max'
+  ) {
+    base.agent.delegationReasoningEffort = 'inherit';
+  }
+
+  // Stage 2: Multi-provider validation, safe base URL enforcement, and Hermes fallback deduplication.
+  if (!PROVIDER_IDS.includes(base.provider.provider)) {
+    base.provider.provider = DEFAULT_SETTINGS.provider.provider;
+  }
+  if (typeof base.provider.baseUrl === 'string' && base.provider.baseUrl.trim()) {
+    base.provider.baseUrl = isSafeProviderBaseUrl(base.provider.baseUrl)
+      ? base.provider.baseUrl.trim().replace(/\/+$/, '')
+      : '';
+  } else {
+    base.provider.baseUrl = '';
+  }
+  base.provider.contextLength = Math.round(
+    finiteWithin(base.provider.contextLength, 4_096, 2_000_000, DEFAULT_SETTINGS.provider.contextLength ?? 128_000),
+  );
+  const rawEndpoints = Array.isArray(base.provider.customEndpoints) ? base.provider.customEndpoints : [];
+  const seenEndpointIds = new Set<string>();
+  base.provider.customEndpoints = rawEndpoints
+    .filter((ep): ep is CustomEndpointConfig => Boolean(ep && typeof ep === 'object'))
+    .map((ep, idx) => ({
+      id: typeof ep.id === 'string' && ep.id.trim() ? ep.id.trim().slice(0, 64) : `custom-${idx + 1}`,
+      name: typeof ep.name === 'string' && ep.name.trim() ? ep.name.trim().slice(0, 80) : `Custom Endpoint ${idx + 1}`,
+      baseUrl: typeof ep.baseUrl === 'string' ? ep.baseUrl.trim().replace(/\/+$/, '') : '',
+      model: typeof ep.model === 'string' ? ep.model.trim().slice(0, 160) : '',
+      enabled: ep.enabled !== false,
+    }))
+    .filter((ep) => {
+      if (!isSafeProviderBaseUrl(ep.baseUrl) || !ep.model) return false;
+      if (seenEndpointIds.has(ep.id)) return false;
+      seenEndpointIds.add(ep.id);
+      return true;
+    })
+    .slice(0, 12);
+
+  const rawFallbacks = Array.isArray(base.provider.fallbackProviders) ? base.provider.fallbackProviders : [];
+  const seenFallbacks = new Set<string>();
+  base.provider.fallbackProviders = rawFallbacks
+    .filter((fb): fb is FallbackProviderEntry => Boolean(fb && typeof fb === 'object'))
+    .map((fb) => {
+      const provider: ProviderId = PROVIDER_IDS.includes(fb.provider) ? fb.provider : 'deepseek';
+      const model = typeof fb.model === 'string' ? fb.model.trim().slice(0, 160) : '';
+      const baseUrl = typeof fb.baseUrl === 'string' && isSafeProviderBaseUrl(fb.baseUrl)
+        ? fb.baseUrl.trim().replace(/\/+$/, '')
+        : undefined;
+      const customEndpointId = typeof fb.customEndpointId === 'string' && fb.customEndpointId.trim()
+        ? fb.customEndpointId.trim().slice(0, 64)
+        : undefined;
+      return {
+        provider,
+        model,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(customEndpointId ? { customEndpointId } : {}),
+        enabled: fb.enabled !== false,
+      };
+    })
+    .filter((fb) => {
+      if (!fb.model) return false;
+      const dedupeKey = `${fb.provider}|${fb.model.toLowerCase()}|${(fb.baseUrl ?? fb.customEndpointId ?? '').toLowerCase()}`;
+      if (seenFallbacks.has(dedupeKey)) return false;
+      seenFallbacks.add(dedupeKey);
+      return true;
+    })
+    .slice(0, 8);
+
+  base.display = {
+    ...DEFAULT_SETTINGS.display,
+    ...(typeof (partial as { display?: Partial<DisplayPreferences> } | undefined)?.display === 'object'
+      && (partial as { display?: Partial<DisplayPreferences> } | undefined)?.display !== null
+      ? (partial as { display?: Partial<DisplayPreferences> }).display
+      : {}),
+  };
+  base.display.uiScale = Math.round(finiteWithin(base.display.uiScale, 85, 125, DEFAULT_SETTINGS.display.uiScale));
+  base.display.chatTextScale = Math.round(finiteWithin(base.display.chatTextScale, 85, 130, DEFAULT_SETTINGS.display.chatTextScale));
+  if (base.display.sessionDensity !== 'comfortable' && base.display.sessionDensity !== 'compact') {
+    base.display.sessionDensity = DEFAULT_SETTINGS.display.sessionDensity;
+  }
+  base.display.reasoningCollapsed = base.display.reasoningCollapsed !== false;
+  base.display.hideCodeDiffs = base.display.hideCodeDiffs === true;
+  base.display.muteSounds = base.display.muteSounds === true;
 
   return base;
 }

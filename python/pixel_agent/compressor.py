@@ -109,23 +109,30 @@ def compress_messages(
     messages: list[dict[str, Any]],
     token_budget: int,
     *,
+    enabled: bool = True,
+    threshold_ratio: float = 1.0,
     keep_recent: int = 6,
     aux_summarizer: Optional[Callable[[list[dict[str, Any]]], str]] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     Two-stage Hermes-inspired compression:
       1. Prune bulky older tool outputs.
-      2. If still above `token_budget`, summarize middle turns while protecting
-         the system message(s) at the head and `keep_recent` messages at the tail
-         (never splitting an assistant tool_call from its tool result).
+      2. If still above `effective_budget = int(token_budget * threshold_ratio)`,
+         summarize middle turns while protecting the system message(s) at the
+         head and `keep_recent` messages at the tail (never splitting an
+         assistant tool_call from its tool result).
     """
     stats = {"prunedTools": 0, "compressedMiddle": 0, "usedAuxSummary": False}
-    if estimate_messages_tokens(messages) <= token_budget:
+    if not enabled:
+        return messages, stats
+    clamped_ratio = min(1.0, max(0.4, float(threshold_ratio)))
+    effective_budget = max(1, int(token_budget * clamped_ratio))
+    if estimate_messages_tokens(messages) <= effective_budget:
         return messages, stats
 
     working, pruned_count = prune_old_tool_outputs(messages, keep_recent_messages=keep_recent)
     stats["prunedTools"] = pruned_count
-    if estimate_messages_tokens(working) <= token_budget:
+    if estimate_messages_tokens(working) <= effective_budget:
         return working, stats
 
     # Split head (leading system messages), middle, and protected tail

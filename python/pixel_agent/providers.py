@@ -21,6 +21,26 @@ from .errors import AgentError, bound_error_text
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
+PROVIDER_DEFAULT_BASE_URLS: dict[str, str] = {
+    "deepseek": DEFAULT_DEEPSEEK_BASE_URL,
+    "openai": "https://api.openai.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "xai": "https://api.x.ai/v1",
+    "ollama": f"{DEFAULT_OLLAMA_BASE_URL}/v1",
+    "custom": "http://127.0.0.1:8080/v1",
+}
+
+FALLBACK_ELIGIBLE_CODES = frozenset({
+    "RATE_LIMITED",
+    "SERVER",
+    "NETWORK",
+    "TIMEOUT",
+    "INSUFFICIENT_BALANCE",
+    "NO_API_KEY",
+})
+
 
 @dataclass
 class ProviderConfig:
@@ -61,10 +81,10 @@ class ProviderTurnResult:
 def _resolve_chat_completions_url(config: ProviderConfig) -> str:
     base = (config.base_url or "").strip().rstrip("/")
     if not base:
-        base = DEFAULT_OLLAMA_BASE_URL if config.provider == "ollama" else DEFAULT_DEEPSEEK_BASE_URL
+        base = PROVIDER_DEFAULT_BASE_URLS.get(config.provider.lower(), DEFAULT_DEEPSEEK_BASE_URL)
     if base.endswith("/chat/completions"):
         return base
-    if base.endswith("/v1"):
+    if base.endswith("/v1") or base.endswith("/openai"):
         return f"{base}/chat/completions"
     return f"{base}/v1/chat/completions"
 
@@ -254,3 +274,63 @@ def stream_openai_compatible(
                 )
             )
     return result
+
+
+def build_fallback_chain(
+    primary: ProviderConfig,
+    fallbacks: Optional[list[ProviderConfig]] = None,
+) -> list[ProviderConfig]:
+    """Deduplicate `[primary, *fallbacks]` by normalized `(provider, model, base_url)`."""
+    chain: list[ProviderConfig] = []
+    seen: set[tuple[str, str, str]] = set()
+    for cfg in [primary, *(fallbacks or [])]:
+        provider_id = (cfg.provider or "deepseek").strip().lower()
+        model_id = (cfg.model or "").strip()
+        if not model_id:
+            continue
+        resolved_base = (cfg.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_id, DEFAULT_DEEPSEEK_BASE_URL)).strip().rstrip("/").lower()
+        key = (provider_id, model_id.lower(), resolved_base)
+        if key in seen:
+            continue
+        seen.add(key)
+        chain.append(cfg)
+    return chain
+
+
+def stream_with_fallback(
+    primary: ProviderConfig,
+    fallbacks: Optional[list[ProviderConfig]],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    cancel_event: threading.Event,
+    on_delta: Callable[[str], None],
+    on_reasoning: Callable[[str], None],
+    on_fallback: Optional[Callable[[ProviderConfig, ProviderConfig, AgentError], None]] = None,
+    stream_fn: Callable[..., ProviderTurnResult] = stream_openai_compatible,
+) -> tuple[ProviderTurnResult, ProviderConfig]:
+    """Execute `stream_fn` across the deduplicated Hermes-style fallback chain."""
+    chain = build_fallback_chain(primary, fallbacks)
+    last_error: Optional[AgentError] = None
+    for idx, cfg in enumerate(chain):
+        has_next = idx + 1 < len(chain)
+        try:
+            result = stream_fn(
+                cfg,
+                messages,
+                tools,
+                cancel_event=cancel_event,
+                on_delta=on_delta,
+                on_reasoning=on_reasoning,
+            )
+            return result, cfg
+        except AgentError as exc:
+            last_error = exc
+            if has_next and exc.code in FALLBACK_ELIGIBLE_CODES and not cancel_event.is_set():
+                if on_fallback is not None:
+                    on_fallback(cfg, chain[idx + 1], exc)
+                continue
+            raise
+    if last_error is not None:
+        raise last_error
+    raise AgentError("NO_API_KEY", "No provider configuration was available.", retryable=False)
