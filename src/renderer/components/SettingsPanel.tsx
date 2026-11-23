@@ -982,11 +982,46 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   <option value="python">Python (pixel-agent-v2)</option>
                 </select>
               </Row>
+              <Row label="Max agent steps">
+                <input
+                  aria-label="Max agent steps"
+                  type="number"
+                  min={4}
+                  max={40}
+                  value={settings.agent?.maxTurns ?? 12}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) {
+                      void onPatch({ agent: { maxTurns: Math.min(40, Math.max(4, parsed)) } });
+                    }
+                  }}
+                  className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                />
+              </Row>
+              <Row label="Parallel subagents">
+                <select
+                  aria-label="Parallel subagents"
+                  value={String(settings.agent?.maxConcurrentSpecialists ?? 3)}
+                  onChange={(event) => {
+                    const parsed = Number.parseInt(event.target.value, 10);
+                    if (Number.isFinite(parsed)) {
+                      void onPatch({ agent: { maxConcurrentSpecialists: Math.min(3, Math.max(1, parsed)) } });
+                    }
+                  }}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="1">1 (sequential)</option>
+                  <option value="2">2 concurrent</option>
+                  <option value="3">3 concurrent (max)</option>
+                </select>
+              </Row>
               <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
                 Choose the TypeScript executor (default) or the Hermes-inspired Python agent engine (pixel-agent-v2). Electron’s PermissionBroker remains authoritative in both modes.
               </p>
               <div className="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
                 <p>runtimeEngine: {settings.agent?.runtimeEngine ?? 'typescript'}</p>
+                <p>maxTurns: {String(settings.agent?.maxTurns ?? 12)}</p>
+                <p>maxConcurrentSpecialists: {String(settings.agent?.maxConcurrentSpecialists ?? 3)}</p>
                 <p>provider: {settings.provider.provider}</p>
                 <p>primary: {settings.provider.primaryModel}</p>
                 <p>reasoning: {settings.provider.reasoningModel}</p>

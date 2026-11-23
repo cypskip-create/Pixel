@@ -297,6 +297,10 @@ export type AgentRuntimeEngine = 'typescript' | 'python';
 export interface AgentRuntimeSettings {
   /** Selects the active conversation runtime; defaults to 'typescript' until Python parity is promoted. */
   runtimeEngine: AgentRuntimeEngine;
+  /** Upper bound for tool-calling turns per request (4–40, default 12). Matches Hermes `agent.max_turns`. */
+  maxTurns: number;
+  /** Maximum parallel child specialists (1–3, default 3). Matches Hermes `delegation.max_concurrent_children`. */
+  maxConcurrentSpecialists: number;
 }
 
 export interface AppSettings {
@@ -338,6 +342,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   agent: {
     runtimeEngine: 'typescript',
+    maxTurns: 12,
+    maxConcurrentSpecialists: 3,
   },
   companion: {
     mode: DEFAULT_MODE,
@@ -431,6 +437,10 @@ export function mergeSettings(partial: unknown): AppSettings {
   if (typeof base.voice.ttsVoice !== 'string' || base.voice.ttsVoice.trim().length === 0 ||
       base.voice.ttsVoice.length > 160 || /[\u0000-\u001f\u007f]/.test(base.voice.ttsVoice)) base.voice.ttsVoice = null;
   base.voice.ttsRate = finiteWithin(base.voice.ttsRate, 0.7, 1.3, DEFAULT_SETTINGS.voice.ttsRate);
+  base.agent.maxTurns = Math.round(finiteWithin(base.agent.maxTurns, 4, 40, DEFAULT_SETTINGS.agent.maxTurns));
+  base.agent.maxConcurrentSpecialists = Math.round(
+    finiteWithin(base.agent.maxConcurrentSpecialists, 1, 3, DEFAULT_SETTINGS.agent.maxConcurrentSpecialists),
+  );
 
   return base;
 }

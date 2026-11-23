@@ -2,6 +2,14 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
+## Phase G — Windows Acceptance, Packaging Audit & Exhaustive Hermes Settings Parity (Local Uncommitted)
+
+- Confirmed Phase F Windows CI run `45223028456` (`0a01a14`) passed 100% green (`windows: completed/success`).
+- Built exhaustive **161-entry** source-grounded Hermes Desktop settings inventory (`0f602c5f6f18615632535251d62a2db74ce93b69`) in `docs/parity/HERMES_SETTINGS_SOURCE_MAP.json`, `HERMES_SETTINGS_INVENTORY.md`, `HERMES_PIXEL_SETTINGS_MATRIX.md`, and `HERMES_FUNCTIONAL_PARITY_ROADMAP.md` (34 Implemented & verified, 24 Partially implemented, 61 Missing, 31 Blocked by external credentials/platform, 5 Platform-specific, 6 Not applicable).
+- Wired `agent.maxTurns` (4–40) and `agent.maxConcurrentSpecialists` (1–3) end-to-end across `src/shared/types.ts`, `src/renderer/components/SettingsPanel.tsx`, and `SpecialistCoordinator`, verified with automated inventory-to-test reconciliation in `tests/phase-g-settings-parity.test.ts`.
+- Diagnosed bare `electron.exe --version` exiting `0x80000003` before Pixel JS entry on this sandboxed host; documented Windows packaging (`tests/artifacts.test.ts` 11/11, `tests/nsis.test.ts` 9/9) and voice worker (`tests/voice.test.ts` 25/25) in `docs/architecture/PIXEL_WINDOWS_PHASE_G.md` & `docs/testing/PIXEL_WINDOWS_ACCEPTANCE.md`.
+- Verified `npm run typecheck` PASS, `npm run build` PASS, full `npm test` **1,042 passed, 27 skipped, 0 failed**, and Python `unittest` **26/26 PASS**.
+
 ## Phase F — Electron Security Hardening, Modular IPC, Pixel Board Expansion & UX Polish (Local Uncommitted)
 
 - Confirmed Phase E Windows CI run `45216760779` (`40f078b`) passed 100% green (`windows: completed/success`).

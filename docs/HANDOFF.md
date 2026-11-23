@@ -2,6 +2,21 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
+## Phase G — Windows Acceptance, Packaging Audit & Exhaustive Hermes Settings Parity Inventory (2026-11-23 — Local Uncommitted)
+
+- **G0 CI Baseline:** Phase F Windows CI run `45223028456` (`0a01a14`) passed 100% green (`windows: completed/success`).
+- **G1–G2 Exhaustive Source-Grounded Hermes Settings Parity Inventory (Pinned `0f602c5f6f18615632535251d62a2db74ce93b69`):**
+  - Extracted **161** total settings across Hermes `constants.ts#SECTIONS` (106), `settings-manifest.ts` (46), and `types.ts` dedicated views (9): **34** Implemented and verified, **24** Partially implemented, **61** Missing, **31** Blocked by external credentials/platform (cloud STT/TTS), **5** Platform-specific (Docker/Singularity/Modal/Daytona/translucency), **6** Not applicable.
+  - Created `docs/parity/HERMES_SETTINGS_SOURCE_MAP.json`, `docs/parity/HERMES_SETTINGS_INVENTORY.md`, `docs/parity/HERMES_PIXEL_SETTINGS_MATRIX.md`, and `docs/parity/HERMES_FUNCTIONAL_PARITY_ROADMAP.md`.
+- **G3–G4 Windows Runtime Diagnostic & Packaging:**
+  - Reproduced `.\node_modules\electron\dist\electron.exe --version` exiting `-2147483645` (`0x80000003` / `STATUS_BREAKPOINT`) before executing any Pixel JavaScript, proving a host-sandbox Electron 45.2.3 native init breakpoint (not a Pixel regression; zero security flags weakened).
+  - Verified existing Windows distributions (`Pixel-Setup-0.2.1.exe`, `Pixel-Portable-0.2.1.exe`, `Pixel-Windows-Unpacked-0.2.1.zip`, `win-unpacked/`) via `tests/artifacts.test.ts` (11/11) and `tests/nsis.test.ts` (9/9), plus Python `pixel-agent-v2` and local voice worker (`tests/voice.test.ts` 25/25, `stt=true tts=true`).
+- **G5–G8 High-Priority Parity Settings & Reconciliation Tests:**
+  - Wired `agent.maxTurns` (4–40, default 12) and `agent.maxConcurrentSpecialists` (1–3, default 3) end-to-end (`types.ts` → `mergeSettings` → `SettingsStore` → `SettingsPanel.tsx` → `SpecialistCoordinator.delegateParallel`).
+  - Added `tests/phase-g-settings-parity.test.ts` (3/3 PASS) including automated inventory-to-test reconciliation verifying every `Implemented and verified` entry in `HERMES_SETTINGS_SOURCE_MAP.json` maps to real existing implementation & test files.
+  - Full verification: `npm run typecheck` PASS; `npm run build` PASS; `npm test` **1,042 passed, 27 skipped, 0 failed** (85 files passed, 1 skipped); Python `unittest` **26/26 PASS**.
+- **Open / Next Program:** Live unsandboxed Windows GUI visual acceptance & screenshots (blocked by host `0x80000003`) and **Hermes Functional Parity Expansion** Tier 1–2 per `docs/parity/HERMES_FUNCTIONAL_PARITY_ROADMAP.md`. Docs: `docs/architecture/PIXEL_WINDOWS_PHASE_G.md`, `docs/testing/PIXEL_WINDOWS_ACCEPTANCE.md`.
+
 ## Phase F — Electron Security Hardening, Modular IPC, Pixel Board Expansion & UX Polish (2026-11-23 — Local Uncommitted)
 
 - **F0 CI Baseline:** Phase E Windows CI run `45216760779` (`40f078b`) passed 100% green (`windows: completed/success`).

@@ -38,7 +38,9 @@ Use this checklist to execute the next implementation phase in dependency order.
 - [x] Modularize `src/main/ipc.ts` with `IpcHandlerRegistry` (`src/main/ipc/registry.ts`) and domain IPC routers (`plugins.ts`, `skills.ts`, `audit.ts`) preserving all `CHANNELS` contracts
 - [x] Expand Pixel Board (`drawingBoard.ts`, `service.ts`, `PixelBoard.tsx`) with multi-selection (Shift-click + marquee), group move, 20px grid snapping, alignment/distribution, linked connectors following moved objects, zoom, and keyboard shortcuts
 
-## Phase G — Verification & Windows Acceptance
-- [ ] Diagnose & fix local Electron `0x80000003` exit on Windows
-- [ ] Verify packaged Windows installer (NSIS + portable), ASAR integrity fuses, and voice worker inference
-- [ ] Capture live Windows GUI visual acceptance evidence (empty/active ASCII sharks, narrow layout, reduced motion, 11-category Settings, Running Tasks)
+## Phase G — Verification, Windows Acceptance & Hermes Settings Parity
+- [x] Diagnose local Electron `0x80000003` exit on Windows (`electron.exe --version` reproduces `0x80000003` pre-entry in sandboxed host; documented in `docs/architecture/PIXEL_WINDOWS_PHASE_G.md`; live unsandboxed Windows GUI launch remains open)
+- [x] Verify packaged Windows distributions (`tests/artifacts.test.ts` 11/11, `tests/nsis.test.ts` 9/9) and local Python/voice runtime (`tests/voice.test.ts` 25/25, Python `unittest` 26/26)
+- [x] Produce exhaustive 161-entry source-grounded Hermes settings inventory & automated reconciliation test (`docs/parity/HERMES_SETTINGS_SOURCE_MAP.json`, `tests/phase-g-settings-parity.test.ts`) + wire `agent.maxTurns` & `agent.maxConcurrentSpecialists` end-to-end
+- [ ] Capture live unsandboxed Windows GUI visual acceptance screenshots (empty/active ASCII sharks, narrow layout, reduced motion, Settings hierarchy, Running Tasks, Pixel Board)
+- [ ] Execute post-Phase-G **Hermes Functional Parity Expansion** roadmap (`docs/parity/HERMES_FUNCTIONAL_PARITY_ROADMAP.md`)
