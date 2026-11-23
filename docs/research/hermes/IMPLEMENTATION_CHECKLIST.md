@@ -29,9 +29,9 @@ Use this checklist to execute the next implementation phase in dependency order.
 - [x] Implement OAuth 2.0 PKCE (`oauth.ts`) + first real external productivity plugin (`GOOGLE_CALENDAR_PLUGIN` / `googleCalendar.ts`, 7 tools) with deterministic test suite (live OAuth requires user-owned `PIXEL_GOOGLE_OAUTH_CLIENT_ID`)
 
 ## Phase E — Background Tasks & Delegation
-- [ ] Add `execution_scope`, `checkpoint_json`, `lease_pid`, `cron_expression` DB migration
-- [ ] Implement `croniter` + `tzdata` + `msvcrt` lockfile scheduler with missed-run recovery
-- [ ] Upgrade `SpecialistCoordinator` with parallel batches (cap 3), abort propagation & child heartbeats
+- [x] Add `execution_scope`, `parent_task_id`, `lease_*`, `cron_expression`, `missed_run_policy`, and `scheduler_leases` DB migration (v16) + safe crash recovery (`src/main/tasks/recovery.ts`)
+- [x] Implement IANA-timezone/DST-aware 5-field cron engine (`src/main/routines/cron.ts`) + SQLite transactional `SchedulerLeaseManager` (`src/main/routines/lease.ts`) + bounded missed-run recovery (`skip`, `notify_only`, `run_once`, `catch_up_window`)
+- [x] Upgrade `SpecialistCoordinator` with parallel batches (hard cap 3), fail-closed empty allowlists, parent-child abort propagation, heartbeats, and conflict-surfacing consolidation + Running Tasks / `AgentActivityBar` integration
 
 ## Phase F — Desktop Hardening & Polish
 - [ ] Add `setWindowOpenHandler` and `will-navigate` guards to all Electron `BrowserWindow`s in `src/main/window.ts`

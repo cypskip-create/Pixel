@@ -20,8 +20,10 @@ import { describeScope } from './scope';
 import { ToolRegistry, applyDecision, riskAllowsGrantDuration } from './tools';
 import { PERMISSION_POLICY_VERSION } from './scope';
 import type { PermissionGrantStore } from './permissionStore';
+import { randomUUID } from 'node:crypto';
 import type { TaskPersistence } from '../tasks/store';
 import { redactTaskText } from '../tasks/schema';
+import { inferTaskExecutionScope, recoverInterruptedTask } from '../tasks/recovery';
 
 export const MAX_AUDIT_ENTRIES = 500;
 
@@ -282,6 +284,7 @@ export class TaskManager {
   private readonly emit: (task: TaskRecord) => void;
   private readonly persistence?: TaskPersistence;
   private readonly onError: (error: unknown) => void;
+  private readonly instanceId: string;
   private readonly controls = new Map<string, { cancel: () => void }>();
   private readonly pauseWaiters = new Map<string, (resumed: boolean) => void>();
   private readonly handoffWaiters = new Map<string, (continued: boolean) => void>();
@@ -290,29 +293,22 @@ export class TaskManager {
     emit: (task: TaskRecord) => void,
     persistence?: TaskPersistence,
     onPersistenceError: (error: unknown) => void = () => undefined,
+    instanceId = `pixel_${process.pid}_${randomUUID().slice(0, 8)}`,
   ) {
     this.emit = emit;
     this.persistence = persistence;
     this.onError = onPersistenceError;
+    this.instanceId = instanceId;
 
     for (const restored of persistence?.load() ?? []) {
-      const interrupted = isActiveStatus(restored.status) || restored.status === 'paused'
-        ? {
-            ...restored,
-            status: 'paused' as const,
-            pauseRequested: false,
-            recoveryNote:
-              'Pixel restarted while this task was active. Its previous call stack and pending approval were discarded. Review the last completed step and recheck the target before starting a new request.',
-            checkpoint: {
-              phase: 'before_tool' as const,
-              at: Date.now(),
-              summary: 'Restart recovery: no action was resumed automatically.',
-            },
-          }
-        : restored;
-      if (interrupted !== restored) this.commit(interrupted);
+      const outcome = recoverInterruptedTask(restored, this.instanceId);
+      if (outcome.recovered) this.commit(outcome.task);
       else this.tasks.set(restored.id, restored);
     }
+  }
+
+  getInstanceId(): string {
+    return this.instanceId;
   }
 
   upsert(task: TaskRecord): void {
@@ -451,6 +447,12 @@ export class TaskManager {
   cancel(id: string): void {
     const task = this.tasks.get(id);
     if (!task || !isCancellableStatus(task.status)) return;
+    // Propagate parent cancellation to all active child specialist tasks.
+    for (const child of this.childrenOf(id)) {
+      if (isCancellableStatus(child.status)) {
+        this.cancel(child.id);
+      }
+    }
     const cancel = this.controls.get(id)?.cancel;
     if (!cancel) {
       this.update(id, { status: 'cancelled', endedAt: Date.now(), pauseRequested: false });
@@ -461,12 +463,86 @@ export class TaskManager {
     cancel();
   }
 
+  /** Returns all direct child tasks linked to a parent task. */
+  childrenOf(parentTaskId: string): TaskRecord[] {
+    return [...this.tasks.values()].filter((task) => task.parentTaskId === parentTaskId);
+  }
+
+  /**
+   * Records a genuine worker heartbeat and renews the task's execution lease.
+   * Never fabricates step progress; only proves liveness.
+   */
+  recordHeartbeat(id: string, ttlMs = 30_000, now = Date.now()): boolean {
+    const task = this.tasks.get(id);
+    if (!task || !isActiveStatus(task.status)) return false;
+    const acquiredAt = task.lease?.acquiredAt ?? now;
+    this.update(id, {
+      lease: {
+        instanceId: this.instanceId,
+        pid: process.pid,
+        acquiredAt,
+        expiresAt: now + Math.max(5_000, ttlMs),
+        lastHeartbeatAt: now,
+      },
+    });
+    return true;
+  }
+
+  /**
+   * Identifies active tasks whose lease or heartbeat has gone stale past
+   * `stallTimeoutMs` so the caller can surface stalled state honestly.
+   */
+  detectStalled(now = Date.now(), stallTimeoutMs = 60_000): TaskRecord[] {
+    const stalled: TaskRecord[] = [];
+    for (const task of this.tasks.values()) {
+      if (!['running', 'planning'].includes(task.status)) continue;
+      const lastBeat = task.lease?.lastHeartbeatAt ?? task.updatedAt ?? task.createdAt;
+      const leaseExpired = task.lease !== undefined && task.lease.expiresAt <= now;
+      if (leaseExpired || now - lastBeat >= stallTimeoutMs) {
+        stalled.push(task);
+      }
+    }
+    return stalled;
+  }
+
+  /**
+   * Safely pauses desktop-session-dependent tasks (e.g. when Windows locks,
+   * suspends, or loses interactive focus) while leaving headless tasks running.
+   */
+  pauseDesktopSessionTasks(reason = 'Windows desktop session became unavailable; task paused safely.'): number {
+    let paused = 0;
+    const now = Date.now();
+    for (const task of this.tasks.values()) {
+      if (!['running', 'planning', 'queued'].includes(task.status)) continue;
+      if (inferTaskExecutionScope(task) !== 'desktop_session') continue;
+      this.update(task.id, {
+        status: this.controls.has(task.id) ? 'pause_requested' : 'paused',
+        pauseRequested: this.controls.has(task.id),
+        reobserveRequired: true,
+        handoffReason: redactHandoffReason(reason),
+        checkpoint: {
+          phase: 'before_tool',
+          at: now,
+          summary: 'Desktop session paused: re-observation required before resuming.',
+        },
+      });
+      paused += 1;
+    }
+    return paused;
+  }
+
   runningCount(): number {
     return [...this.tasks.values()].filter((t) => isActiveStatus(t.status)).length;
   }
 
   private commit(task: TaskRecord): void {
-    const next: TaskRecord = { ...task, updatedAt: Date.now() };
+    const now = Date.now();
+    const executionScope = inferTaskExecutionScope(task);
+    const next: TaskRecord = {
+      ...task,
+      executionScope,
+      updatedAt: now,
+    };
     this.tasks.set(next.id, next);
     try {
       this.persistence?.save(next);
@@ -484,7 +560,7 @@ export class TaskManager {
 }
 
 function isActiveStatus(status: TaskRecord['status']): boolean {
-  return ['planning', 'running', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'cancelling'].includes(status);
+  return ['queued', 'planning', 'running', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'recovering', 'cancelling'].includes(status);
 }
 
 function isCancellableStatus(status: TaskRecord['status']): boolean {

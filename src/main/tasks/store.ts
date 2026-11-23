@@ -51,15 +51,30 @@ export class TaskStore implements TaskPersistence {
 
     this.database.transaction(() => {
       this.database.execute(
-        `INSERT INTO tasks (id, project_id, title, status, created_at, ended_at, payload, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO tasks (
+           id, project_id, title, status, created_at, ended_at, payload, updated_at,
+           parent_task_id, execution_scope, lease_pid, lease_instance_id,
+           lease_expires_at, last_heartbeat_at, attempt_count, max_attempts,
+           specialist_id, routine_id
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            title = excluded.title,
            status = excluded.status,
            ended_at = excluded.ended_at,
            payload = excluded.payload,
-           updated_at = excluded.updated_at`,
+           updated_at = excluded.updated_at,
+           parent_task_id = excluded.parent_task_id,
+           execution_scope = excluded.execution_scope,
+           lease_pid = excluded.lease_pid,
+           lease_instance_id = excluded.lease_instance_id,
+           lease_expires_at = excluded.lease_expires_at,
+           last_heartbeat_at = excluded.last_heartbeat_at,
+           attempt_count = excluded.attempt_count,
+           max_attempts = excluded.max_attempts,
+           specialist_id = excluded.specialist_id,
+           routine_id = excluded.routine_id`,
         [
           safe.id,
           safe.projectId ?? null,
@@ -69,6 +84,16 @@ export class TaskStore implements TaskPersistence {
           safe.endedAt ?? null,
           payload,
           updatedAt,
+          safe.parentTaskId ?? null,
+          safe.executionScope ?? 'headless',
+          safe.lease?.pid ?? null,
+          safe.lease?.instanceId ?? null,
+          safe.lease?.expiresAt ?? null,
+          safe.lease?.lastHeartbeatAt ?? null,
+          safe.attemptCount ?? 1,
+          safe.maxAttempts ?? 1,
+          safe.specialistId ?? null,
+          safe.routineId ?? null,
         ],
       );
       this.database.execute(
@@ -117,6 +142,9 @@ function sanitizeTask(task: TaskRecord): TaskRecord {
       ...(step.args === undefined ? {} : { args: sanitizeArguments(step.toolName, step.args) }),
     })),
     ...(task.recoveryNote === undefined ? {} : { recoveryNote: redactTaskText(task.recoveryNote) }),
+    ...(task.failure === undefined
+      ? {}
+      : { failure: { ...task.failure, message: redactTaskText(task.failure.message).slice(0, 2_000) } }),
     ...(task.checkpoint === undefined
       ? {}
       : { checkpoint: { ...task.checkpoint, summary: redactTaskText(task.checkpoint.summary) } }),

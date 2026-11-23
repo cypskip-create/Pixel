@@ -12,7 +12,7 @@
  *  - Emergency stop is enforced in the agent runtime, not in the UI.
  */
 
-import { app, clipboard, dialog, ipcMain, screen, shell } from 'electron';
+import { app, clipboard, dialog, ipcMain, powerMonitor, screen, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statfsSync, writeFileSync } from 'node:fs';
@@ -101,7 +101,7 @@ import type { ProductivityDocumentLink } from './productivity/store';
 import { ProductivityTools, PRODUCTIVITY_TOOL_DEFINITIONS } from './productivity/toolset';
 import { SkillStore } from './skills/store';
 import { draftSkillFromTask } from './skills/recording';
-import { LocalRoutineScheduler, RoutineStore } from './routines';
+import { LocalRoutineScheduler, RoutineStore, SchedulerLeaseManager } from './routines';
 import type { ModelProvider } from './providers/deepseek';
 import { SettingsStore } from './settings';
 import { collectDiagnostics } from './system/diagnostics';
@@ -898,9 +898,26 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     (error) => boot.info(`routine scheduler: ${error instanceof Error ? error.message : String(error)}`),
     Date.now,
     () => !emergency.isStopped(),
+    {
+      lease: new SchedulerLeaseManager(database),
+      onMissedNotification: (routine, scheduledKey, policy) => {
+        audit.record('system', `Missed scheduled routine "${routine.name}"`, 'ok', `${scheduledKey} (${policy})`);
+      },
+    },
   );
   routineScheduler = routines;
   routines.start();
+
+  if (typeof powerMonitor?.on === 'function') {
+    const pauseDesktop = (reason: string): void => {
+      const count = tasks.pauseDesktopSessionTasks(reason);
+      if (count > 0) {
+        audit.record('system', `Paused ${count} desktop-session task(s)`, 'ok', reason);
+      }
+    };
+    powerMonitor.on('lock-screen', () => pauseDesktop('Windows screen locked; desktop-session task paused safely.'));
+    powerMonitor.on('suspend', () => pauseDesktop('System suspended; desktop-session task paused safely.'));
+  }
 
   registerHandler(CHANNELS.skillsList, (): SkillRecord[] =>
     skillStore.list(projectId()) as SkillRecord[],

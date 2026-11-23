@@ -603,17 +603,39 @@ export interface CypsError {
  * ------------------------------------------------------------------ */
 
 export type TaskStatus =
+  | 'queued'
   | 'planning'
   | 'running'
   | 'pause_requested'
   | 'awaiting_approval'
   | 'awaiting_user'
   | 'paused'
+  | 'recovering'
   | 'blocked'
   | 'cancelling'
   | 'completed'
   | 'failed'
   | 'cancelled';
+
+export type TaskExecutionScope = 'headless' | 'desktop_session';
+
+export interface TaskLease {
+  instanceId: string;
+  pid: number;
+  acquiredAt: number;
+  expiresAt: number;
+  lastHeartbeatAt: number;
+}
+
+export interface TaskFailureInfo {
+  code: string;
+  message: string;
+  retryable: boolean;
+  at: number;
+}
+
+export type RoutineScheduleKind = 'once' | 'interval' | 'daily' | 'weekly' | 'cron';
+export type MissedRunPolicy = 'skip' | 'run_once' | 'catch_up_window' | 'notify_only';
 
 export interface TaskStep {
   id: string;
@@ -660,6 +682,26 @@ export interface TaskRecord {
   projectId?: string;
   /** Optional capability ceiling used by routine and delegated tasks. */
   allowedTools?: string[];
+  /** Parent task ID when this task is a delegated specialist child. */
+  parentTaskId?: string;
+  /** Specialist role assigned to this task, when delegated. */
+  specialistId?: string;
+  /** Linked scheduled routine ID, when triggered by the scheduler. */
+  routineId?: string;
+  /** Headless tasks may continue while minimized; desktop_session tasks pause on lock/session loss. */
+  executionScope?: TaskExecutionScope;
+  /** Durable execution lease & heartbeat metadata. */
+  lease?: TaskLease;
+  /** Number of execution attempts made for this task. */
+  attemptCount?: number;
+  /** Maximum permitted attempts under the task's retry policy. */
+  maxAttempts?: number;
+  /** Structured failure metadata when a task fails or stalls. */
+  failure?: TaskFailureInfo;
+  /** Optional idempotency key for safe crash reconciliation. */
+  idempotencyKey?: string;
+  /** True when startup recovery determined the task is safe to resume (read-only / idempotent). */
+  safeToResume?: boolean;
   budget?: TaskBudget;
   approvalRefs?: string[];
   evidence?: TaskEvidence[];

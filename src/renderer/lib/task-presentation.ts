@@ -7,8 +7,8 @@ export interface TaskDisplayState {
 }
 
 const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
-  'planning', 'running', 'pause_requested', 'awaiting_approval', 'awaiting_user',
-  'paused', 'blocked', 'cancelling',
+  'queued', 'planning', 'running', 'pause_requested', 'awaiting_approval', 'awaiting_user',
+  'paused', 'recovering', 'blocked', 'cancelling',
 ]);
 
 /** A finished task is never selected as current activity just because it is recent. */

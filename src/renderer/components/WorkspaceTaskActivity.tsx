@@ -10,12 +10,14 @@ interface TaskActivityIndicatorProps {
 }
 
 const TASK_LABEL: Record<TaskStatus, string> = {
+  queued: 'Queued',
   planning: 'Planning',
   running: 'Working',
   pause_requested: 'Pausing',
   awaiting_approval: 'Waiting for approval',
   awaiting_user: 'Waiting for you',
   paused: 'Paused',
+  recovering: 'Recovering',
   blocked: 'Blocked',
   cancelling: 'Stopping',
   completed: 'Completed',

@@ -22,12 +22,14 @@ interface TaskStripProps {
 }
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
+  queued: 'Queued',
   planning: 'Planning',
   running: 'Running',
   pause_requested: 'Pausing',
   awaiting_approval: 'Needs your OK',
   awaiting_user: 'Your turn',
   paused: 'Paused',
+  recovering: 'Recovering',
   blocked: 'Needs verification',
   cancelling: 'Stopping',
   completed: 'Completed',
@@ -36,12 +38,14 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 const STATUS_TONE: Record<TaskStatus, string> = {
+  queued: 'text-neutral-200 border-neutral-400/35 bg-neutral-400/12',
   planning: 'text-neutral-200 border-neutral-400/35 bg-neutral-400/12',
   running: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
   pause_requested: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
   awaiting_approval: 'text-neutral-100 border-neutral-400/45 bg-neutral-400/18',
   awaiting_user: 'text-neutral-100 border-neutral-300/45 bg-neutral-400/14',
   paused: 'text-slate-200 border-slate-400/35 bg-slate-400/12',
+  recovering: 'text-neutral-100 border-neutral-400/40 bg-neutral-400/14',
   blocked: 'text-neutral-100 border-neutral-400/40 bg-neutral-400/14',
   cancelling: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',
   completed: 'text-neutral-100 border-neutral-400/35 bg-neutral-400/12',

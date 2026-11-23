@@ -56,6 +56,14 @@ export function describeToolActivity(toolName: string | undefined): string {
   return `Running ${toolName}`;
 }
 
+const SPECIALIST_ACTIVITY_LABEL: Record<string, string> = {
+  research: 'Research specialist working',
+  browser: 'Browser specialist working',
+  systems: 'Systems specialist working',
+  knowledge: 'Knowledge specialist working',
+  infrastructure: 'Infrastructure specialist working',
+};
+
 export function deriveAgentActivity({
   activeTask,
   streaming,
@@ -82,16 +90,30 @@ export function deriveAgentActivity({
       ?? activeTask.steps.find((step) => step.status === 'pending');
     const visualState: ActivityVisualState = activeTask.status === 'failed' || activeTask.status === 'blocked'
       ? 'error'
-      : 'working';
-    const label = activeTask.status === 'planning'
-      ? 'Planning'
-      : activeTask.status === 'failed'
-        ? 'Failed'
-        : activeTask.status === 'cancelled' || activeTask.status === 'cancelling'
-          ? 'Stopping'
-          : runningStep?.toolName
-            ? describeToolActivity(runningStep.toolName)
-            : 'Working';
+      : activeTask.status === 'recovering' || Boolean(activeTask.recoveryNote && activeTask.status === 'paused')
+        ? 'approval'
+        : 'working';
+    const specialistLabel = activeTask.specialistId
+      ? SPECIALIST_ACTIVITY_LABEL[activeTask.specialistId] ?? `${activeTask.specialistId} specialist working`
+      : null;
+
+    const label = activeTask.status === 'queued'
+      ? 'Queued'
+      : activeTask.status === 'planning'
+        ? 'Planning task'
+        : activeTask.status === 'recovering'
+          ? 'Recovering interrupted task'
+          : activeTask.status === 'paused' && activeTask.recoveryNote
+            ? (activeTask.safeToResume ? 'Checkpoint ready to resume' : 'Recovery review required')
+            : activeTask.status === 'failed'
+              ? 'Failed'
+              : activeTask.status === 'cancelled' || activeTask.status === 'cancelling'
+                ? 'Stopping'
+                : activeTask.routineId && !runningStep?.toolName
+                  ? 'Running scheduled job'
+                  : runningStep?.toolName
+                    ? describeToolActivity(runningStep.toolName)
+                    : specialistLabel ?? 'Working';
 
     return {
       label,

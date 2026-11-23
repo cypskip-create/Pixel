@@ -1,12 +1,14 @@
 import { z } from 'zod';
 
 const taskStatus = z.enum([
+  'queued',
   'planning',
   'running',
   'pause_requested',
   'awaiting_approval',
   'awaiting_user',
   'paused',
+  'recovering',
   'blocked',
   'cancelling',
   'completed',
@@ -37,6 +39,27 @@ export const TaskRecordSchema = z.object({
   result: z.string().max(20_000).optional(),
   projectId: z.string().max(200).optional(),
   allowedTools: z.array(z.string().min(1).max(120)).max(100).optional(),
+  parentTaskId: z.string().min(1).max(200).optional(),
+  specialistId: z.string().min(1).max(80).optional(),
+  routineId: z.string().min(1).max(200).optional(),
+  executionScope: z.enum(['headless', 'desktop_session']).optional(),
+  lease: z.object({
+    instanceId: z.string().min(1).max(200),
+    pid: z.number().int().nonnegative(),
+    acquiredAt: z.number().finite(),
+    expiresAt: z.number().finite(),
+    lastHeartbeatAt: z.number().finite(),
+  }).strict().optional(),
+  attemptCount: z.number().int().nonnegative().optional(),
+  maxAttempts: z.number().int().nonnegative().optional(),
+  failure: z.object({
+    code: z.string().min(1).max(80),
+    message: z.string().max(2_000),
+    retryable: z.boolean(),
+    at: z.number().finite(),
+  }).strict().optional(),
+  idempotencyKey: z.string().min(1).max(200).optional(),
+  safeToResume: z.boolean().optional(),
   budget: z.object({
     deadlineAt: z.number().finite(),
     maxTurns: z.number().int().nonnegative(),

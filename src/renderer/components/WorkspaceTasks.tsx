@@ -39,7 +39,14 @@ export function WorkspaceTasks({ tasks, audit, projectName, onAction, onContinue
   const [now, setNow] = useState(() => Date.now());
   const runningTasks = tasks.filter((task) => ACTIVE_OR_ATTENTION_STATUSES.has(task.status));
   const historyTasks = tasks.filter((task) => !ACTIVE_OR_ATTENTION_STATUSES.has(task.status));
-  const hasLiveExecution = runningTasks.some((task) => task.status === 'running' || task.status === 'planning');
+  const hasLiveExecution = runningTasks.some((task) => task.status === 'running' || task.status === 'planning' || task.status === 'recovering');
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const childCountByParent = new Map<string, number>();
+  for (const task of tasks) {
+    if (task.parentTaskId) {
+      childCountByParent.set(task.parentTaskId, (childCountByParent.get(task.parentTaskId) ?? 0) + 1);
+    }
+  }
 
   useEffect(() => {
     if (!hasLiveExecution) return;
@@ -51,24 +58,33 @@ export function WorkspaceTasks({ tasks, audit, projectName, onAction, onContinue
     <section className="workspace-page" aria-label="Running Tasks">
       <div className="workspace-page-heading">
         <h1>Running Tasks</h1>
-        <p>Active, queued, waiting, paused, and failed tasks requiring attention.</p>
+        <p>Active, queued, scheduled, recovering, paused, and failed tasks requiring attention.</p>
       </div>
 
       {runningTasks.length ? (
         <div className="workspace-task-grid">
           {runningTasks.map((task) => {
             const display = taskDisplayState(task);
-            const currentStep = [...task.steps].reverse().find((step) => step.status === 'running' || step.status === 'failed' || step.status === 'done');
+            const currentStep = [...task.steps].reverse().find((step) => step.status === 'running' || step.status === 'failed' || step.status === 'done' || step.status === 'verified');
             const isTerminalFailed = task.status === 'failed';
             const canPause = task.status === 'running' || task.status === 'planning';
-            const canResume = task.status === 'paused';
+            const canResume = task.status === 'paused' && (!task.recoveryNote || task.safeToResume === true);
             const canCancel = !isTerminalFailed && task.status !== 'completed' && task.status !== 'cancelled';
+            const parentTask = task.parentTaskId ? taskById.get(task.parentTaskId) : undefined;
+            const childCount = childCountByParent.get(task.id) ?? 0;
+            const scopeLabel = task.executionScope === 'desktop_session' ? 'Desktop session' : 'Headless';
 
             return (
-              <article className="workspace-task-card" key={task.id}>
+              <article className="workspace-task-card" key={task.id} data-task-id={task.id} data-execution-scope={task.executionScope ?? 'headless'}>
                 <header>
                   <span className={`workspace-task-status status-${display.tone}`}>
                     {display.verificationPending ? display.label : task.status.replaceAll('_', ' ')}
+                  </span>
+                  <span className="text-[10.5px] text-[var(--color-ink-dim)]">
+                    {scopeLabel}
+                    {task.specialistId ? ` · ${task.specialistId}` : ''}
+                    {task.routineId ? ' · scheduled' : ''}
+                    {childCount > 0 ? ` · ${childCount} ${childCount === 1 ? 'subtask' : 'subtasks'}` : ''}
                   </span>
                   <time title={new Date(task.createdAt).toLocaleString()}>
                     {formatElapsed(task.createdAt, task.endedAt, now)}
@@ -76,7 +92,13 @@ export function WorkspaceTasks({ tasks, audit, projectName, onAction, onContinue
                 </header>
                 <h3>{task.title}</h3>
                 {projectName ? <p className="text-[11px] text-[var(--color-ink-dim)]">Project: {projectName}</p> : null}
+                {parentTask ? (
+                  <p className="text-[11px] text-[var(--color-ink-dim)]">Subtask of: {parentTask.title}</p>
+                ) : null}
                 {task.request ? <p className="workspace-task-request">{task.request}</p> : null}
+                {task.recoveryNote ? (
+                  <p className="text-[11px] text-[var(--color-warning)]" role="status">{task.recoveryNote}</p>
+                ) : null}
                 {currentStep ? (
                   <p className="text-[11px] text-[var(--color-ink-soft)]">
                     Current step: <strong>{currentStep.title}</strong>

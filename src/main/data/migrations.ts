@@ -549,6 +549,46 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_mcp_servers_enabled ON mcp_servers(enabled, updated_at DESC);
     `,
   },
+  {
+    version: 16,
+    name: 'durable-tasks-and-cron-scheduler',
+    sql: `
+      ALTER TABLE tasks ADD COLUMN parent_task_id TEXT;
+      ALTER TABLE tasks ADD COLUMN execution_scope TEXT NOT NULL DEFAULT 'headless';
+      ALTER TABLE tasks ADD COLUMN lease_pid INTEGER;
+      ALTER TABLE tasks ADD COLUMN lease_instance_id TEXT;
+      ALTER TABLE tasks ADD COLUMN lease_expires_at INTEGER;
+      ALTER TABLE tasks ADD COLUMN last_heartbeat_at INTEGER;
+      ALTER TABLE tasks ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE tasks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE tasks ADD COLUMN specialist_id TEXT;
+      ALTER TABLE tasks ADD COLUMN routine_id TEXT;
+
+      CREATE INDEX idx_tasks_parent ON tasks(parent_task_id);
+      CREATE INDEX idx_tasks_scope_status ON tasks(execution_scope, status, updated_at DESC);
+
+      ALTER TABLE routines ADD COLUMN schedule_kind TEXT NOT NULL DEFAULT 'daily';
+      ALTER TABLE routines ADD COLUMN cron_expression TEXT;
+      ALTER TABLE routines ADD COLUMN interval_ms INTEGER;
+      ALTER TABLE routines ADD COLUMN run_at INTEGER;
+      ALTER TABLE routines ADD COLUMN missed_run_policy TEXT NOT NULL DEFAULT 'skip';
+      ALTER TABLE routines ADD COLUMN catchup_window_ms INTEGER;
+      ALTER TABLE routines ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE routines ADD COLUMN execution_scope TEXT NOT NULL DEFAULT 'headless';
+      ALTER TABLE routines ADD COLUMN next_run_at INTEGER;
+      ALTER TABLE routines ADD COLUMN last_run_at INTEGER;
+      ALTER TABLE routines ADD COLUMN last_status TEXT;
+
+      CREATE TABLE scheduler_leases (
+        lock_name     TEXT PRIMARY KEY,
+        owner_id      TEXT NOT NULL,
+        pid           INTEGER NOT NULL,
+        acquired_at   INTEGER NOT NULL,
+        heartbeat_at  INTEGER NOT NULL,
+        expires_at    INTEGER NOT NULL
+      );
+    `,
+  },
 ] as const;
 
 /** The schema version this build expects. */

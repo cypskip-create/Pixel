@@ -2,6 +2,22 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
+## Phase E — Durable Background Tasks, Cron Scheduler, Recovery & Parallel Delegation (2026-11-23 — Local Uncommitted)
+
+- **E0 CI Baseline:** Windows CI run `45206359050` (`b6526d2`) passed 100% green (`windows: completed/success`).
+- **E2–E3 Durable Task Engine, Migration 16 & Safe Crash Recovery:**
+  - Added SQLite Migration 16 (`durable-tasks-and-cron-scheduler`) extending `tasks` (`parent_task_id`, `execution_scope`, `lease_pid`, `lease_instance_id`, `lease_expires_at`, `last_heartbeat_at`, `attempt_count`, `max_attempts`, `specialist_id`, `routine_id`), extending `routines` (`schedule_kind`, `cron_expression`, `interval_ms`, `run_at`, `missed_run_policy`, `catchup_window_ms`, `max_retries`, `execution_scope`, `next_run_at`, `last_run_at`, `last_status`), and creating `scheduler_leases`.
+  - Created `src/main/tasks/recovery.ts` (`classifyToolExecutionScope`, `inferTaskExecutionScope`, fail-closed `isStateChangingTool`, `recoverInterruptedTask`) so interrupted state-changing operations are NEVER blindly replayed after crash (`reobserveRequired: true`, `safeToResume: false`), while read-only headless tasks are marked `safeToResume: true`.
+  - Upgraded `TaskManager` (`src/main/agent/runtime.ts`) with startup recovery, `recordHeartbeat`, `detectStalled`, parent-to-child `cancel` propagation, and `pauseDesktopSessionTasks` wired to Electron `powerMonitor` (`lock-screen`, `suspend`) in `src/main/ipc.ts`.
+- **E4–E5 Cron Scheduler, IANA DST Handling & Transactional Locking:**
+  - Implemented zero-dependency IANA-timezone-aware 5-field cron engine (`src/main/routines/cron.ts`) with exact DST spring-forward skip and fall-back local-key deduplication, plus SQLite transactional `SchedulerLeaseManager` (`src/main/routines/lease.ts`) preventing duplicate execution across concurrent instances.
+  - Extended `RoutineStore` and `LocalRoutineScheduler` (`src/main/routines/index.ts`) to support `daily`, `weekly`, `cron`, `interval`, and `once` schedules, plus bounded missed-run policies (`skip`, `notify_only`, `run_once`, `catch_up_window`).
+- **E6–E8 Parallel Specialist Delegation & Desktop UI:**
+  - Extended `SpecialistCoordinator` (`src/main/agents/coordinator.ts`) with `delegateParallel` (hard cap `MAX_CONCURRENT_SPECIALISTS = 3`), fail-closed empty tool allowlists (`[]` → 0 tools), nested delegation blocking, parent-child `AbortSignal` propagation, real heartbeats/step updates on `TaskManager`, and conflict-surfacing `consolidateDelegationResults`.
+  - Upgraded `WorkspaceTasks.tsx`, `AgentActivityBar.tsx`, `WorkspaceTaskActivity.tsx`, `TaskStrip.tsx`, and `task-presentation.ts` to display execution scope, specialist badges, parent-child links, recovery notes, and scheduled/recovering states.
+- **Verification:** `npm run typecheck` PASS; `npm run build` PASS; `tests/phase-e-durable-tasks-scheduler-delegation.test.ts` **10/10 PASS**; full `npm test` **1,032 passed, 27 skipped, 0 failed** (83 files passed, 1 skipped); Python `unittest` **26/26 PASS**.
+- **Unverified / Open:** Interactive Electron GUI visual acceptance (`0x80000003` pre-entry exit) and post-push Windows CI run. Architecture docs: `docs/architecture/PIXEL_BACKGROUND_TASKS_PHASE_E.md` & `docs/architecture/PIXEL_SCHEDULER_AND_RECOVERY.md`.
+
 ## Hermes-Level Desktop Experience Directive (2026-11-23 — Local Uncommitted)
 
 - **Permanent Design Spec:** Created `docs/design/PIXEL_DESKTOP_EXPERIENCE.md` defining Pixel's surface materiality layers, control-height scale (`28px`/`34px`/`40px`), Segoe UI Variable typography, tactile micro-interactions (`90ms` press / `150ms` UI, reduced-motion compliant), chat composer presence, honest live activity taxonomy, and per-phase user-visible checklist while preserving Pixel's matte charcoal + `#4299F5` blue identity, Pix mascot, and ASCII sharks.

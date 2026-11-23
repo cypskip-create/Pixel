@@ -2,6 +2,15 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
+## Phase E — Durable Background Tasks, Cron Scheduler, Recovery & Parallel Delegation (Local Uncommitted)
+
+- Confirmed Windows CI run `45206359050` (`b6526d2`) passed 100% green (`windows: completed/success`).
+- Added SQLite Migration 16 (`durable-tasks-and-cron-scheduler`), `src/main/tasks/recovery.ts` (execution scope classification, fail-closed side-effect protection, safe crash recovery), and upgraded `TaskManager` with heartbeats, stall detection, parent-child cancellation propagation, and Windows `powerMonitor` lock/suspend desktop-session pausing.
+- Built zero-dependency IANA-timezone/DST-aware 5-field cron engine (`src/main/routines/cron.ts`), SQLite transactional `SchedulerLeaseManager` (`src/main/routines/lease.ts`), and multi-schedule + bounded missed-run policies (`skip`, `notify_only`, `run_once`, `catch_up_window`) in `src/main/routines/index.ts`.
+- Extended `SpecialistCoordinator` (`src/main/agents/coordinator.ts`) with `delegateParallel` (hard cap 3), fail-closed empty tool allowlists, nested delegation blocking, `AbortSignal` propagation, heartbeats, and conflict-surfacing consolidation.
+- Upgraded `WorkspaceTasks.tsx`, `AgentActivityBar.tsx`, `WorkspaceTaskActivity.tsx`, `TaskStrip.tsx`, and `task-presentation.ts` for honest durable/scheduled/specialist/recovery visibility.
+- Verified `npm run typecheck` PASS, `npm run build` PASS, `tests/phase-e-durable-tasks-scheduler-delegation.test.ts` 10/10 PASS, full `npm test` **1,032 passed, 27 skipped, 0 failed**, and Python `unittest` **26/26 PASS**. Docs: `docs/architecture/PIXEL_BACKGROUND_TASKS_PHASE_E.md`, `docs/architecture/PIXEL_SCHEDULER_AND_RECOVERY.md`.
+
 ## Hermes-Level Desktop Experience Directive (Local Uncommitted)
 
 - Authored permanent desktop-experience specification in `docs/design/PIXEL_DESKTOP_EXPERIENCE.md`.
