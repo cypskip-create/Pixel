@@ -114,6 +114,8 @@ import { PixelBoardService } from './board/service';
 import type { BoardFileFormat } from './board/service';
 import { BOARD_TOOL_DEFINITIONS } from './board/tools';
 import { PluginStore } from './plugins/store';
+import { verifyGitHubToken } from './plugins/github';
+import type { GitHubConnectionStatus } from '../shared/types';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -668,6 +670,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     clearVisualGuidance: (selector) => windows.clearVisualGuidance(selector),
     onPluginHealth: (pluginId, error) => pluginStore.recordHealth(pluginId, error),
     getPluginSetting: (pluginId, key) => pluginStore.getSetting(pluginId, key),
+    getGitHubToken: () => settings.getGitHubToken(),
   });
 
   const agent = new AgentExecutor({
@@ -1937,6 +1940,63 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     pluginStore.setSetting(pluginId, key, value);
     audit.record('system', `Changed a setting for Pixel plugin ${pluginId}`, 'ok', `Setting ${key} was changed through its reviewed manifest.`);
     return pluginStore.list(projectId());
+  });
+  registerHandler(CHANNELS.pluginsGitHubStatus, async (): Promise<GitHubConnectionStatus> => {
+    const encryptionAvailable = settings.isEncryptionAvailable();
+    const token = settings.getGitHubToken();
+    if (!token) return { connected: false, encryptionAvailable };
+    try {
+      const profile = await verifyGitHubToken(token);
+      return {
+        connected: true,
+        encryptionAvailable,
+        verified: true,
+        login: profile.login,
+        name: profile.name,
+        scopes: profile.scopes,
+      };
+    } catch (error) {
+      return {
+        connected: true,
+        encryptionAvailable,
+        verified: false,
+        error: error instanceof Error ? error.message : 'Unable to verify GitHub token.',
+      };
+    }
+  });
+  registerHandler(CHANNELS.pluginsGitHubConnect, async (_event, tokenValue: unknown): Promise<GitHubConnectionStatus> => {
+    const encryptionAvailable = settings.isEncryptionAvailable();
+    const token = typeof tokenValue === 'string' ? tokenValue.trim() : '';
+    if (!token) return { connected: false, encryptionAvailable, error: 'Enter a GitHub personal access token.' };
+    try {
+      const profile = await verifyGitHubToken(token);
+      const saved = settings.setGitHubToken(token);
+      if (!saved.ok) {
+        return { connected: false, encryptionAvailable, error: saved.error ?? 'Could not store GitHub token.' };
+      }
+      audit.record('system', 'Connected GitHub account', 'ok', `@${profile.login} · scopes: ${profile.scopes.join(', ') || 'fine-grained'}`);
+      return {
+        connected: true,
+        encryptionAvailable,
+        verified: true,
+        login: profile.login,
+        name: profile.name,
+        scopes: profile.scopes,
+      };
+    } catch (error) {
+      audit.record('system', 'GitHub account connection failed', 'error');
+      return {
+        connected: false,
+        encryptionAvailable,
+        verified: false,
+        error: error instanceof Error ? error.message : 'GitHub token verification failed.',
+      };
+    }
+  });
+  registerHandler(CHANNELS.pluginsGitHubDisconnect, (): GitHubConnectionStatus => {
+    settings.clearGitHubToken();
+    audit.record('system', 'Disconnected local GitHub token', 'ok', 'Removed encrypted local token; revoke on github.com separately if desired.');
+    return { connected: false, encryptionAvailable: settings.isEncryptionAvailable() };
   });
 
   /* -------------------------------- app ------------------------------ */

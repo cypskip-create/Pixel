@@ -2,7 +2,15 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
-## Phase A — Python Agent Engine (`pixel-agent-v2`) (Local Uncommitted)
+## Phase B — Git, Files, Rich Documents, GitHub Plugin & Secure Execution (Local Uncommitted)
+
+- Fixed the Windows CI regression from commit `1178401` (runs `45168522052` and `45175291910`): added injectable `allowedRoot` to `FileTools`, updated `tests/files.test.ts` and `tests/tasks.test.ts` to inject `{ allowedRoot: root }`, honored `PIXEL_PYTHON` in `PythonAgentBridge`, untracked 4 `__pycache__/*.pyc` files, and updated `.gitignore`.
+- Extended `src/main/git/toolset.ts` with `git_remote_list` (credential redaction), `git_repository_info`, `git_stage`, `git_unstage`, clone protocol/credential hardening, and structured Git error classification.
+- Added `src/main/files/patch.ts` (`file_patch`: exact + unambiguous fuzzy multi-hunk atomic patching with SHA-256 & CRLF preservation), `file_search_content`, UNC path blocking, and `src/main/files/richDocuments.ts` (zero-dependency bounded DOCX/PPTX/XLSX/PDF extraction in `file_read`).
+- Expanded `src/main/plugins/github.ts`, `manifest.ts`, and `executors.ts` to 13 registered GitHub tools (10 read + 3 approval-gated authenticated write tools) and added DPAPI-encrypted optional GitHub PAT connection (`SettingsStore`, `ipc.ts`, `preload/index.ts`, `WorkspacePluginManager.tsx`).
+- Verified Agent-mode scoped autonomy and a 5-step real-repo developer workflow end-to-end through Python `pixel-agent-v2` in `tests/phase-b-git-files-github.test.ts`. Live GitHub PAT calls, post-push Windows CI, and Electron GUI launch remain open.
+
+## Phase A — Python Agent Engine (`pixel-agent-v2`) (Committed at `ec61ca0`)
 
 - Implemented `python/pixel_agent/` (`protocol.py`, `loop.py`, `providers.py`, `compressor.py`, `budgets.py`, `errors.py`, `crash_log.py`, `__main__.py`) and `python/pyproject.toml` (zero third-party runtime deps; pure Python 3 stdlib SSE streaming).
 - Upgraded `src/main/services/pythonAgentBridge.ts` to `pixel-agent-v2` with ownership file tracking, `.corrupt` quarantine, 4 MiB frame cap, and spawn/exit crash handling.

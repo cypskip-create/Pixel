@@ -151,6 +151,9 @@ export const CHANNELS = {
   pluginsSetEnabled: 'plugins:setEnabled',
   pluginsSetProjectAvailability: 'plugins:setProjectAvailability',
   pluginsSetSetting: 'plugins:setSetting',
+  pluginsGitHubStatus: 'plugins:githubStatus',
+  pluginsGitHubConnect: 'plugins:githubConnect',
+  pluginsGitHubDisconnect: 'plugins:githubDisconnect',
 
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',

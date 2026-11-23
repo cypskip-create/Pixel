@@ -312,6 +312,12 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.pluginsSetProjectAvailability, pluginId, availability) as Promise<PluginView[]>,
     setSetting: (pluginId: string, key: string, value: string) =>
       ipcRenderer.invoke(CH.pluginsSetSetting, pluginId, key, value) as Promise<PluginView[]>,
+    githubStatus: () =>
+      ipcRenderer.invoke(CH.pluginsGitHubStatus) as Promise<import('../shared/types').GitHubConnectionStatus>,
+    githubConnect: (token: string) =>
+      ipcRenderer.invoke(CH.pluginsGitHubConnect, token) as Promise<import('../shared/types').GitHubConnectionStatus>,
+    githubDisconnect: () =>
+      ipcRenderer.invoke(CH.pluginsGitHubDisconnect) as Promise<import('../shared/types').GitHubConnectionStatus>,
   },
 
   app: {

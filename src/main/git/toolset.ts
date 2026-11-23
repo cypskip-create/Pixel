@@ -207,6 +207,68 @@ export const GIT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'git_remote_list',
+    description: 'Lists configured Git remotes (with any embedded URL credentials redacted).',
+    category: 'code',
+    risk: 'low',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: { repoPath: { type: 'string', minLength: 1, maxLength: 500 } },
+      required: ['repoPath'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'git_repository_info',
+    description: 'Summarizes repository branch or detached HEAD state, HEAD SHA, remotes, and working-tree/conflict counts.',
+    category: 'code',
+    risk: 'low',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: { repoPath: { type: 'string', minLength: 1, maxLength: 500 } },
+      required: ['repoPath'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'git_stage',
+    description: 'Stages explicit relative file paths in the local Git index without committing.',
+    category: 'code',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        repoPath: { type: 'string', minLength: 1, maxLength: 500 },
+        paths: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 50 },
+      },
+      required: ['repoPath', 'paths'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'git_unstage',
+    description: 'Unstages explicit relative file paths from the Git index while preserving working-tree edits.',
+    category: 'code',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        repoPath: { type: 'string', minLength: 1, maxLength: 500 },
+        paths: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 50 },
+      },
+      required: ['repoPath', 'paths'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export type GitRunner = (args: string[], cwd: string, signal?: AbortSignal) => Promise<{ stdout: string; stderr: string }>;
@@ -242,10 +304,40 @@ function isValidHttpsGitUrl(raw: string): boolean {
   if (raw.startsWith('-')) return false;
   try {
     const parsed = new URL(raw);
+    if (parsed.username || parsed.password) return false;
     return parsed.protocol === 'https:' && Boolean(parsed.hostname) && parsed.pathname.length > 1;
   } catch {
     return false;
   }
+}
+
+function redactGitUrlSecrets(text: string): string {
+  return text.replace(/(https?:\/\/)([^/\s@]+)@/gi, '$1[REDACTED]@');
+}
+
+function classifyGitError(error: unknown): { content: string; errorCode: ToolResult['errorCode'] } {
+  const err = error as NodeJS.ErrnoException | undefined;
+  const raw = err instanceof Error ? err.message : String(error ?? 'Git operation failed.');
+  const msg = redactGitUrlSecrets(raw);
+  if (err?.code === 'ENOENT' || /not recognized|ENOENT/i.test(msg)) {
+    return { content: 'Git is not installed or not available on PATH.', errorCode: 'UNAVAILABLE' };
+  }
+  if (err?.name === 'AbortError' || /aborted/i.test(msg)) {
+    return { content: 'Git operation was cancelled.', errorCode: 'CANCELLED' };
+  }
+  if (/ETIMEDOUT|timed out/i.test(msg)) {
+    return { content: 'Git operation timed out.', errorCode: 'TIMEOUT' };
+  }
+  if (/index\.lock|Unable to create.*\.lock/i.test(msg)) {
+    return { content: `Git repository is locked by another process: ${truncate(msg)}`, errorCode: 'FAILED' };
+  }
+  if (/not a git repository/i.test(msg)) {
+    return { content: 'The target directory is not a valid Git repository.', errorCode: 'NOT_FOUND' };
+  }
+  if (/Authentication failed|could not read Username|Permission denied/i.test(msg)) {
+    return { content: `Git authentication failed: ${truncate(msg)}`, errorCode: 'DENIED' };
+  }
+  return { content: truncate(msg), errorCode: 'FAILED' };
 }
 
 function truncate(text: string): string {
@@ -383,7 +475,7 @@ export class GitTools {
             return { ok: false, content: 'Only valid public https:// Git URLs are allowed for git_clone.' };
           }
           const dest = this.assertAllowedPath(String(args.destination ?? ''), false);
-          const gitArgs = ['clone'];
+          const gitArgs = ['-c', 'protocol.ext.allow=never', '-c', 'protocol.file.allow=never', 'clone'];
           if (typeof args.depth === 'number' && args.depth >= 1 && args.depth <= 50) {
             gitArgs.push('--depth', String(Math.floor(args.depth)));
           }
@@ -489,11 +581,91 @@ export class GitTools {
           };
         }
 
+        case 'git_remote_list': {
+          const repo = this.assertAllowedPath(String(args.repoPath ?? ''), true);
+          const { stdout } = await this.runGit(['remote', '-v'], repo, signal);
+          const cleaned = redactGitUrlSecrets(stdout.trim());
+          return { ok: true, content: truncate(cleaned || 'No remotes configured.') };
+        }
+
+        case 'git_repository_info': {
+          const repo = this.assertAllowedPath(String(args.repoPath ?? ''), true);
+          let branch = '(unborn)';
+          let detached = false;
+          try {
+            const sym = await this.runGit(['symbolic-ref', '--short', 'HEAD'], repo, signal);
+            branch = sym.stdout.trim() || '(unknown)';
+          } catch {
+            detached = true;
+            branch = '(detached HEAD)';
+          }
+          let headSha = '(none)';
+          try {
+            const rev = await this.runGit(['rev-parse', '--short', 'HEAD'], repo, signal);
+            headSha = rev.stdout.trim() || '(none)';
+          } catch { /* unborn repository */ }
+          const { stdout: statusOut } = await this.runGit(['status', '--porcelain=v1'], repo, signal);
+          const lines = statusOut.split(/\r?\n/).filter(Boolean);
+          let staged = 0;
+          let unstaged = 0;
+          let untracked = 0;
+          let conflicts = 0;
+          for (const line of lines) {
+            const code = line.slice(0, 2);
+            if (code === '??') untracked += 1;
+            else if (code.includes('U') || code === 'AA' || code === 'DD') conflicts += 1;
+            else {
+              if (code[0] !== ' ') staged += 1;
+              if (code[1] !== ' ') unstaged += 1;
+            }
+          }
+          const { stdout: remOut } = await this.runGit(['remote'], repo, signal);
+          const remotes = remOut.split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
+          return {
+            ok: true,
+            content: [
+              `Repository: ${repo}`,
+              `Branch: ${branch} (${detached ? 'detached' : 'attached'}) · HEAD: ${headSha}`,
+              `Remotes: ${remotes.length ? remotes.join(', ') : 'none'}`,
+              `Working tree: ${staged} staged, ${unstaged} unstaged, ${untracked} untracked, ${conflicts} conflict(s)`,
+            ].join('\n'),
+            detail: { repo, branch, detached, headSha, remotes, staged, unstaged, untracked, conflicts },
+          };
+        }
+
+        case 'git_stage': {
+          const repo = this.assertAllowedPath(String(args.repoPath ?? ''), true);
+          const paths = this.sanitizeRelativePaths(args.paths);
+          await this.runGit(['add', '--', ...paths], repo, signal);
+          return {
+            ok: true,
+            content: `Staged ${paths.length} path(s): ${paths.join(', ')}`,
+            verification: { summary: `Staged ${paths.length} path(s).`, source: 'git add' },
+          };
+        }
+
+        case 'git_unstage': {
+          const repo = this.assertAllowedPath(String(args.repoPath ?? ''), true);
+          const paths = this.sanitizeRelativePaths(args.paths);
+          try {
+            await this.runGit(['reset', 'HEAD', '--', ...paths], repo, signal);
+          } catch {
+            // Unborn repo (no HEAD yet): fall back to git rm --cached
+            await this.runGit(['rm', '--cached', '--', ...paths], repo, signal);
+          }
+          return {
+            ok: true,
+            content: `Unstaged ${paths.length} path(s): ${paths.join(', ')}`,
+            verification: { summary: `Unstaged ${paths.length} path(s).`, source: 'git reset HEAD' },
+          };
+        }
+
         default:
           return { ok: false, content: `Unknown git tool "${name}".` };
       }
     } catch (error) {
-      return { ok: false, content: error instanceof Error ? error.message : 'Git operation failed.' };
+      const classified = classifyGitError(error);
+      return { ok: false, content: classified.content, errorCode: classified.errorCode };
     }
   }
 }

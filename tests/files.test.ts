@@ -23,7 +23,7 @@ describe('local file tools', () => {
     expect(FILE_TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([
       'file_list', 'file_read', 'file_search', 'file_metadata', 'file_open', 'file_trash', 'file_write',
       'directory_create', 'file_copy', 'file_rename', 'file_batch_copy',
-      'file_batch_rename', 'file_find_duplicates',
+      'file_batch_rename', 'file_find_duplicates', 'file_patch', 'file_search_content',
     ]);
     expect(FILE_TOOL_DEFINITIONS.every((tool) => tool.requiresApproval && tool.risk === 'high')).toBe(true);
     expect(FILE_TOOL_DEFINITIONS.find((tool) => tool.name === 'file_write')?.changesState).toBe(true);
@@ -43,10 +43,10 @@ describe('local file tools', () => {
     for (let index = 0; index < MAX_DIRECTORY_ENTRIES + 3; index += 1) {
       writeFileSync(join(root, `item-${String(index).padStart(3, '0')}.txt`), 'x');
     }
-    const result = new FileTools().run('file_list', { directory: root });
+    const result = new FileTools({ allowedRoot: root }).run('file_list', { directory: root });
     expect(result.ok).toBe(true);
     expect(result.detail).toMatchObject({ hasMore: true, shown: MAX_DIRECTORY_ENTRIES, nextOffset: MAX_DIRECTORY_ENTRIES });
-    const nextPage = new FileTools().run('file_list', { directory: root, offset: MAX_DIRECTORY_ENTRIES });
+    const nextPage = new FileTools({ allowedRoot: root }).run('file_list', { directory: root, offset: MAX_DIRECTORY_ENTRIES });
     expect(nextPage.detail).toMatchObject({ hasMore: false, shown: 3, nextOffset: null });
   });
 
@@ -62,7 +62,7 @@ describe('local file tools', () => {
     const path = join(root, 'readme.txt');
     writeFileSync(path, 'pixel file tool');
     const openPath = vi.fn(async () => '');
-    const executors = new ToolExecutors({ files: new FileTools(), openPath });
+    const executors = new ToolExecutors({ files: new FileTools({ allowedRoot: root }), openPath });
     const result = await executors.run('file_read', { path });
     expect(result.ok).toBe(true);
     expect(result.content).toContain('pixel file tool');
@@ -74,7 +74,7 @@ describe('local file tools', () => {
     const root = tempHome();
     const path = join(root, 'notes.txt');
     writeFileSync(path, 'first line\nsecond line\nthird line', 'utf8');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     const first = tools.run('file_read', { path });
     const next = tools.run('file_read', { path, offset: 11 });
     expect(first.ok).toBe(true);
@@ -87,19 +87,19 @@ describe('local file tools', () => {
     const root = tempHome();
     const envPath = join(root, '.env');
     writeFileSync(envPath, 'TOKEN=not-for-the-model');
-    const secret = new FileTools().run('file_read', { path: envPath });
+    const secret = new FileTools({ allowedRoot: root }).run('file_read', { path: envPath });
     expect(secret.errorCode).toBe('DENIED');
 
     const binaryPath = join(root, 'image.bin');
     writeFileSync(binaryPath, Buffer.from([0, 1, 2]));
-    const binary = new FileTools().run('file_read', { path: binaryPath });
+    const binary = new FileTools({ allowedRoot: root }).run('file_read', { path: binaryPath });
     expect(binary.content).toMatch(/binary files are not supported/i);
   });
 
   it('creates new files only by default and requires explicit overwrite', () => {
     const root = tempHome();
     const path = join(root, 'draft.txt');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     expect(tools.run('file_write', { path, content: 'one' }).ok).toBe(true);
     expect(tools.run('file_write', { path, content: 'two' }).errorCode).toBe('DENIED');
     const replaced = tools.run('file_write', { path, content: 'two', overwrite: true });
@@ -109,7 +109,7 @@ describe('local file tools', () => {
 
   it('authors supported UTF-8 documents with read-back and refuses binary document exports', () => {
     const root = tempHome();
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     for (const [name, content] of [['brief.md', '# Brief\n\nDraft'], ['data.csv', 'name,value\nPix,1'], ['record.json', '{"ok":true}']]) {
       const path = join(root, name);
       const result = tools.run('file_write', { path, content });
@@ -130,13 +130,13 @@ describe('local file tools', () => {
   it('does not create missing parent directories or follow symlinks', () => {
     const root = tempHome();
     const absent = join(root, 'missing', 'new.txt');
-    expect(new FileTools().run('file_write', { path: absent, content: 'x' }).ok).toBe(false);
+    expect(new FileTools({ allowedRoot: root }).run('file_write', { path: absent, content: 'x' }).ok).toBe(false);
     const existing = join(root, 'ordinary.txt');
     writeFileSync(existing, 'existing');
     const link = join(root, 'alias.txt');
     try {
       symlinkSync(existing, link);
-      expect(new FileTools().run('file_write', { path: link, content: 'replace', overwrite: true }).errorCode).toBe('DENIED');
+      expect(new FileTools({ allowedRoot: root }).run('file_write', { path: link, content: 'replace', overwrite: true }).errorCode).toBe('DENIED');
     } catch (error) {
       if (process.platform !== 'win32') throw error;
       // Symlink creation may be disabled in a Windows test environment.
@@ -145,9 +145,9 @@ describe('local file tools', () => {
   });
 
   it('rejects relative paths and invalid offsets', () => {
-    const tools = new FileTools();
-    expect(tools.run('file_list', { directory: 'relative/path' }).ok).toBe(false);
     const root = tempHome();
+    const tools = new FileTools({ allowedRoot: root });
+    expect(tools.run('file_list', { directory: 'relative/path' }).ok).toBe(false);
     const path = join(root, 'x.txt');
     writeFileSync(path, 'x');
     expect(tools.run('file_read', { path, offset: -1 }).ok).toBe(false);
@@ -159,7 +159,7 @@ describe('local file tools', () => {
     mkdirSync(join(root, 'nested'));
     writeFileSync(join(root, 'nested', 'Quarterly Plan.pdf'), 'private document body');
     writeFileSync(join(root, 'nested', 'other.txt'), 'not a match');
-    const result = new FileTools().run('file_search', { directory: root, query: 'quarterly', extension: '.pdf' });
+    const result = new FileTools({ allowedRoot: root }).run('file_search', { directory: root, query: 'quarterly', extension: '.pdf' });
     expect(result.ok).toBe(true);
     expect(result.detail).toMatchObject({ matches: [{ path: join(root, 'nested', 'Quarterly Plan.pdf') }], truncated: false });
     expect(result.content).not.toContain('private document body');
@@ -170,7 +170,7 @@ describe('local file tools', () => {
     const root = tempHome();
     const file = join(root, 'manual.pdf');
     writeFileSync(file, 'document bytes');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     const result = tools.run('file_search', {
       directory: root,
       query: 'manual',
@@ -189,7 +189,7 @@ describe('local file tools', () => {
     const root = tempHome();
     const source = join(root, 'ordinary.txt');
     writeFileSync(source, 'hello');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     expect(tools.run('file_metadata', { path: source })).toMatchObject({ ok: true, detail: { type: 'file', sizeBytes: 5 } });
     const created = tools.run('directory_create', { path: join(root, 'Project Notes') });
     expect(created.ok).toBe(true);
@@ -207,7 +207,7 @@ describe('local file tools', () => {
     writeFileSync(executable, 'not a real executable');
     mkdirSync(folder);
     const openPath = vi.fn(async () => '');
-    const files = new FileTools();
+    const files = new FileTools({ allowedRoot: root });
 
     const opened = await files.open({ path: document }, openPath);
     expect(opened).toMatchObject({ ok: true, detail: { path: document, type: 'file', windowsAccepted: true } });
@@ -224,7 +224,7 @@ describe('local file tools', () => {
     writeFileSync(file, 'disposable fixture');
     writeFileSync(secret, 'not used');
     const trashItem = vi.fn(async (path: string) => { unlinkSync(path); });
-    const files = new FileTools();
+    const files = new FileTools({ allowedRoot: root });
 
     expect(await files.trash({ path: file }, trashItem)).toMatchObject({
       ok: true,
@@ -243,7 +243,7 @@ describe('local file tools', () => {
     const copy = join(root, 'copy.txt');
     const renamed = join(root, 'renamed.txt');
     writeFileSync(source, 'harmless fixture');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     expect(tools.run('file_copy', { source, destination: copy })).toMatchObject({ ok: true, verification: { source: 'filesystem read-back SHA-256' } });
     expect(readFileSync(copy, 'utf8')).toBe('harmless fixture');
     expect(tools.run('file_copy', { source, destination: copy }).errorCode).toBe('DENIED');
@@ -261,7 +261,7 @@ describe('local file tools', () => {
     const secondCopy = join(root, 'copy-two.txt');
     writeFileSync(first, 'same fixture');
     writeFileSync(second, 'same fixture');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
 
     const duplicates = tools.run('file_find_duplicates', { directory: root });
     expect(duplicates.ok).toBe(true);
@@ -293,7 +293,7 @@ describe('local file tools', () => {
     writeFileSync(source, 'ordinary');
     writeFileSync(existing, 'keep');
     writeFileSync(secret, 'private');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     expect(tools.run('file_batch_copy', { operations: [{ source, destination: existing }] }).ok).toBe(false);
     expect(tools.run('file_batch_copy', { operations: [{ source: secret, destination: join(root, 'copy.txt') }] }).errorCode).toBe('DENIED');
     expect(existsSync(source)).toBe(true);
@@ -305,7 +305,7 @@ describe('local file tools', () => {
     const root = tempHome();
     const secret = join(root, 'access-token.txt');
     writeFileSync(secret, 'never returned');
-    const tools = new FileTools();
+    const tools = new FileTools({ allowedRoot: root });
     expect(tools.run('file_search', { directory: root, query: 'token' }).detail).toMatchObject({ matches: [] });
     expect(tools.run('file_metadata', { path: secret }).errorCode).toBe('DENIED');
     expect(tools.run('file_copy', { source: secret, destination: join(root, 'copy.txt') }).errorCode).toBe('DENIED');

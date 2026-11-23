@@ -10,10 +10,12 @@ Use this checklist to execute the next implementation phase in dependency order.
 - [x] Pass TS-vs-Python parity test suite (12/12) with rollback flag `agent.runtimeEngine` (default `'typescript'`)
 
 ## Phase B — Git, Files & Execution
-- [ ] Add injectable `allowedRoot` to `FileTools` and move `tests/files.test.ts` + `tests/tasks.test.ts` to `os.tmpdir()`
-- [ ] Add fuzzy `file_patch` tool and rich document extraction in `file_read`
-- [ ] Expose expanded GitHub tools (`github_read_file`, `github_list_issues`, `github_list_prs`, `github_repo_branches`, `github_workflow_runs`) in plugin manifest & executor
-- [ ] Add DPAPI-backed optional GitHub auth token flow in Settings → Plugins & Connections
+- [x] Add injectable `allowedRoot` to `FileTools` and fix `tests/files.test.ts` + `tests/tasks.test.ts` for Windows CI `os.tmpdir()`
+- [x] Add exact + unambiguous fuzzy `file_patch` tool, `file_search_content`, and bounded rich document extraction (DOCX/PPTX/XLSX/PDF) in `file_read`
+- [x] Complete local Git toolset (`git_remote_list`, `git_repository_info`, `git_stage`, `git_unstage`, clone protocol hardening)
+- [x] Expose expanded GitHub tools (10 read + 3 approval-gated authenticated write tools) in plugin manifest & executor
+- [x] Add DPAPI-backed optional GitHub auth token flow in Settings → Plugins & Connections (`WorkspacePluginManager.tsx`)
+- [x] Verify Agent-mode scoped autonomy and 5-step real-repo developer workflow through Python `pixel-agent-v2`
 
 ## Phase C — Memory & Skills
 - [ ] Add SQLite FTS5 migration over `messages` + `session_search` agent tool

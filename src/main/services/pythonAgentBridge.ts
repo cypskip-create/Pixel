@@ -154,7 +154,7 @@ export class PythonAgentBridge {
     ownershipPath?: string;
     crashLogPath?: string;
   } = {}) {
-    this.pythonExecutable = options.pythonExecutable ?? (process.platform === 'win32' ? 'python' : 'python3');
+    this.pythonExecutable = options.pythonExecutable ?? process.env.PIXEL_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
     this.scriptPath = options.scriptPath ?? join(process.cwd(), 'python', 'agent_service.py');
     this.timeoutMs = options.timeoutMs ?? 8_000;
     this.ownershipPath = options.ownershipPath ?? null;

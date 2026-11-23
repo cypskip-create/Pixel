@@ -28,7 +28,11 @@ describe('Pixel plugin foundation', () => {
     expect(store.list()[0]).toMatchObject({ installed: true, enabled: false, health: 'disabled' });
     expect(store.installedTools()).toHaveLength(0);
     store.setEnabled(GITHUB_PUBLIC_PLUGIN.id, true);
-    expect(store.installedTools().map((tool) => tool.name)).toEqual(['github_repo_summary']);
+    const toolNames = store.installedTools().map((tool) => tool.name);
+    expect(toolNames).toContain('github_repo_summary');
+    expect(toolNames).toContain('github_read_file');
+    expect(toolNames).toContain('github_list_issues');
+    expect(toolNames).toContain('github_create_issue');
     store.recordHealth(GITHUB_PUBLIC_PLUGIN.id, 'temporary provider error');
     expect(store.list()[0]).toMatchObject({ health: 'error', error: 'temporary provider error' });
     store.recordHealth(GITHUB_PUBLIC_PLUGIN.id);
@@ -164,7 +168,8 @@ describe('Pixel plugin foundation', () => {
     const registry = new ToolRegistry(store.installedTools());
     const args = { owner: 'octocat', repository: 'Hello-World' };
     expect(registry.validateArgs('github_repo_summary', args)).toEqual({ ok: true });
-    expect(registry.evaluate('github_repo_summary', 'agent', args)).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.evaluate('github_repo_summary', 'hybrid', args)).toMatchObject({ allowed: false, needsApproval: true });
+    expect(registry.evaluate('github_repo_summary', 'agent', args)).toEqual({ allowed: true });
 
     const prompts: PermissionRequest[] = [];
     const broker = new PermissionBroker(registry, new AuditLog(), (request) => prompts.push(request));
@@ -189,7 +194,7 @@ describe('Pixel plugin foundation', () => {
     expect(hiddenDescription.content).toContain('description hidden or unavailable');
     expect(hiddenDescription.content).not.toContain('Sample repository');
     expect(broker.revokeForTool('github_repo_summary')).toBeGreaterThan(0);
-    expect(registry.evaluate('github_repo_summary', 'agent', args).allowed).toBe(false);
+    expect(registry.evaluate('github_repo_summary', 'hybrid', args).allowed).toBe(false);
   });
 
   it('records a real adapter error as plugin health and never reports a false success', async () => {

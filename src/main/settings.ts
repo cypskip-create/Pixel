@@ -25,14 +25,18 @@ interface KeyFile {
 export class SettingsStore {
   private readonly settingsPath: string;
   private readonly keyPath: string;
+  private readonly githubKeyPath: string;
   private cache: AppSettings | null = null;
   /** Decrypted key, held in memory only for the lifetime of the process. */
   private apiKeyCache: string | null = null;
   private apiKeyLoaded = false;
+  private githubTokenCache: string | null = null;
+  private githubTokenLoaded = false;
 
   constructor(userDataDir: string) {
     this.settingsPath = join(userDataDir, 'settings.json');
     this.keyPath = join(userDataDir, 'credentials', 'deepseek.key');
+    this.githubKeyPath = join(userDataDir, 'credentials', 'github.key');
   }
 
   /* ----------------------------- settings ----------------------------- */
@@ -143,6 +147,65 @@ export class SettingsStore {
     }
     this.apiKeyCache = null;
     this.apiKeyLoaded = true;
+  }
+
+  /** Encrypt and persist an optional GitHub Personal Access Token via DPAPI. */
+  setGitHubToken(token: string): { ok: boolean; error?: string } {
+    const trimmed = token.trim();
+    if (!trimmed) return { ok: false, error: 'The GitHub token is empty.' };
+    if (trimmed.length > 512) return { ok: false, error: 'The GitHub token is unexpectedly long.' };
+    if (!this.isEncryptionAvailable()) {
+      return {
+        ok: false,
+        error: 'Windows credential encryption is unavailable on this account, so Pixel will not store the GitHub token.',
+      };
+    }
+    try {
+      const encrypted = safeStorage.encryptString(trimmed);
+      mkdirSync(dirname(this.githubKeyPath), { recursive: true });
+      const payload: KeyFile = { encrypted: encrypted.toString('base64') };
+      writeFileSync(this.githubKeyPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
+      this.githubTokenCache = trimmed;
+      this.githubTokenLoaded = true;
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Pixel could not save the GitHub token securely.' };
+    }
+  }
+
+  /** Decrypted GitHub token, or null. Held in memory only in the main process. */
+  getGitHubToken(): string | null {
+    if (this.githubTokenLoaded) return this.githubTokenCache;
+    this.githubTokenLoaded = true;
+    this.githubTokenCache = null;
+
+    if (!existsSync(this.githubKeyPath)) return null;
+    if (!this.isEncryptionAvailable()) return null;
+
+    try {
+      const raw = readFileSync(this.githubKeyPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (!isKeyFile(parsed)) return null;
+      this.githubTokenCache = safeStorage.decryptString(Buffer.from(parsed.encrypted, 'base64'));
+      return this.githubTokenCache;
+    } catch {
+      return null;
+    }
+  }
+
+  hasGitHubToken(): boolean {
+    return this.getGitHubToken() !== null;
+  }
+
+  /** Remove the locally stored encrypted GitHub token (does not revoke the token on github.com). */
+  clearGitHubToken(): void {
+    try {
+      if (existsSync(this.githubKeyPath)) rmSync(this.githubKeyPath, { force: true });
+    } catch {
+      throw new Error('Pixel could not remove the saved GitHub token.');
+    }
+    this.githubTokenCache = null;
+    this.githubTokenLoaded = true;
   }
 }
 

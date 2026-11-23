@@ -9,7 +9,9 @@ dist-electron/
 release/
 python/build/
 python/dist/
-python/**/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
 out/
 *.tsbuildinfo
 

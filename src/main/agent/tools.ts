@@ -78,8 +78,12 @@ export function riskAllowsGrantDuration(risk: RiskLevel, duration: 'once' | 'ses
 export const AGENT_MODE_AUTONOMOUS_TOOLS: ReadonlySet<string> = new Set([
   // Public GitHub read-only inspection
   'plugin_github_repo_summary',
+  'github_repo_summary',
   'github_read_file',
+  'github_list_dir',
+  'github_list_commits',
   'github_list_issues',
+  'github_issue_detail',
   'github_list_prs',
   'github_repo_branches',
   'github_workflow_runs',
@@ -90,12 +94,15 @@ export const AGENT_MODE_AUTONOMOUS_TOOLS: ReadonlySet<string> = new Set([
   'git_diff',
   'git_log',
   'git_branches',
+  'git_remote_list',
+  'git_repository_info',
   'git_fetch',
   'git_clone',
   // Bounded local read-only file & document inspection
   'file_list',
   'file_read',
   'file_search',
+  'file_search_content',
   'file_metadata',
   'file_find_duplicates',
   'documents_search',

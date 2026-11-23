@@ -870,6 +870,16 @@ export interface ToolCatalogEntry {
   availabilityReason?: string;
 }
 
+export interface GitHubConnectionStatus {
+  connected: boolean;
+  encryptionAvailable: boolean;
+  login?: string;
+  name?: string | null;
+  scopes?: string[];
+  verified?: boolean;
+  error?: string;
+}
+
 export interface PluginView {
   id: string;
   name: string;
@@ -1128,6 +1138,9 @@ export interface CypsBridge {
     setEnabled(pluginId: string, enabled: boolean): Promise<PluginView[]>;
     setProjectAvailability(pluginId: string, availability: 'inherit' | 'enabled' | 'disabled'): Promise<PluginView[]>;
     setSetting(pluginId: string, key: string, value: string): Promise<PluginView[]>;
+    githubStatus?(): Promise<GitHubConnectionStatus>;
+    githubConnect?(token: string): Promise<GitHubConnectionStatus>;
+    githubDisconnect?(): Promise<GitHubConnectionStatus>;
   };
   app: {
     getVersion(): Promise<string>;

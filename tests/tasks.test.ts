@@ -174,7 +174,7 @@ describe('durable file task integration', () => {
       const registry = new ToolRegistry([...BUILTIN_TOOLS, ...FILE_TOOL_DEFINITIONS]);
       const audit = new AuditLog();
       const tasks = new TaskManager(() => undefined, new TaskStore(database));
-      const files = new FileTools();
+      const files = new FileTools({ allowedRoot: root });
       const broker = new PermissionBroker(registry, audit, (approval) => {
         queueMicrotask(() => {
           broker.respond({ requestId: approval.id, approved: true, duration: 'once' });
@@ -258,7 +258,7 @@ describe('durable file task integration', () => {
         permissions: broker,
         tasks,
         audit,
-        executors: new ToolExecutors({ files: new FileTools() }),
+        executors: new ToolExecutors({ files: new FileTools({ allowedRoot: root }) }),
         emit: () => undefined,
         isStopped: () => false,
       });

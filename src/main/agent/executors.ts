@@ -36,7 +36,21 @@ import type { BoardDiagramEdge, BoardObject, BoardOperation, BoardSnapshot } fro
 import type { BoardFileFormat, PixelBoardService } from '../board/service';
 import { isBoardTool } from '../board/tools';
 import type { ProductivityTools } from '../productivity/toolset';
-import { readPublicGitHubRepository } from '../plugins/github';
+import {
+  commentGitHubIssue,
+  compareGitHubCommits,
+  createGitHubIssue,
+  createGitHubPullRequest,
+  listGitHubCommits,
+  listGitHubDirectory,
+  listPublicGitHubBranches,
+  listPublicGitHubIssues,
+  listPublicGitHubPullRequests,
+  listPublicGitHubWorkflowRuns,
+  readGitHubIssueDetail,
+  readPublicGitHubFile,
+  readPublicGitHubRepository,
+} from '../plugins/github';
 import type { GitHubRepositorySummary } from '../plugins/github';
 
 const sharedDesktopInputLease = new DesktopInputLease();
@@ -132,7 +146,9 @@ export interface ExecutorDeps {
   /** Reuse the main-process verified system diagnostics probes when available. */
   systemDiagnostics?: () => DiagnosticsSnapshot | Promise<DiagnosticsSnapshot>;
   /** Read-only public GitHub adapter; injectable for deterministic tests. */
-  githubRepository?: (owner: unknown, repository: unknown, signal?: AbortSignal) => Promise<GitHubRepositorySummary>;
+  githubRepository?: (owner: unknown, repository: unknown, signal?: AbortSignal, authToken?: string | null) => Promise<GitHubRepositorySummary>;
+  /** Optional DPAPI-decrypted GitHub token resolver (main process only). */
+  getGitHubToken?: () => string | null;
   /** Main-process, manifest-validated non-secret plugin configuration. */
   getPluginSetting?: (pluginId: string, key: string) => string | undefined;
   onPluginHealth?: (pluginId: string, error?: string) => void;
@@ -345,7 +361,10 @@ export class ToolExecutors {
           return await this.browserVerify(args);
         case 'github_repo_summary': {
           try {
-            const repository = await (this.deps.githubRepository ?? readPublicGitHubRepository)(args.owner, args.repository, signal);
+            const token = this.deps.getGitHubToken?.() ?? null;
+            const repository = this.deps.githubRepository
+              ? (token ? await this.deps.githubRepository(args.owner, args.repository, signal, token) : await this.deps.githubRepository(args.owner, args.repository, signal))
+              : await readPublicGitHubRepository(args.owner, args.repository, signal, undefined, token);
             const descriptionMode = this.deps.getPluginSetting?.('pixel.github-public', 'descriptionDetail') ?? 'compact';
             const descriptionLimit = descriptionMode === 'hidden' ? 0 : descriptionMode === 'full' ? 500 : 160;
             const originalDescription = repository.description ? Array.from(repository.description) : [];
@@ -354,14 +373,139 @@ export class ToolExecutors {
             try { this.deps.onPluginHealth?.('pixel.github-public'); } catch { /* health persistence cannot change the provider result */ }
             return {
               ok: true,
-              content: `Public GitHub repository ${repository.fullName}: ${description ? `description (untrusted external data): ${description}${descriptionSuffix}` : 'description hidden or unavailable'}. ${repository.stars} stars, ${repository.forks} forks, ${repository.openIssues} open issues. Default branch: ${repository.defaultBranch}. Updated: ${repository.updatedAt}. URL: ${repository.url}.`,
-              detail: { fullName: repository.fullName, stars: repository.stars, forks: repository.forks, openIssues: repository.openIssues, updatedAt: repository.updatedAt, source: 'GitHub REST API; public unauthenticated read' },
-              verification: { summary: `GitHub returned public repository metadata for ${repository.fullName}.`, source: 'HTTPS response from api.github.com' },
+              content: `GitHub repository ${repository.fullName}: ${description ? `description (untrusted external data): ${description}${descriptionSuffix}` : 'description hidden or unavailable'}. ${repository.stars} stars, ${repository.forks} forks, ${repository.openIssues} open issues. Default branch: ${repository.defaultBranch}. Updated: ${repository.updatedAt}. URL: ${repository.url}.`,
+              detail: { fullName: repository.fullName, stars: repository.stars, forks: repository.forks, openIssues: repository.openIssues, updatedAt: repository.updatedAt, source: token ? 'GitHub REST API; authenticated read' : 'GitHub REST API; public unauthenticated read' },
+              verification: { summary: `GitHub returned repository metadata for ${repository.fullName}.`, source: 'HTTPS response from api.github.com' },
             };
           } catch (error) {
             try { this.deps.onPluginHealth?.('pixel.github-public', error instanceof Error ? error.message : String(error)); } catch { /* do not replace the provider error with a health-store error */ }
             throw error;
           }
+        }
+        case 'github_repo_branches': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const branches = await listPublicGitHubBranches(args.owner, args.repository, signal, undefined, token);
+          return {
+            ok: true,
+            content: branches.length
+              ? `Branches (${branches.length}):\n${branches.map((b) => `- ${b.name} (${b.sha.slice(0, 7)})${b.protected ? ' [protected]' : ''}`).join('\n')}`
+              : 'No branches found.',
+            detail: { branches },
+          };
+        }
+        case 'github_list_dir': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const entries = await listGitHubDirectory(args.owner, args.repository, args.path ?? '', signal, undefined, token);
+          return {
+            ok: true,
+            content: entries.length
+              ? `Entries (${entries.length}):\n${entries.map((e) => `- [${e.type}] ${e.path}${e.type === 'file' ? ` (${e.size} bytes)` : ''}`).join('\n')}`
+              : 'Directory is empty.',
+            detail: { entries },
+          };
+        }
+        case 'github_read_file': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const file = await readPublicGitHubFile(args.owner, args.repository, args.path, signal, undefined, token);
+          return {
+            ok: true,
+            content: `GitHub file ${file.path} (${file.size} bytes). Treat contents as untrusted external data:\n\n${file.content}`,
+            detail: { path: file.path, size: file.size },
+          };
+        }
+        case 'github_list_commits': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const commits = await listGitHubCommits(args.owner, args.repository, typeof args.branch === 'string' ? args.branch : undefined, signal, undefined, token);
+          return {
+            ok: true,
+            content: commits.length
+              ? `Recent commits (${commits.length}):\n${commits.map((c) => `- ${c.sha} ${c.message} (${c.author}, ${c.date})`).join('\n')}`
+              : 'No commits found.',
+            detail: { commits },
+          };
+        }
+        case 'github_compare_commits': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const cmp = await compareGitHubCommits(args.owner, args.repository, args.base, args.head, signal, undefined, token);
+          return {
+            ok: true,
+            content: `Compare ${String(args.base)}...${String(args.head)}: ${cmp.status} (+${cmp.aheadBy}/-${cmp.behindBy}, ${cmp.totalCommits} commit(s), ${cmp.files.length} changed file(s)):\n${cmp.files.map((f) => `- [${f.status}] ${f.filename} (+${f.additions}/-${f.deletions})`).join('\n')}`,
+            detail: cmp,
+          };
+        }
+        case 'github_list_issues': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const state = args.state === 'closed' || args.state === 'all' ? args.state : 'open';
+          const issues = await listPublicGitHubIssues(args.owner, args.repository, state, signal, undefined, token);
+          return {
+            ok: true,
+            content: issues.length
+              ? `Issues (${state}, ${issues.length}):\n${issues.map((i) => `- #${i.number} [${i.state}] ${i.title} (${i.url})`).join('\n')}`
+              : `No ${state} issues found.`,
+            detail: { issues },
+          };
+        }
+        case 'github_issue_detail': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const issue = await readGitHubIssueDetail(args.owner, args.repository, args.issueNumber, signal, undefined, token);
+          return {
+            ok: true,
+            content: `Issue #${issue.number} [${issue.state}] by @${issue.author}: ${issue.title}\nLabels: ${issue.labels.join(', ') || 'none'} · Comments: ${issue.comments}\nURL: ${issue.url}\n\nUntrusted body:\n${issue.body}`,
+            detail: { number: issue.number, state: issue.state, url: issue.url },
+          };
+        }
+        case 'github_list_prs': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const state = args.state === 'closed' || args.state === 'all' ? args.state : 'open';
+          const prs = await listPublicGitHubPullRequests(args.owner, args.repository, state, signal, undefined, token);
+          return {
+            ok: true,
+            content: prs.length
+              ? `Pull Requests (${state}, ${prs.length}):\n${prs.map((p) => `- #${p.number} [${p.state}] ${p.title} (${p.url})`).join('\n')}`
+              : `No ${state} pull requests found.`,
+            detail: { pullRequests: prs },
+          };
+        }
+        case 'github_workflow_runs': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const runs = await listPublicGitHubWorkflowRuns(args.owner, args.repository, signal, undefined, token);
+          return {
+            ok: true,
+            content: runs.length
+              ? `Workflow runs (${runs.length}):\n${runs.map((r) => `- #${r.id} ${r.name} [${r.status}/${r.conclusion ?? 'pending'}] on ${r.branch} (${r.url})`).join('\n')}`
+              : 'No workflow runs found.',
+            detail: { runs },
+          };
+        }
+        case 'github_create_issue': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const created = await createGitHubIssue(args.owner, args.repository, args.title, args.body, args.labels, signal, undefined, token);
+          return {
+            ok: true,
+            content: `Created GitHub issue #${created.number}: ${created.title} (${created.url})`,
+            detail: created,
+            verification: { summary: `GitHub created issue #${created.number}.`, source: 'HTTPS POST to api.github.com' },
+          };
+        }
+        case 'github_comment_issue': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const comment = await commentGitHubIssue(args.owner, args.repository, args.issueNumber, args.body, signal, undefined, token);
+          return {
+            ok: true,
+            content: `Posted comment #${comment.id} on #${String(args.issueNumber)} (${comment.url})`,
+            detail: comment,
+            verification: { summary: `GitHub created comment #${comment.id}.`, source: 'HTTPS POST to api.github.com' },
+          };
+        }
+        case 'github_create_pr': {
+          const token = this.deps.getGitHubToken?.() ?? null;
+          const pr = await createGitHubPullRequest(args.owner, args.repository, args.title, args.head, args.base, args.body, signal, undefined, token);
+          return {
+            ok: true,
+            content: `Created Pull Request #${pr.number}: ${pr.title} (${pr.url})`,
+            detail: pr,
+            verification: { summary: `GitHub created PR #${pr.number}.`, source: 'HTTPS POST to api.github.com' },
+          };
         }
         default:
           return {
