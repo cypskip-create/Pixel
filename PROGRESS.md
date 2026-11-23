@@ -2,6 +2,15 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
+## Phase F — Electron Security Hardening, Modular IPC, Pixel Board Expansion & UX Polish (Local Uncommitted)
+
+- Confirmed Phase E Windows CI run `45216760779` (`40f078b`) passed 100% green (`windows: completed/success`).
+- Hardened all 6 Electron `BrowserWindow`s (`main`, `workspace`, `settings`, `cursor`, `guidance`, `diagnostic`) and global `web-contents-created` via centralized `attachWindowSecurityPolicy` & `validateExternalUrl` in `src/main/windowPolicy.ts`.
+- Modularized IPC with `IpcHandlerRegistry` (`src/main/ipc/registry.ts`, duplicate-channel refusal + clean disposal) and domain routers (`src/main/ipc/plugins.ts`, `skills.ts`, `audit.ts`), preserving 100% `CHANNELS` / `CypsBridge` compatibility.
+- Expanded Pixel Board (`src/shared/drawingBoard.ts`, `src/main/board/service.ts`, `src/renderer/components/PixelBoard.tsx`) with multi-selection (Shift-click + marquee), group movement, 20px grid snapping, alignment/distribution, linked connectors following moved objects + SVG export, zoom controls, and full keyboard shortcuts respecting text inputs.
+- Added `Escape`-to-close drawer/dialog handling in `Workspace.tsx` and unified tactile surface/elevation polish across task, plugin, tool, and Board controls.
+- Verified `npm run typecheck` PASS, `npm run build` PASS, `tests/phase-f-hardening-ipc-board.test.ts` 7/7 PASS, full `npm test` **1,039 passed, 27 skipped, 0 failed**, and Python `unittest` **26/26 PASS**. Docs: `docs/architecture/PIXEL_DESKTOP_PHASE_F.md`, `docs/architecture/PIXEL_IPC_SECURITY.md`.
+
 ## Phase E — Durable Background Tasks, Cron Scheduler, Recovery & Parallel Delegation (Local Uncommitted)
 
 - Confirmed Windows CI run `45206359050` (`b6526d2`) passed 100% green (`windows: completed/success`).

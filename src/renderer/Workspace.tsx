@@ -100,6 +100,21 @@ export function Workspace(): React.JSX.Element {
   useLayoutEffect(() => {
     if (view === 'chat' && scrollRef.current) scrollRef.current.scrollTop = chatScrollTop.current;
   }, [view]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      if (pendingMode) {
+        event.preventDefault();
+        setPendingMode(null);
+      } else if (contextOpen) {
+        event.preventDefault();
+        setContextOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [contextOpen, pendingMode]);
   const activeTask = useMemo(() => selectActiveTask(tasks), [tasks]);
   const title = chat.historyLoading ? 'Restoring conversation…' : history.find((item) => item.id === chat.conversationId)?.title ?? 'New conversation';
   const recentTaskDisplay = recentOutcome ? taskDisplayState(recentOutcome) : null;

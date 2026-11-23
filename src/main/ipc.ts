@@ -20,7 +20,6 @@ import { basename, dirname, join, parse } from 'node:path';
 import type {
   AppSettings,
   AssistantState,
-  AuditEntry,
   CaptureResult,
   ChatMessage,
   ChatRequest,
@@ -39,18 +38,14 @@ import type {
   SkillRecord,
   TaskRecord,
   SkillDraftRequest,
-  RoutineRecord,
-  RoutineRunRecord,
   MemoryRecordView,
   MemoryExportView,
   PixelMemoryKind,
   SearchProvider,
-  ToolCatalogEntry,
   ScreenWindowTarget,
   ProductivityChecklistView,
   ProductivityDocumentLinkView,
   DocumentLibraryIndexResult,
-  PluginView,
 } from '../shared/types';
 import type { BoardOperation, PixelBoardDocument } from '../shared/drawingBoard';
 import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
@@ -58,7 +53,7 @@ import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
 import { PythonAgentRunner } from './agent/pythonRunner';
-import { buildRoutineToolPlan, buildSkillToolPlan, normalizeSkillInputValues } from './skills/plan';
+import { buildRoutineToolPlan, buildSkillToolPlan } from './skills/plan';
 import { ToolExecutors } from './agent/executors';
 import { PermissionGrantStore } from './agent/permissionStore';
 import { BrowserSession, validateBrowserUploadFile } from './agent/browser';
@@ -102,6 +97,10 @@ import { ProductivityTools, PRODUCTIVITY_TOOL_DEFINITIONS } from './productivity
 import { SkillStore } from './skills/store';
 import { draftSkillFromTask } from './skills/recording';
 import { LocalRoutineScheduler, RoutineStore, SchedulerLeaseManager } from './routines';
+import { IpcHandlerRegistry } from './ipc/registry';
+import { registerPluginIpc } from './ipc/plugins';
+import { registerProceduralSkillsIpc, registerRoutinesIpc } from './ipc/skills';
+import { registerAuditAndToolsIpc } from './ipc/audit';
 import type { ModelProvider } from './providers/deepseek';
 import { SettingsStore } from './settings';
 import { collectDiagnostics } from './system/diagnostics';
@@ -116,11 +115,9 @@ import { PixelBoardService } from './board/service';
 import type { BoardFileFormat } from './board/service';
 import { BOARD_TOOL_DEFINITIONS } from './board/tools';
 import { PluginStore } from './plugins/store';
-import { verifyGitHubToken } from './plugins/github';
 import { McpServerManager } from './plugins/mcpManager';
 import { GoogleCalendarClient } from './plugins/googleCalendar';
 import type { OAuthTokenRecord } from './plugins/oauth';
-import type { GitHubConnectionStatus, GoogleCalendarConnectionStatus, McpServerSummaryView, ProceduralSkillView } from '../shared/types';
 
 export interface IpcContext {
   settings: SettingsStore;
@@ -180,19 +177,34 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 }> {
   const { settings, windows, provider, captures, nativeHelper } = context;
 
+  const ipcRegistry = new IpcHandlerRegistry({
+    handle: (channel, listener) => ipcMain.handle(channel, listener),
+    removeHandler: (channel) => ipcMain.removeHandler(channel),
+    isTrustedSender: (event) => {
+      const trustedApplication = windows.isTrustedApplicationSender(event.sender, event.senderFrame);
+      if (trustedApplication) return true;
+      return false;
+    },
+  });
+
   const registerHandler = (
     channel: string,
     listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown,
   ): void => {
-    ipcMain.handle(channel, (event, ...args) => {
-      const trustedApplication = windows.isTrustedApplicationSender(event.sender, event.senderFrame);
-      const trustedCursorRequest = isCursorIpcChannelAllowed(channel) &&
-        windows.isTrustedCursorApplicationSender(event.sender, event.senderFrame);
-      if (!trustedApplication && !trustedCursorRequest) {
-        throw new Error('This Pixel IPC request came from an untrusted renderer.');
-      }
-      return listener(event, ...args);
-    });
+    if (isCursorIpcChannelAllowed(channel)) {
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, (event, ...args) => {
+        const trustedApplication = windows.isTrustedApplicationSender(event.sender, event.senderFrame);
+        const trustedCursorRequest = isCursorIpcChannelAllowed(channel) &&
+          windows.isTrustedCursorApplicationSender(event.sender, event.senderFrame);
+        if (!trustedApplication && !trustedCursorRequest) {
+          throw new Error('This Pixel IPC request came from an untrusted renderer.');
+        }
+        return listener(event, ...args);
+      });
+      return;
+    }
+    ipcRegistry.registerHandler(channel, listener);
   };
 
   const audit = new AuditLog(
@@ -1002,44 +1014,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return skillStore.delete(skillId);
   });
 
-  registerHandler(CHANNELS.routinesList, (): RoutineRecord[] =>
-    routineStore.list(projectId()) as RoutineRecord[],
-  );
-  registerHandler(CHANNELS.routinesCreate, (_event, input: { skillId: string; name: string; localTime: string; timezone: string; inputValues?: unknown }): RoutineRecord => {
-    if (!input || typeof input !== 'object' || typeof input.skillId !== 'string' ||
-        typeof input.name !== 'string' || typeof input.localTime !== 'string' || typeof input.timezone !== 'string') {
-      throw new Error('Routine settings are required.');
-    }
-    const skill = skillStore.getActive(input.skillId);
-    if (!skill || skill.projectId !== projectId()) throw new Error('Choose an active skill in the current project.');
-    const inputValues = normalizeSkillInputValues(skill.inputs, input.inputValues ?? {});
-    buildRoutineToolPlan(skill, 'routine-validation', toolRegistry, inputValues);
-    return routineStore.toSummary(routineStore.create({ ...input, inputValues, projectId: projectId() })) as RoutineRecord;
-  });
-  registerHandler(CHANNELS.routinesSetEnabled, (_event, routineId: string, enabled: boolean): boolean => {
-    if (typeof enabled !== 'boolean') return false;
-    const routine = routineStore.get(routineId);
-    if (!routine || routine.projectId !== projectId()) return false;
-    return routineStore.setEnabled(routineId, enabled);
-  });
-  registerHandler(CHANNELS.routinesDelete, (_event, routineId: string): boolean => {
-    const routine = routineStore.get(routineId);
-    if (!routine || routine.projectId !== projectId()) return false;
-    if (routines.cancel(routineId)) return false;
-    return routineStore.delete(routineId);
-  });
-  registerHandler(CHANNELS.routinesHistory, (_event, routineId: string, limit?: number): RoutineRunRecord[] => {
-    const routine = routineStore.get(routineId);
-    if (!routine || routine.projectId !== projectId()) return [];
-    return routineStore.history(routineId, limit) as RoutineRunRecord[];
-  });
-  registerHandler(CHANNELS.routinesCancel, (_event, routineId: string): boolean => {
-    const routine = routineStore.get(routineId);
-    return routine?.projectId === projectId() && routines.cancel(routineId);
-  });
-  registerHandler(CHANNELS.routinesRetry, (_event, routineId: string): boolean => {
-    const routine = routineStore.get(routineId);
-    return routine?.projectId === projectId() && routines.retry(routineId);
+  registerRoutinesIpc({
+    registrar: ipcRegistry,
+    projectId,
+    routineStore,
+    routines,
+    skillStore,
+    toolRegistry,
   });
 
   registerHandler(CHANNELS.memoryList, (): MemoryRecordView[] =>
@@ -1912,239 +1893,31 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------- audit ----------------------------- */
 
-  registerHandler(CHANNELS.auditList, (_event, limit?: number): AuditEntry[] =>
-    audit.list(typeof limit === 'number' ? limit : 100),
-  );
-  registerHandler(CHANNELS.toolsList, (): ToolCatalogEntry[] => {
-    const native = context.nativeHelper.available();
-    const python = pythonWorker.availability();
-    return toolRegistry.list().map((tool) => {
-      const entry: ToolCatalogEntry = {
-        name: tool.name,
-        description: tool.description,
-        category: tool.category,
-        risk: tool.risk,
-        requiresApproval: tool.requiresApproval,
-        changesState: tool.changesState,
-        availability: 'ready',
-      };
-      if (tool.category === 'screen' || tool.category === 'input') {
-        entry.availability = native.available ? 'conditional' : 'unavailable';
-        entry.dependency = 'PixelNative executable (health checked when used)';
-        if (!native.available) entry.availabilityReason = native.reason;
-      } else if (tool.name.startsWith('browser_')) {
-        entry.availability = 'not_checked';
-        entry.dependency = 'Playwright Chromium (checked when first used)';
-      } else if (tool.name === 'documents_index') {
-        entry.availability = python.available ? 'conditional' : 'unavailable';
-        entry.dependency = 'Python executable and document worker (checked when used)';
-        if (!python.available) entry.availabilityReason = python.reason;
-      }
-      return entry;
-    });
-  });
-  registerHandler(CHANNELS.pluginsList, (): PluginView[] => pluginStore.list(projectId()));
-  const revokePluginPermissions = (pluginId: string, manifest: ReturnType<typeof pluginStore.manifest>): void => {
-    if (!manifest) return;
-    for (const tool of manifest.tools) permissions.revokeForTool(tool.name);
-    audit.record('system', `Cleared permissions for Pixel plugin ${pluginId}`, 'ok', 'Pending approvals and stored grants were revoked.');
-  };
-  registerHandler(CHANNELS.pluginsInstall, (_event, pluginId: string): PluginView[] => {
-    pluginStore.install(pluginId);
-    audit.record('system', `Installed Pixel plugin ${pluginId}`, 'ok', 'Bundled, declarative plugin; no external code was executed.');
-    return pluginStore.list(projectId());
-  });
-  registerHandler(CHANNELS.pluginsUpdate, (_event, pluginId: string): PluginView[] => {
-    const manifest = pluginStore.manifest(pluginId);
-    if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
-    pluginStore.update(pluginId);
-    revokePluginPermissions(pluginId, manifest);
-    for (const tool of manifest.tools) toolRegistry.unregister(tool.name);
-    audit.record('system', `Updated Pixel plugin ${pluginId}`, 'ok', 'Updated from the bundled reviewed manifest; plugin remains disabled pending explicit re-enable.');
-    return pluginStore.list(projectId());
-  });
-  registerHandler(CHANNELS.pluginsUninstall, (_event, pluginId: string): PluginView[] => {
-    const manifest = pluginStore.manifest(pluginId);
-    revokePluginPermissions(pluginId, manifest);
-    pluginStore.uninstall(pluginId);
-    if (manifest) for (const tool of manifest.tools) toolRegistry.unregister(tool.name);
-    audit.record('system', `Uninstalled Pixel plugin ${pluginId}`, 'ok');
-    return pluginStore.list(projectId());
-  });
-  registerHandler(CHANNELS.pluginsSetEnabled, (_event, pluginId: string, enabled: boolean): PluginView[] => {
-    if (typeof enabled !== 'boolean') throw new Error('Plugin enabled state must be true or false.');
-    const manifest = pluginStore.manifest(pluginId);
-    if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
-    if (enabled) {
-      const current = pluginStore.list(projectId()).find((item) => item.id === pluginId);
-      if (current?.enabled) return pluginStore.list(projectId());
-      for (const tool of manifest.tools) {
-        const existing = toolRegistry.get(tool.name);
-        if (existing) {
-          throw new Error(`Plugin tool name conflicts with an existing Pixel capability: ${tool.name}`);
-        }
-      }
-    }
-    if (!enabled) revokePluginPermissions(pluginId, manifest);
-    pluginStore.setEnabled(pluginId, enabled);
-    for (const tool of manifest.tools) {
-      if (enabled) toolRegistry.register(tool);
-      else toolRegistry.unregister(tool.name);
-    }
-    audit.record('system', `${enabled ? 'Enabled' : 'Disabled'} Pixel plugin ${pluginId}`, 'ok', `Registered tools: ${manifest.tools.map((tool) => tool.name).join(', ')}`);
-    return pluginStore.list(projectId());
-  });
-  registerHandler(CHANNELS.pluginsSetProjectAvailability, (_event, pluginId: string, availability: 'inherit' | 'enabled' | 'disabled'): PluginView[] => {
-    const manifest = pluginStore.manifest(pluginId);
-    if (!manifest) throw new Error('This plugin is not in Pixel’s reviewed catalog.');
-    pluginStore.setProjectAvailability(pluginId, projectId(), availability);
-    revokePluginPermissions(pluginId, manifest);
-    audit.record('system', `Changed project plugin availability for ${pluginId}`, 'ok', `Project ${projectId()}; setting ${availability}; existing grants cleared.`);
-    return pluginStore.list(projectId());
-  });
-  registerHandler(CHANNELS.pluginsSetSetting, (_event, pluginId: string, key: string, value: string): PluginView[] => {
-    pluginStore.setSetting(pluginId, key, value);
-    audit.record('system', `Changed a setting for Pixel plugin ${pluginId}`, 'ok', `Setting ${key} was changed through its reviewed manifest.`);
-    return pluginStore.list(projectId());
-  });
-  registerHandler(CHANNELS.pluginsGitHubStatus, async (): Promise<GitHubConnectionStatus> => {
-    const encryptionAvailable = settings.isEncryptionAvailable();
-    const token = settings.getGitHubToken();
-    if (!token) return { connected: false, encryptionAvailable };
-    try {
-      const profile = await verifyGitHubToken(token);
-      return {
-        connected: true,
-        encryptionAvailable,
-        verified: true,
-        login: profile.login,
-        name: profile.name,
-        scopes: profile.scopes,
-      };
-    } catch (error) {
-      return {
-        connected: true,
-        encryptionAvailable,
-        verified: false,
-        error: error instanceof Error ? error.message : 'Unable to verify GitHub token.',
-      };
-    }
-  });
-  registerHandler(CHANNELS.pluginsGitHubConnect, async (_event, tokenValue: unknown): Promise<GitHubConnectionStatus> => {
-    const encryptionAvailable = settings.isEncryptionAvailable();
-    const token = typeof tokenValue === 'string' ? tokenValue.trim() : '';
-    if (!token) return { connected: false, encryptionAvailable, error: 'Enter a GitHub personal access token.' };
-    try {
-      const profile = await verifyGitHubToken(token);
-      const saved = settings.setGitHubToken(token);
-      if (!saved.ok) {
-        return { connected: false, encryptionAvailable, error: saved.error ?? 'Could not store GitHub token.' };
-      }
-      audit.record('system', 'Connected GitHub account', 'ok', `@${profile.login} · scopes: ${profile.scopes.join(', ') || 'fine-grained'}`);
-      return {
-        connected: true,
-        encryptionAvailable,
-        verified: true,
-        login: profile.login,
-        name: profile.name,
-        scopes: profile.scopes,
-      };
-    } catch (error) {
-      audit.record('system', 'GitHub account connection failed', 'error');
-      return {
-        connected: false,
-        encryptionAvailable,
-        verified: false,
-        error: error instanceof Error ? error.message : 'GitHub token verification failed.',
-      };
-    }
-  });
-  registerHandler(CHANNELS.pluginsGitHubDisconnect, (): GitHubConnectionStatus => {
-    settings.clearGitHubToken();
-    audit.record('system', 'Disconnected local GitHub token', 'ok', 'Removed encrypted local token; revoke on github.com separately if desired.');
-    return { connected: false, encryptionAvailable: settings.isEncryptionAvailable() };
+  registerAuditAndToolsIpc({
+    registrar: ipcRegistry,
+    audit,
+    toolRegistry,
+    getNativeAvailability: () => context.nativeHelper.available(),
+    getPythonAvailability: () => pythonWorker.availability(),
   });
 
-  /* ----------------------- procedural skills ------------------------- */
-
-  registerHandler(CHANNELS.proceduralSkillsList, (): ProceduralSkillView[] =>
-    proceduralSkillStore.list(projectId()),
-  );
-  registerHandler(CHANNELS.proceduralSkillsCreateDraft, (_event, markdown: unknown): ProceduralSkillView => {
-    if (typeof markdown !== 'string') throw new Error('SKILL.md markdown text is required.');
-    const draft = proceduralSkillStore.createDraft({ projectId: projectId(), markdown, source: 'user:settings' });
-    audit.record('system', `Created procedural skill draft ${draft.name} v${draft.version}`, 'ok', `scan=${draft.scanStatus}`);
-    return draft;
-  });
-  registerHandler(CHANNELS.proceduralSkillsActivate, (_event, id: string): ProceduralSkillView => {
-    const active = proceduralSkillStore.activate(id);
-    audit.record('system', `Activated procedural skill ${active.name} v${active.version}`, 'ok');
-    return active;
-  });
-  registerHandler(CHANNELS.proceduralSkillsDisable, (_event, id: string): ProceduralSkillView => {
-    const disabled = proceduralSkillStore.setDisabled(id);
-    audit.record('system', `Disabled procedural skill ${disabled.name} v${disabled.version}`, 'ok');
-    return disabled;
-  });
-  registerHandler(CHANNELS.proceduralSkillsSetPinned, (_event, id: string, pinned: boolean): ProceduralSkillView => {
-    const updated = proceduralSkillStore.setPinned(id, Boolean(pinned));
-    audit.record('system', `${updated.pinned ? 'Pinned' : 'Unpinned'} procedural skill ${updated.name}`, 'ok');
-    return updated;
-  });
-  registerHandler(CHANNELS.proceduralSkillsDelete, (_event, id: string): boolean => {
-    const deleted = proceduralSkillStore.delete(id);
-    if (deleted) audit.record('system', `Deleted procedural skill ${id}`, 'ok');
-    return deleted;
+  registerPluginIpc({
+    registrar: ipcRegistry,
+    projectId,
+    pluginStore,
+    toolRegistry,
+    permissions,
+    audit,
+    settings,
+    mcpManager: mcpManager!,
+    readGoogleCalendarToken,
   });
 
-  /* ----------------------- MCP & Google Calendar --------------------- */
-
-  registerHandler(CHANNELS.mcpServersList, (): McpServerSummaryView[] =>
-    mcpManager!.listServers(),
-  );
-  registerHandler(CHANNELS.mcpServersAdd, (_event, input: Parameters<McpServerManager['addServer']>[0]): McpServerSummaryView => {
-    const created = mcpManager!.addServer(input);
-    audit.record('system', `Added MCP server ${created.id} (${created.transport})`, 'ok', created.trustTier);
-    return created;
-  });
-  registerHandler(CHANNELS.mcpServersEnable, async (_event, id: string): Promise<McpServerSummaryView> => {
-    const view = await mcpManager!.enableServer(id);
-    audit.record('system', `Enabled MCP server ${id}`, 'ok', `${view.toolCount} tool(s) discovered`);
-    return view;
-  });
-  registerHandler(CHANNELS.mcpServersDisable, async (_event, id: string): Promise<McpServerSummaryView> => {
-    const view = await mcpManager!.disableServer(id);
-    audit.record('system', `Disabled MCP server ${id}`, 'ok', 'Connections closed and tool grants revoked.');
-    return view;
-  });
-  registerHandler(CHANNELS.mcpServersSetProjects, (_event, id: string, allowedProjects: string[]): McpServerSummaryView => {
-    const view = mcpManager!.setAllowedProjects(id, allowedProjects);
-    audit.record('system', `Updated project scope for MCP server ${id}`, 'ok', view.allowedProjects.join(', '));
-    return view;
-  });
-  registerHandler(CHANNELS.mcpServersRemove, async (_event, id: string): Promise<boolean> => {
-    const removed = await mcpManager!.removeServer(id);
-    if (removed) audit.record('system', `Removed MCP server ${id}`, 'ok');
-    return removed;
-  });
-  registerHandler(CHANNELS.googleCalendarStatus, (): GoogleCalendarConnectionStatus => {
-    const token = readGoogleCalendarToken();
-    const oauthClientConfigured = Boolean(process.env.PIXEL_GOOGLE_OAUTH_CLIENT_ID?.trim());
-    return {
-      connected: Boolean(token),
-      encryptionAvailable: settings.isEncryptionAvailable(),
-      oauthClientConfigured,
-      ...(token ? { scopes: token.scopes, expiresAt: token.expiresAt } : {}),
-    };
-  });
-  registerHandler(CHANNELS.googleCalendarDisconnect, (): GoogleCalendarConnectionStatus => {
-    settings.clearProviderSecret('google-calendar');
-    audit.record('system', 'Disconnected local Google Calendar OAuth credentials', 'ok');
-    return {
-      connected: false,
-      encryptionAvailable: settings.isEncryptionAvailable(),
-      oauthClientConfigured: Boolean(process.env.PIXEL_GOOGLE_OAUTH_CLIENT_ID?.trim()),
-    };
+  registerProceduralSkillsIpc({
+    registrar: ipcRegistry,
+    projectId,
+    proceduralSkillStore,
+    audit,
   });
 
   /* -------------------------------- app ------------------------------ */
@@ -2166,6 +1939,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     endPushToTalk,
     cancelVoiceCapture,
     shutdown: () => {
+      ipcRegistry.dispose();
       routines.stop();
       cancelPttSession('cancelled');
       voice.cancelAll();

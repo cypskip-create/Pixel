@@ -7,6 +7,7 @@ import {
   MAX_BOARD_OBJECTS,
   boardSvg,
   createBoard,
+  resolveConnectorPoints,
   validateBoardDocument,
 } from '../../shared/drawingBoard';
 import type {
@@ -274,11 +275,28 @@ function applyOperation(document: PixelBoardDocument, operation: BoardOperation)
       objects[index] = { ...objects[index]!, points: objects[index]!.points.map((point) => ({
         x: clamp(point.x + operation.dx, 0, BOARD_WIDTH), y: clamp(point.y + operation.dy, 0, BOARD_HEIGHT),
       })) };
+      // Re-anchor any connectors linked to the moved object so connectors follow automatically.
+      for (let i = 0; i < objects.length; i += 1) {
+        const candidate = objects[i]!;
+        if (candidate.kind === 'connector' && (candidate.fromId === operation.id || candidate.toId === operation.id)) {
+          const [start, end] = resolveConnectorPoints(candidate, objects);
+          objects[i] = { ...candidate, points: [start, end] };
+        }
+      }
       return { ...document, objects };
     }
     case 'delete': {
       if (!document.objects.some((object) => object.id === operation.id)) throw new Error(`Board object ${operation.id} no longer exists.`);
-      return { ...document, objects: document.objects.filter((object) => object.id !== operation.id) };
+      const remaining = document.objects
+        .filter((object) => object.id !== operation.id)
+        .map((object) => {
+          if (object.kind !== 'connector') return object;
+          const detached = { ...object };
+          if (detached.fromId === operation.id) delete detached.fromId;
+          if (detached.toId === operation.id) delete detached.toId;
+          return detached;
+        });
+      return { ...document, objects: remaining };
     }
     case 'clear':
       return { ...document, objects: [] };

@@ -34,9 +34,9 @@ Use this checklist to execute the next implementation phase in dependency order.
 - [x] Upgrade `SpecialistCoordinator` with parallel batches (hard cap 3), fail-closed empty allowlists, parent-child abort propagation, heartbeats, and conflict-surfacing consolidation + Running Tasks / `AgentActivityBar` integration
 
 ## Phase F — Desktop Hardening & Polish
-- [ ] Add `setWindowOpenHandler` and `will-navigate` guards to all Electron `BrowserWindow`s in `src/main/window.ts`
-- [ ] Split `src/main/ipc.ts` into domain IPC routers
-- [ ] Enhance Pixel Board (multi-select, alignment, connectors, shortcuts)
+- [x] Add centralized `attachWindowSecurityPolicy` (`setWindowOpenHandler`, `will-navigate`, `will-redirect`, `will-attach-webview`, session permission guards, `validateExternalUrl`) to all 6 Electron `BrowserWindow`s in `src/main/window.ts` and `src/main/app.ts`
+- [x] Modularize `src/main/ipc.ts` with `IpcHandlerRegistry` (`src/main/ipc/registry.ts`) and domain IPC routers (`plugins.ts`, `skills.ts`, `audit.ts`) preserving all `CHANNELS` contracts
+- [x] Expand Pixel Board (`drawingBoard.ts`, `service.ts`, `PixelBoard.tsx`) with multi-selection (Shift-click + marquee), group move, 20px grid snapping, alignment/distribution, linked connectors following moved objects, zoom, and keyboard shortcuts
 
 ## Phase G — Verification & Windows Acceptance
 - [ ] Diagnose & fix local Electron `0x80000003` exit on Windows

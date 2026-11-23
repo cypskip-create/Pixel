@@ -10,7 +10,7 @@
  *  - Renderer-measured panel sizes are clamped to compact native bounds.
  */
 
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, screen, shell } from 'electron';
 import type { Display, WebContents, WebFrameMain } from 'electron';
 import { join } from 'node:path';
 import type {
@@ -24,7 +24,7 @@ import type {
   WorkspaceWindowState,
 } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
-import { isTrustedRendererUrl } from './windowPolicy';
+import { attachWindowSecurityPolicy, isTrustedRendererUrl } from './windowPolicy';
 import type { Point } from '../shared/companion/geometry';
 
 import { DEFAULT_OFFSET_FROM_TOP, SURFACE_SIZES } from '../shared/surfaces';
@@ -172,6 +172,7 @@ export class WindowManager {
     // 'screen-saver', which would cover UAC and system permission dialogs.
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+    this.hardenWindow(win, 'main', true);
 
     win.once('ready-to-show', () => {
       this.mainReady = true;
@@ -310,10 +311,7 @@ export class WindowManager {
       this.guidanceWindowReady = true;
       void this.refreshGuidance();
     });
-    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    win.webContents.on('will-navigate', (event, url) => {
-      if (!isTrustedRendererUrl(url, this.deps.rendererIndexPath, this.deps.devServerUrl)) event.preventDefault();
-    });
+    this.hardenWindow(win, 'guidance', false);
     win.on('closed', () => {
       if (this.guidanceWindow !== win) return;
       this.guidanceWindow = null;
@@ -462,6 +460,7 @@ export class WindowManager {
       win.show();
       this.syncCursorWindow();
     });
+    this.hardenWindow(win, 'settings', true);
     win.on('closed', () => {
       this.settings = null;
       this.syncCursorWindow(true);
@@ -521,6 +520,7 @@ export class WindowManager {
         spellcheck: true,
       },
     });
+    this.hardenWindow(win, 'workspace', true);
 
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
     let restoreBounds = { ...initialBounds };
@@ -683,6 +683,20 @@ export class WindowManager {
       this.deps.onVisibilityChange(true);
     }
     this.syncCursorWindow(true);
+  }
+
+  private hardenWindow(
+    win: BrowserWindow,
+    windowRole: 'main' | 'workspace' | 'settings' | 'cursor' | 'guidance',
+    allowExternalLinks: boolean,
+  ): void {
+    attachWindowSecurityPolicy(win.webContents, {
+      windowRole,
+      rendererIndexPath: this.deps.rendererIndexPath,
+      devServerUrl: this.deps.devServerUrl,
+      allowExternalLinks,
+      openExternal: allowExternalLinks ? (safeUrl) => { void shell.openExternal(safeUrl); } : undefined,
+    });
   }
 
   private loadRenderer(win: BrowserWindow, query = ''): void {
@@ -947,10 +961,7 @@ export class WindowManager {
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
     win.setIgnoreMouseEvents(true, { forward: true });
-    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    win.webContents.on('will-navigate', (event, url) => {
-      if (!isTrustedRendererUrl(url, this.deps.rendererIndexPath, this.deps.devServerUrl)) event.preventDefault();
-    });
+    this.hardenWindow(win, 'cursor', false);
     win.webContents.on('did-finish-load', () => {
       if (this.cursorWindow !== win) return;
       this.reportCursorStatus('renderer-loaded; awaiting-ready-ack');

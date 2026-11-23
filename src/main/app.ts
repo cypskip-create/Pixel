@@ -11,7 +11,6 @@ import { existsSync } from 'node:fs';
 import { release as osRelease } from 'node:os';
 import { join } from 'node:path';
 import { CHANNELS } from '../shared/channels';
-import { safeExternalHttpUrl } from '../shared/externalUrl';
 import { boot, describeError } from './startup/boot';
 import {
   APP_NAME,
@@ -184,7 +183,15 @@ export async function start(): Promise<void> {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        webSecurity: true,
       },
+    });
+    const { attachWindowSecurityPolicy } = await import('./windowPolicy');
+    attachWindowSecurityPolicy(diagnostic.webContents, {
+      windowRole: 'diagnostic',
+      rendererIndexPath: rendererIndex,
+      devServerUrl: null,
+      allowExternalLinks: false,
     });
 
     diagnostic.once('ready-to-show', () => {
@@ -446,10 +453,15 @@ export async function start(): Promise<void> {
     // Unsupported on some managed machines; not fatal.
   }
 
-  // Open external links in the user's browser, never inside the app window.
+  // Global defense-in-depth for any WebContents created anywhere in the app:
+  // block child popups, webviews, and untrusted external URLs.
+  const { validateExternalUrl } = await import('./windowPolicy');
   app.on('web-contents-created', (_event, contents) => {
+    contents.on('will-attach-webview', (webviewEvent) => {
+      webviewEvent.preventDefault();
+    });
     contents.setWindowOpenHandler(({ url }) => {
-      const safeUrl = safeExternalHttpUrl(url);
+      const safeUrl = validateExternalUrl(url);
       if (safeUrl) void shell.openExternal(safeUrl);
       return { action: 'deny' };
     });

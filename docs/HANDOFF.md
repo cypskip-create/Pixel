@@ -2,6 +2,20 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
+## Phase F — Electron Security Hardening, Modular IPC, Pixel Board Expansion & UX Polish (2026-11-23 — Local Uncommitted)
+
+- **F0 CI Baseline:** Phase E Windows CI run `45216760779` (`40f078b`) passed 100% green (`windows: completed/success`).
+- **F1–F2 Centralized Electron Window Security Hardening (`src/main/windowPolicy.ts`, `window.ts`, `app.ts`):**
+  - Implemented `validateExternalUrl`, `isSafeDevServerUrl`, and `attachWindowSecurityPolicy` blocking child popups (`action: 'deny'`), untrusted `will-navigate` & `will-redirect`, `<webview>` attachment (`will-attach-webview`), malicious URL schemes (`javascript:`, `data:`, `file:`, `vbscript:`, `ms-msdt:`, credentialed URLs), and unexpected browser permissions.
+  - Installed across **all 6** `BrowserWindow`s (`main`, `workspace`, `settings`, `cursor`, `guidance`, `diagnostic`) plus global `app.on('web-contents-created')` defense-in-depth.
+- **F3 Modular IPC Architecture (`src/main/ipc/`):**
+  - Created `src/main/ipc/registry.ts` (`IpcHandlerRegistry` refusing duplicate channel registration, enforcing trusted-sender checks, and disposing cleanly on shutdown) plus domain routers `src/main/ipc/plugins.ts`, `src/main/ipc/skills.ts`, and `src/main/ipc/audit.ts`, wired into `src/main/ipc.ts` with 100% `CHANNELS` and `CypsBridge` parity.
+- **F4 Pixel Board Expansion (`src/shared/drawingBoard.ts`, `src/main/board/service.ts`, `src/renderer/components/PixelBoard.tsx`):**
+  - Added multi-selection (Shift-click + marquee drag + `Ctrl+A`), group drag movement, `20px` grid snapping (without affecting freehand pen/highlighter), atomic alignment/distribution (`left`, `center-x`, `right`, `top`, `center-y`, `bottom`, `distribute-x`, `distribute-y`), linked `connector` objects (`fromId`/`toId`/`arrowHead`) that follow moved objects automatically and export to SVG, zoom controls (`75%`–`200%`), and keyboard shortcuts (`Ctrl+A/C/X/V/Z/Y`, `Delete`/`Backspace`, `Escape`, `Arrow`/`Shift+Arrow` nudge) respecting focused text inputs.
+- **F5–F7 Desktop Polish & Accessibility:** Added `Escape`-to-close drawer/dialog handling in `Workspace.tsx` and unified layered elevation/tactile transitions across task/plugin/tool cards, dialogs, and Board controls in `workspace-design-system.css`.
+- **Verification:** `npm run typecheck` PASS; `npm run build` PASS (`2.08s`); `tests/phase-f-hardening-ipc-board.test.ts` **7/7 PASS**; `tests/window-policy.test.ts` **6/6 PASS**; `tests/monochrome-theme.test.ts` **7/7 PASS**; full `npm test` **1,039 passed, 27 skipped, 0 failed** (84 files passed, 1 skipped); Python `unittest` **26/26 PASS**.
+- **Unverified / Open:** Interactive Windows Electron GUI visual acceptance (`0x80000003` pre-entry exit) and post-push Windows CI run. Architecture docs: `docs/architecture/PIXEL_DESKTOP_PHASE_F.md` & `docs/architecture/PIXEL_IPC_SECURITY.md`.
+
 ## Phase E — Durable Background Tasks, Cron Scheduler, Recovery & Parallel Delegation (2026-11-23 — Local Uncommitted)
 
 - **E0 CI Baseline:** Windows CI run `45206359050` (`b6526d2`) passed 100% green (`windows: completed/success`).
