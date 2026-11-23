@@ -2,6 +2,13 @@
 
 Updated: 2026-11-23. Version: 0.2.1.
 
+## Phase A — Python Agent Engine (`pixel-agent-v2`) (Local Uncommitted)
+
+- Implemented `python/pixel_agent/` (`protocol.py`, `loop.py`, `providers.py`, `compressor.py`, `budgets.py`, `errors.py`, `crash_log.py`, `__main__.py`) and `python/pyproject.toml` (zero third-party runtime deps; pure Python 3 stdlib SSE streaming).
+- Upgraded `src/main/services/pythonAgentBridge.ts` to `pixel-agent-v2` with ownership file tracking, `.corrupt` quarantine, 4 MiB frame cap, and spawn/exit crash handling.
+- Added `src/main/agent/pythonRunner.ts`, wired `agent.runtimeEngine` (`'typescript'` default, `'python'` opt-in, `PIXEL_AGENT_RUNTIME` env override) into `src/main/ipc.ts` and `src/renderer/components/SettingsPanel.tsx` (Settings → Advanced), preserving Electron `PermissionBroker` as sole privileged authority with automatic pre-turn TypeScript fallback.
+- Verification: `npm run typecheck` PASS; `npm run build` PASS; Python unit tests **23/23 PASS**; TS-vs-Python parity & bridge tests **12/12 PASS**; full `npm test` **1,004 passed, 27 skipped, 0 failed**. Architecture & benchmark report in `docs/architecture/PIXEL_PYTHON_AGENT_PHASE_A.md`. Live cloud provider API calls and Electron desktop GUI acceptance remain open.
+
 ## New-chat recovery and current local checkpoint
 
 - Recovery began at `8288850ac825d5b5c1b79656f1432622a8129bf7`; current

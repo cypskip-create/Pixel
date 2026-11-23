@@ -968,7 +968,25 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </Group>
 
             <Group icon={Terminal} title="Diagnostics & Runtime" category="advanced">
-              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
+              <Row label="Agent runtime engine">
+                <select
+                  aria-label="Agent runtime engine"
+                  value={settings.agent?.runtimeEngine ?? 'typescript'}
+                  onChange={(event) => {
+                    const value = event.target.value === 'python' ? 'python' : 'typescript';
+                    void onPatch({ agent: { runtimeEngine: value } });
+                  }}
+                  className="no-drag rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="typescript">TypeScript (default)</option>
+                  <option value="python">Python (pixel-agent-v2)</option>
+                </select>
+              </Row>
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
+                Choose the TypeScript executor (default) or the Hermes-inspired Python agent engine (pixel-agent-v2). Electron’s PermissionBroker remains authoritative in both modes.
+              </p>
+              <div className="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-[var(--color-ink-dim)]">
+                <p>runtimeEngine: {settings.agent?.runtimeEngine ?? 'typescript'}</p>
                 <p>provider: {settings.provider.provider}</p>
                 <p>primary: {settings.provider.primaryModel}</p>
                 <p>reasoning: {settings.provider.reasoningModel}</p>

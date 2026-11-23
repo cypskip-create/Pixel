@@ -292,10 +292,18 @@ export interface PrivacySettings {
   historyRetentionDays: number;
 }
 
+export type AgentRuntimeEngine = 'typescript' | 'python';
+
+export interface AgentRuntimeSettings {
+  /** Selects the active conversation runtime; defaults to 'typescript' until Python parity is promoted. */
+  runtimeEngine: AgentRuntimeEngine;
+}
+
 export interface AppSettings {
   version: number;
   browserSearchProvider: SearchProvider;
   provider: ProviderSettings;
+  agent: AgentRuntimeSettings;
   companion: CompanionSettings;
   voice: VoiceSettings;
   privacy: PrivacySettings;
@@ -327,6 +335,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     temperature: 1,
     maxTokens: 8192,
     requestTimeoutMs: 60_000,
+  },
+  agent: {
+    runtimeEngine: 'typescript',
   },
   companion: {
     mode: DEFAULT_MODE,
@@ -407,6 +418,9 @@ export function mergeSettings(partial: unknown): AppSettings {
   base.workspaceWindow.maximized = base.workspaceWindow.maximized !== false;
   if (typeof base.workspaceAccelerator !== 'string') base.workspaceAccelerator = DEFAULT_SETTINGS.workspaceAccelerator;
   if (!SEARCH_PROVIDERS.includes(base.browserSearchProvider)) base.browserSearchProvider = 'google';
+  if (base.agent.runtimeEngine !== 'typescript' && base.agent.runtimeEngine !== 'python') {
+    base.agent.runtimeEngine = DEFAULT_SETTINGS.agent.runtimeEngine;
+  }
   if (!MODES.includes(base.companion.mode)) base.companion.mode = DEFAULT_MODE;
   if (migrateCursorPresentation) base.companion.cursorCompanionEnabled = true;
   sanitiseCompanion(base.companion);

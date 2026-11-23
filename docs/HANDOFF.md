@@ -2,6 +2,13 @@
 
 Updated: 2026-11-23. This file is the short recovery point for future sessions.
 
+## Phase A — Python Agent Engine (`pixel-agent-v2`) (2026-11-23 — Local Uncommitted)
+
+- **Implemented & Verified Locally:** Upgraded Pixel's advisory-only `python/agent_service.py` into a full Hermes-inspired streaming Python agent engine (`python/pixel_agent/` + `python/pyproject.toml`, zero third-party runtime deps, pure Python 3 stdlib HTTP/TLS/JSON/threading) speaking NDJSON protocol `pixel-agent-v2`.
+- **Electron Integration & Security:** Upgraded `src/main/services/pythonAgentBridge.ts` (ownership tracking, `.corrupt` quarantine, 4 MiB buffer cap, spawn/exit crash handling), created `src/main/agent/pythonRunner.ts` (keeps Electron's `ToolRegistry` + `PermissionBroker` + `TaskManager` + `AuditLog` as sole privileged authority, automatic pre-turn fallback to TypeScript `AgentExecutor`, no mid-turn mutation replay), wired into `src/main/ipc.ts`, added `agent.runtimeEngine: 'typescript' | 'python'` (default `'typescript'`) in `src/shared/types.ts` and Settings → Advanced (`src/renderer/components/SettingsPanel.tsx`).
+- **Verification:** `npm run typecheck` PASS; `npm run build` PASS; `python -m unittest discover -s python\tests -v` **23/23 PASS**; `tests/python-agent-bridge.test.ts` + `tests/python-agent-parity.test.ts` **12/12 PASS** (all 10 parity scenarios + crash safety); full `npm test` **1,004 passed, 27 skipped, 0 failed** (78 passed, 1 skipped). Measured Windows benchmark (Python 3.15.2, local mock SSE): startup 831.7 ms, RSS 23.59 MB, first token 258.0 ms, tool round-trip 38.9 ms, cancel 32.9 ms.
+- **Unverified / Open:** Live cloud provider API calls and interactive Electron GUI launch (`0x80000003` pre-entry exit) remain unverified. Detailed report: `docs/architecture/PIXEL_PYTHON_AGENT_PHASE_A.md`. All edits kept local and uncommitted.
+
 ## Phase H1 — Hermes Agent Reverse-Engineering & Blueprint (2026-11-23)
 
 - **Research Complete (No Production Code Modified in Phase H1):** Completed 10-pass reverse-engineering of `NousResearch/hermes-agent` at pinned commit `0f602c5f6f18615632535251d62a2db74ce93b69` (MIT, local research clone `C:\dev\pixel-research\hermes-agent`).

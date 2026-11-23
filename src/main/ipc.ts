@@ -57,6 +57,7 @@ import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
 import { AgentExecutor } from './agent/executor';
+import { PythonAgentRunner } from './agent/pythonRunner';
 import { buildRoutineToolPlan, buildSkillToolPlan, normalizeSkillInputValues } from './skills/plan';
 import { ToolExecutors } from './agent/executors';
 import { PermissionGrantStore } from './agent/permissionStore';
@@ -73,6 +74,7 @@ import { DocumentTools, DOCUMENT_TOOL_DEFINITIONS } from './documents/toolset';
 import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
 import { GitTools, GIT_TOOL_DEFINITIONS } from './git/toolset';
 import { PythonWorker } from './services/python-worker';
+import { PythonAgentBridge } from './services/pythonAgentBridge';
 import type { NativeHelper } from './services/nativeHelper';
 import { VoiceService, validateDiagnosticVoiceWav } from './voice/voice';
 import type { RecognitionResult } from './voice/voice';
@@ -566,9 +568,10 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     tasks,
     audit,
     abortStream: (): boolean => {
-      const wasRunning: boolean = conversation.isRunning;
+      const wasRunning: boolean = conversation.isRunning || pythonRunner.isRunning;
       conversation.abort();
       agent.cancel('stop');
+      pythonRunner.cancel('stop');
       routineScheduler?.cancelAll();
       windows.clearVisualGuidance();
       return wasRunning;
@@ -577,6 +580,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       voice.cancelAll();
       cancelPttSession('cancelled');
       void pythonWorker.shutdown();
+      void pythonAgentBridge.dispose();
       return executors.killAll();
     },
     completedActions: () => [...completedActions],
@@ -678,13 +682,50 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     getProjectId: () => memoryStore.getActiveProject(),
   });
 
+  const pythonAgentBridge = new PythonAgentBridge({
+    ownershipPath: join(app.getPath('userData'), 'runtime', 'python-agent-owner.json'),
+    crashLogPath: join(app.getPath('userData'), 'logs', 'python-agent-crash.log'),
+  });
+
+  const pythonRunner = new PythonAgentRunner({
+    bridge: pythonAgentBridge,
+    registry: toolRegistry,
+    permissions,
+    tasks,
+    audit,
+    executors,
+    emit: emitChatEvent,
+    isStopped: () => emergency.isStopped(),
+    getApiKey: () => settings.getApiKey(),
+    getProviderConfig: (model) => ({
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      model,
+    }),
+    memoryContextFor: (request) =>
+      selectMemoryContext(memoryStore, {
+        projectId: projectId(),
+        text: request.text,
+      }).text,
+    getProjectId: () => memoryStore.getActiveProject(),
+    fallbackToTypescript: (opts) => agent.run(opts),
+  });
+
+  const isAgentBusy = (): boolean => agent.isRunning || pythonRunner.isRunning;
+
+  const resolveRuntimeEngine = (): 'typescript' | 'python' => {
+    const envOverride = process.env.PIXEL_AGENT_RUNTIME?.trim().toLowerCase();
+    if (envOverride === 'python' || envOverride === 'typescript') return envOverride;
+    return settings.get().agent?.runtimeEngine === 'python' ? 'python' : 'typescript';
+  };
+
   const startPushToTalk = (): void => {
     if (activePtt) return;
     if (manualVoiceCaptureOwner !== null) {
       notifyPtt('failed', 'Another Pixel window is already recording. Stop that recording before using push-to-talk.');
       return;
     }
-    if (agent.isRunning || emergency.isStopped()) {
+    if (isAgentBusy() || emergency.isStopped()) {
       notifyPtt('failed', emergency.isStopped()
         ? 'Clear emergency stop before using push-to-talk.'
         : 'Pixel is already handling a request. Your existing work was not interrupted.');
@@ -1279,7 +1320,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (!request || typeof request !== 'object' || typeof request.text !== 'string' || request.text.length > 20_000) {
       throw new Error('The message is empty or too long.');
     }
-    if (agent.isRunning) throw new Error('Pixel is busy. Finish or cancel the current task before starting another chat.');
+    if (isAgentBusy()) throw new Error('Pixel is busy. Finish or cancel the current task before starting another chat.');
 
     let conversationId = typeof request.conversationId === 'string' ? request.conversationId : activeConversationId;
     if (conversationId === null) conversationId = newConversation().id;
@@ -1352,14 +1393,16 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       audit.record('system', 'Ignored renderer-supplied mode', 'denied', `${String(request.mode)} -> ${current.companion.mode}`);
     }
 
-    void agent.run({
+    const runOptions = {
       requestId,
       request: trustedRequest,
       model: current.provider.primaryModel,
       thinking: current.provider.thinking ?? DEFAULT_THINKING,
       temperature: current.provider.temperature,
       maxTokens: current.provider.maxTokens,
-    }).then((result) => {
+    };
+    const activeRunner = resolveRuntimeEngine() === 'python' ? pythonRunner : agent;
+    void activeRunner.run(runOptions).then((result) => {
       if (!current.privacy.automaticMemory || !hasVerifiedTaskOutcome(result.task)) return;
       const verified = result.task.steps.filter((step) => step.status === 'verified').slice(0, 2);
       if (verified.length === 0) return;
@@ -1387,6 +1430,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.chatCancel, (_event, requestId: string): void => {
     agent.cancel('user');
+    pythonRunner.cancel('user');
     conversation.abort();
     permissions.rejectPending();
     audit.record('model', 'Generation cancelled', 'cancelled', requestId);
@@ -1413,7 +1457,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   registerHandler(CHANNELS.historyOpen, (_event, id: string): ConversationRecordView | null => {
-    if (agent.isRunning) throw new Error('Cancel or finish the active task before switching conversations.');
+    if (isAgentBusy()) throw new Error('Cancel or finish the active task before switching conversations.');
     if (typeof id !== 'string') return null;
     const record = getConversation(id);
     if (!record || (record.projectId && record.projectId !== projectId())) return null;
@@ -1423,7 +1467,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   registerHandler(CHANNELS.historyCreate, (): ConversationRecordView => {
-    if (agent.isRunning) throw new Error('Cancel or finish the active task before starting a new conversation.');
+    if (isAgentBusy()) throw new Error('Cancel or finish the active task before starting a new conversation.');
     return toRecordView(newConversation());
   });
 
@@ -1446,7 +1490,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   registerHandler(CHANNELS.historyDelete, (_event, id: string): boolean => {
-    if (agent.isRunning) throw new Error('Cancel or finish the active task before deleting a conversation.');
+    if (isAgentBusy()) throw new Error('Cancel or finish the active task before deleting a conversation.');
     if (typeof id !== 'string') return false;
     const record = getConversation(id);
     if (!record || (record.projectId && record.projectId !== projectId())) return false;
@@ -1460,7 +1504,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   registerHandler(CHANNELS.historyClear, (): void => {
-    if (agent.isRunning) throw new Error('Cancel or finish the active task before clearing chat history.');
+    if (isAgentBusy()) throw new Error('Cancel or finish the active task before clearing chat history.');
     history.clear();
     sessionConversations.clear();
     activeConversationId = null;
@@ -1469,7 +1513,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   registerHandler(CHANNELS.browserOpenSearch, async (_event, queryValue: unknown, requestTextValue: unknown, conversationIdValue: unknown) => {
-    if (agent.isRunning) throw new Error('Finish or cancel the active task before opening a browser search.');
+    if (isAgentBusy()) throw new Error('Finish or cancel the active task before opening a browser search.');
     if (typeof queryValue !== 'string' || queryValue.trim().length === 0 || queryValue.length > MAX_SEARCH_QUERY_LENGTH) {
       throw new Error('Enter a search query with 1–500 characters.');
     }
@@ -1918,6 +1962,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       cancelPttSession('cancelled');
       voice.cancelAll();
       void pythonWorker.shutdown();
+      void pythonAgentBridge.dispose();
       executors.killAll();
       nativeHelper.dispose();
     },

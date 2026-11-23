@@ -3,11 +3,11 @@
 Use this checklist to execute the next implementation phase in dependency order.
 
 ## Phase A — Python Agent Engine
-- [ ] Create pinned `python/pyproject.toml` + lockfile (`openai`, `httpx`, `pydantic`, `truststore`, `tzdata`, `croniter`)
-- [ ] Implement `pixel-agent-v2` NDJSON streaming protocol in `python/pixel_agent/`
-- [ ] Add `BackendOwnershipEntry` (PID + startMarker + quarantine) and crash log to `PythonAgentBridge`
-- [ ] Add tool-output pruning + middle-turn compression + deterministic fallback
-- [ ] Pass TS-vs-Python parity test suite with rollback flag `agent.runtimeEngine`
+- [x] Create `python/pyproject.toml` (zero-dependency pure-stdlib Phase A baseline; third-party lockfile deferred to Phase D/E MCP/cron)
+- [x] Implement `pixel-agent-v2` NDJSON streaming protocol in `python/pixel_agent/`
+- [x] Add `PythonAgentOwnershipEntry` (PID + startMarker + `.corrupt` quarantine) and crash log to `PythonAgentBridge`
+- [x] Add tool-output pruning + middle-turn compression + deterministic fallback
+- [x] Pass TS-vs-Python parity test suite (12/12) with rollback flag `agent.runtimeEngine` (default `'typescript'`)
 
 ## Phase B — Git, Files & Execution
 - [ ] Add injectable `allowedRoot` to `FileTools` and move `tests/files.test.ts` + `tests/tasks.test.ts` to `os.tmpdir()`

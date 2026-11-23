@@ -1,0 +1,19 @@
+[project]
+name = "pixel-agent"
+version = "0.2.1"
+description = "Hermes-inspired Python agent runtime for Pixel (Windows AI Desktop Companion)."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# Zero mandatory third-party runtime dependencies in Phase A:
+# Uses Python 3 standard library (urllib, http.client, ssl, json, threading) so
+# the runtime works reproducibly on Windows without fragile install-time wheels.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
