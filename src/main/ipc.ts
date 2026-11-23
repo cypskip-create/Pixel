@@ -48,9 +48,10 @@ import type {
   DocumentLibraryIndexResult,
 } from '../shared/types';
 import type { BoardOperation, PixelBoardDocument } from '../shared/drawingBoard';
-import { ASSISTANT_STATES, DEFAULT_THINKING } from '../shared/types';
+import { ASSISTANT_STATES, DEFAULT_THINKING, getProviderDescriptor } from '../shared/types';
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
+import { resolveProviderChain } from './providers/catalog';
 import { AgentExecutor } from './agent/executor';
 import { PythonAgentRunner } from './agent/pythonRunner';
 import { buildRoutineToolPlan, buildSkillToolPlan } from './skills/plan';
@@ -754,12 +755,27 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     executors,
     emit: emitChatEvent,
     isStopped: () => emergency.isStopped(),
-    getApiKey: () => settings.getApiKey(),
-    getProviderConfig: (model) => ({
-      provider: 'deepseek',
-      baseUrl: 'https://api.deepseek.com/v1',
-      model,
-    }),
+    getApiKey: () => {
+      const activeProvider = settings.get().provider.provider;
+      return settings.getProviderApiKey(activeProvider);
+    },
+    getProviderConfig: (model) => {
+      const providerSettings = settings.get().provider;
+      const chain = resolveProviderChain(providerSettings, model);
+      const primary = chain[0]!;
+      const fallbacks = chain.slice(1).map((fb) => ({
+        provider: fb.provider,
+        model: fb.model,
+        baseUrl: fb.baseUrl,
+        apiKey: settings.getProviderApiKey(fb.provider),
+      }));
+      return {
+        provider: primary.provider,
+        baseUrl: primary.baseUrl,
+        model: primary.model,
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
+      };
+    },
     memoryContextFor: (request) => buildTurnMemoryAndSkills(request),
     getProjectId: () => memoryStore.getActiveProject(),
     fallbackToTypescript: (opts) => agent.run(opts),
@@ -1238,42 +1254,64 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     const next = settings.set(patch ?? {});
     windows.setPresentationSettings(next.companion);
     context.onSettingsChange?.(next);
+    if (patch?.provider?.provider) {
+      const activeProv = next.provider.provider;
+      const hasKey = settings.hasProviderApiKey(activeProv) || !getProviderDescriptor(activeProv).requiresApiKey;
+      context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, hasKey);
+    }
     audit.record('system', 'Settings updated', 'ok', Object.keys(patch ?? {}).join(', '));
     return next;
   });
 
-  registerHandler(CHANNELS.settingsSetApiKey, (_event, key: string) => {
-    const result = settings.setApiKey(typeof key === 'string' ? key : '');
-    audit.record('system', 'API key updated', result.ok ? 'ok' : 'error');
-    context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, settings.hasApiKey());
+  registerHandler(CHANNELS.settingsSetApiKey, (_event, key: string, providerId?: string) => {
+    const targetProvider = typeof providerId === 'string' && providerId.trim()
+      ? providerId.trim()
+      : settings.get().provider.provider;
+    const result = settings.setProviderApiKey(targetProvider, typeof key === 'string' ? key : '');
+    audit.record('system', 'API key updated', result.ok ? 'ok' : 'error', targetProvider);
+    const activeProv = settings.get().provider.provider;
+    const activeReady = settings.hasProviderApiKey(activeProv) || !getProviderDescriptor(activeProv).requiresApiKey;
+    context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, activeReady);
     return result;
   });
 
-  registerHandler(CHANNELS.settingsHasApiKey, (): boolean => settings.hasApiKey());
+  registerHandler(CHANNELS.settingsHasApiKey, (_event, providerId?: string): boolean => {
+    const targetProvider = typeof providerId === 'string' && providerId.trim()
+      ? providerId.trim()
+      : settings.get().provider.provider;
+    return settings.hasProviderApiKey(targetProvider) || !getProviderDescriptor(targetProvider).requiresApiKey;
+  });
 
-  registerHandler(CHANNELS.settingsClearApiKey, (): void => {
-    settings.clearApiKey();
-    audit.record('system', 'API key removed', 'ok');
-    context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, false);
+  registerHandler(CHANNELS.settingsClearApiKey, (_event, providerId?: string): void => {
+    const targetProvider = typeof providerId === 'string' && providerId.trim()
+      ? providerId.trim()
+      : settings.get().provider.provider;
+    settings.clearProviderApiKey(targetProvider);
+    audit.record('system', 'API key removed', 'ok', targetProvider);
+    const activeProv = settings.get().provider.provider;
+    const activeReady = settings.hasProviderApiKey(activeProv) || !getProviderDescriptor(activeProv).requiresApiKey;
+    context.sendToRenderer(CHANNELS.settingsApiKeyStatusChanged, activeReady);
   });
 
   registerHandler(
     CHANNELS.settingsTestConnection,
     async (_event, model?: string): Promise<ConnectionTestResult> => {
-      const key = settings.getApiKey();
-      if (!key) {
+      const activeSettings = settings.get().provider;
+      const desc = getProviderDescriptor(activeSettings.provider);
+      const key = settings.getProviderApiKey(activeSettings.provider);
+      if (desc.requiresApiKey && !key) {
         return {
           ok: false,
           error: {
             code: 'NO_API_KEY',
-            message: 'Add a DeepSeek API key in Settings first.',
+            message: `Add a ${desc.label} API key in Settings first.`,
             retryable: false,
           },
         };
       }
-      const outcome = await provider.testConnection(key, model ?? settings.get().provider.primaryModel);
+      const outcome = await provider.testConnection(key ?? '', model ?? activeSettings.primaryModel);
       if (outcome.ok) {
-        audit.record('model', 'Connection test succeeded', 'ok', outcome.model);
+        audit.record('model', 'Connection test succeeded', 'ok', `${activeSettings.provider}/${outcome.model ?? activeSettings.primaryModel}`);
         return {
           ok: true,
           ...(outcome.model ? { model: outcome.model } : {}),

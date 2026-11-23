@@ -2,9 +2,10 @@
  * Runtime provider facade with Hermes-inspired multi-provider routing and
  * ordered fallback chains.
  *
- * Resolves credentials and active provider settings at call time so newly saved
- * keys, custom endpoints, and fallback chains take effect immediately without
- * restarting Pixel.
+ * Dispatches each target to its native protocol adapter:
+ *  - `deepseek`  -> `DeepSeekProvider`
+ *  - `anthropic` -> `AnthropicProvider` (native `/v1/messages` protocol)
+ *  - `openai`, `openrouter`, `gemini`, `xai`, `ollama`, `custom` -> `OpenAICompatibleProvider`
  */
 
 import type {
@@ -22,6 +23,8 @@ import type {
   TestConnectionOutcome,
 } from './deepseek';
 import { DeepSeekProvider } from './deepseek';
+import { AnthropicProvider } from './anthropic';
+import { OpenAICompatibleProvider } from './openaiCompat';
 import {
   formatFallbackNotice,
   isFallbackEligibleError,
@@ -37,8 +40,9 @@ export interface RuntimeProviderOptions {
 
 function extractErrorCode(err: unknown): string | undefined {
   if (!err || typeof err !== 'object') return undefined;
-  const e = err as { code?: unknown; error?: { code?: unknown } };
+  const e = err as { code?: unknown; cypsError?: { code?: unknown }; error?: { code?: unknown } };
   if (typeof e.code === 'string') return e.code;
+  if (e.cypsError && typeof e.cypsError.code === 'string') return e.cypsError.code;
   if (e.error && typeof e.error.code === 'string') return e.error.code;
   return undefined;
 }
@@ -62,8 +66,33 @@ export class RuntimeProvider implements ModelProvider {
     this.fetchImpl = options.fetchImpl;
   }
 
+  private createAdapter(target: ResolvedProviderTarget, apiKey: string | null): ModelProvider {
+    if (target.provider === 'deepseek') {
+      return new DeepSeekProvider({
+        apiKey: apiKey ?? '',
+        baseUrl: target.baseUrl,
+        fetchImpl: this.fetchImpl,
+      });
+    }
+    if (target.provider === 'anthropic') {
+      return new AnthropicProvider({
+        apiKey: apiKey ?? '',
+        baseUrl: target.baseUrl,
+        fetchImpl: this.fetchImpl,
+      });
+    }
+    return new OpenAICompatibleProvider({
+      providerId: target.provider,
+      apiKey,
+      baseUrl: target.baseUrl,
+      fetchImpl: this.fetchImpl,
+    });
+  }
+
   listModels(): readonly ModelCapabilities[] {
-    return new DeepSeekProvider({ apiKey: '' }).listModels();
+    const providerSettings = this.getSettings().provider;
+    const primary = resolveProviderChain(providerSettings)[0]!;
+    return this.createAdapter(primary, null).listModels();
   }
 
   private resolveKeyForTarget(target: ResolvedProviderTarget): string | null {
@@ -97,18 +126,13 @@ export class RuntimeProvider implements ModelProvider {
 
       if (target.isFallback) {
         options.onEvent({
-          type: 'status',
+          type: 'reasoning',
           requestId: options.requestId,
-          phase: 'retrying',
-          message: formatFallbackNotice(primary, target),
+          delta: `${formatFallbackNotice(primary, target)}\n`,
         });
       }
 
-      const adapter = new DeepSeekProvider({
-        apiKey: key ?? 'local-no-key',
-        baseUrl: target.baseUrl,
-        fetchImpl: this.fetchImpl,
-      });
+      const adapter = this.createAdapter(target, key);
 
       try {
         return await adapter.generate({
@@ -135,11 +159,7 @@ export class RuntimeProvider implements ModelProvider {
   async testConnection(apiKey: string, model: string): Promise<TestConnectionOutcome> {
     const providerSettings = this.getSettings().provider;
     const target = resolveProviderChain(providerSettings, model)[0]!;
-    return new DeepSeekProvider({
-      apiKey,
-      baseUrl: target.baseUrl,
-      fetchImpl: this.fetchImpl,
-    }).testConnection(apiKey, target.model);
+    return this.createAdapter(target, apiKey).testConnection(apiKey, target.model);
   }
 }
 

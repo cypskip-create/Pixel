@@ -276,6 +276,243 @@ def stream_openai_compatible(
     return result
 
 
+def _resolve_anthropic_messages_url(config: ProviderConfig) -> str:
+    base = (config.base_url or "").strip().rstrip("/")
+    if not base:
+        base = PROVIDER_DEFAULT_BASE_URLS["anthropic"]
+    if base.endswith("/messages"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/messages"
+    return f"{base}/v1/messages"
+
+
+def stream_anthropic(
+    config: ProviderConfig,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    cancel_event: threading.Event,
+    on_delta: Callable[[str], None],
+    on_reasoning: Callable[[str], None],
+) -> ProviderTurnResult:
+    """Execute one streaming native Anthropic Messages API turn."""
+    if cancel_event.is_set():
+        return ProviderTurnResult(aborted=True, finish_reason="cancelled")
+
+    api_key = (config.api_key or "").strip()
+    if not api_key:
+        raise AgentError("NO_API_KEY", "Pixel needs an Anthropic API key.", retryable=False)
+
+    system_parts: list[str] = []
+    wire_messages: list[dict[str, Any]] = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content") or ""
+        if role == "system":
+            if isinstance(content, str) and content.strip():
+                system_parts.append(content.strip())
+        elif role == "tool":
+            wire_messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": str(m.get("tool_call_id") or "tool_call"),
+                    "content": str(content),
+                }],
+            })
+        elif role == "assistant":
+            blocks: list[dict[str, Any]] = []
+            if isinstance(content, str) and content:
+                blocks.append({"type": "text", "text": content})
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                raw_args = fn.get("arguments") or "{}"
+                try:
+                    parsed_input = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except Exception:
+                    parsed_input = {}
+                blocks.append({
+                    "type": "tool_use",
+                    "id": str(tc.get("id") or "toolu_0"),
+                    "name": str(fn.get("name") or ""),
+                    "input": parsed_input if isinstance(parsed_input, dict) else {},
+                })
+            wire_messages.append({"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]})
+        else:
+            wire_messages.append({"role": "user", "content": str(content)})
+
+    payload: dict[str, Any] = {
+        "model": config.model,
+        "max_tokens": max(128, min(config.max_tokens, 64_000)),
+        "messages": wire_messages,
+        "stream": True,
+    }
+    if system_parts:
+        payload["system"] = "\n\n".join(system_parts)
+    if tools:
+        payload["tools"] = [
+            {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "input_schema": t.get("parameters", {"type": "object", "properties": {}}),
+            }
+            for t in tools
+            if isinstance(t, dict) and t.get("name")
+        ]
+
+    url = _resolve_anthropic_messages_url(config)
+    body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "User-Agent": "Pixel-Agent/0.2.1",
+    }
+    req = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
+    timeout_s = max(2.0, config.timeout_ms / 1000.0)
+    ssl_ctx = ssl.create_default_context() if url.startswith("https://") else None
+
+    result = ProviderTurnResult()
+    pending_calls: dict[int, dict[str, str]] = {}
+    prompt_tokens = 0
+    completion_tokens = 0
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s, context=ssl_ctx) as resp:
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+            if "text/event-stream" not in content_type:
+                raw = resp.read(4_000_000).decode("utf-8", errors="replace")
+                data = json.loads(raw)
+                result.finish_reason = str(data.get("stop_reason") or "stop")
+                usage = data.get("usage") or {}
+                prompt_tokens = int(usage.get("input_tokens") or 0)
+                completion_tokens = int(usage.get("output_tokens") or 0)
+                for idx, block in enumerate(data.get("content") or []):
+                    btype = block.get("type")
+                    if btype == "thinking" and block.get("thinking"):
+                        result.reasoning += str(block["thinking"])
+                        on_reasoning(str(block["thinking"]))
+                    elif btype == "text" and block.get("text"):
+                        result.content += str(block["text"])
+                        on_delta(str(block["text"]))
+                    elif btype == "tool_use" and block.get("name"):
+                        result.tool_calls.append(ToolCallRecord(
+                            id=str(block.get("id") or f"toolu_{idx}"),
+                            name=str(block["name"]),
+                            arguments_json=json.dumps(block.get("input") or {}),
+                        ))
+            else:
+                for raw_line in resp:
+                    if cancel_event.is_set():
+                        result.aborted = True
+                        result.finish_reason = "cancelled"
+                        break
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if not data_str:
+                        continue
+                    try:
+                        evt = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    etype = evt.get("type")
+                    if etype == "message_start":
+                        usage = (evt.get("message") or {}).get("usage") or {}
+                        prompt_tokens = int(usage.get("input_tokens") or prompt_tokens)
+                    elif etype == "content_block_start":
+                        cb = evt.get("content_block") or {}
+                        if cb.get("type") == "tool_use":
+                            idx = int(evt.get("index", len(pending_calls)))
+                            pending_calls[idx] = {
+                                "id": str(cb.get("id") or f"toolu_{idx}"),
+                                "name": str(cb.get("name") or ""),
+                                "arguments": "",
+                            }
+                    elif etype == "content_block_delta":
+                        delta = evt.get("delta") or {}
+                        dtype = delta.get("type")
+                        if dtype == "text_delta" and delta.get("text"):
+                            piece = str(delta["text"])
+                            result.content += piece
+                            on_delta(piece)
+                        elif dtype == "thinking_delta" and delta.get("thinking"):
+                            piece = str(delta["thinking"])
+                            result.reasoning += piece
+                            on_reasoning(piece)
+                        elif dtype == "input_json_delta" and delta.get("partial_json"):
+                            idx = int(evt.get("index", 0))
+                            slot = pending_calls.get(idx)
+                            if slot is not None:
+                                slot["arguments"] += str(delta["partial_json"])
+                    elif etype == "message_delta":
+                        delta = evt.get("delta") or {}
+                        if delta.get("stop_reason"):
+                            result.finish_reason = str(delta["stop_reason"])
+                        usage = evt.get("usage") or {}
+                        if usage.get("output_tokens"):
+                            completion_tokens = int(usage["output_tokens"])
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read(16_384).decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        raise _classify_http_error(exc.code, body) from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise AgentError("TIMEOUT", "Anthropic request timed out.", retryable=True, detail=str(exc)) from exc
+    except urllib.error.URLError as exc:
+        raise AgentError("NETWORK", "Could not reach Anthropic.", retryable=True, detail=str(exc.reason)) from exc
+
+    for idx in sorted(pending_calls):
+        slot = pending_calls[idx]
+        if slot["name"]:
+            result.tool_calls.append(ToolCallRecord(
+                id=slot["id"] or f"toolu_{idx}",
+                name=slot["name"],
+                arguments_json=slot["arguments"] or "{}",
+            ))
+    if prompt_tokens or completion_tokens:
+        result.usage = {
+            "promptTokens": prompt_tokens,
+            "completionTokens": completion_tokens,
+            "totalTokens": prompt_tokens + completion_tokens,
+        }
+    return result
+
+
+def stream_provider(
+    config: ProviderConfig,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    cancel_event: threading.Event,
+    on_delta: Callable[[str], None],
+    on_reasoning: Callable[[str], None],
+) -> ProviderTurnResult:
+    """Dispatch a provider turn to its native protocol adapter."""
+    if (config.provider or "").strip().lower() == "anthropic":
+        return stream_anthropic(
+            config,
+            messages,
+            tools,
+            cancel_event=cancel_event,
+            on_delta=on_delta,
+            on_reasoning=on_reasoning,
+        )
+    return stream_openai_compatible(
+        config,
+        messages,
+        tools,
+        cancel_event=cancel_event,
+        on_delta=on_delta,
+        on_reasoning=on_reasoning,
+    )
+
+
 def build_fallback_chain(
     primary: ProviderConfig,
     fallbacks: Optional[list[ProviderConfig]] = None,
@@ -307,7 +544,7 @@ def stream_with_fallback(
     on_delta: Callable[[str], None],
     on_reasoning: Callable[[str], None],
     on_fallback: Optional[Callable[[ProviderConfig, ProviderConfig, AgentError], None]] = None,
-    stream_fn: Callable[..., ProviderTurnResult] = stream_openai_compatible,
+    stream_fn: Callable[..., ProviderTurnResult] = stream_provider,
 ) -> tuple[ProviderTurnResult, ProviderConfig]:
     """Execute `stream_fn` across the deduplicated Hermes-style fallback chain."""
     chain = build_fallback_chain(primary, fallbacks)

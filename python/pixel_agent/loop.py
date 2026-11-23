@@ -17,7 +17,7 @@ from typing import Any, Callable, Optional
 from .budgets import IterationBudget, RUN_BUDGET_WRAPUP_NOTICE, RepetitionGuard
 from .compressor import compress_messages, context_limit_for_model
 from .errors import AgentError, bound_error_text
-from .providers import ProviderConfig, ProviderTurnResult, stream_openai_compatible
+from .providers import ProviderConfig, ProviderTurnResult, stream_provider, stream_with_fallback
 
 ProviderCallFn = Callable[
     [ProviderConfig, list[dict[str, Any]], list[dict[str, Any]], threading.Event, Callable[[str], None], Callable[[str], None]],
@@ -33,7 +33,7 @@ def _default_provider_call(
     on_delta: Callable[[str], None],
     on_reasoning: Callable[[str], None],
 ) -> ProviderTurnResult:
-    return stream_openai_compatible(
+    return stream_provider(
         config,
         messages,
         tools,
@@ -55,6 +55,7 @@ def run_agent_turn(
     request_tool_execution: Callable[[str, str, dict[str, Any], float], dict[str, Any]],
     tool_timeout_s: float = 35.0,
     provider_call: Optional[ProviderCallFn] = None,
+    fallback_configs: Optional[list[ProviderConfig]] = None,
 ) -> dict[str, Any]:
     """Execute one complete multi-step model/tool turn and emit pixel-agent-v2 events."""
     call_model = provider_call or _default_provider_call
@@ -108,8 +109,40 @@ def run_agent_turn(
         def _on_reasoning(chunk: str) -> None:
             emit({"type": "turn.reasoning", "requestId": request_id, "delta": chunk})
 
+        def _on_fallback(failed: ProviderConfig, nxt: ProviderConfig, _err: AgentError) -> None:
+            emit({
+                "type": "turn.reasoning",
+                "requestId": request_id,
+                "delta": f"Provider fallback: {failed.provider}/{failed.model} unavailable; using {nxt.provider}/{nxt.model} for this response.\n",
+            })
+
         try:
-            outcome = call_model(provider_config, working_messages, tools, cancel_event, _on_delta, _on_reasoning)
+            if fallback_configs:
+                def _wrapped_stream(
+                    cfg: ProviderConfig,
+                    msgs: list[dict[str, Any]],
+                    tls: list[dict[str, Any]],
+                    *,
+                    cancel_event: threading.Event,
+                    on_delta: Callable[[str], None],
+                    on_reasoning: Callable[[str], None],
+                ) -> ProviderTurnResult:
+                    return call_model(cfg, msgs, tls, cancel_event, on_delta, on_reasoning)
+
+                outcome, active_cfg = stream_with_fallback(
+                    provider_config,
+                    fallback_configs,
+                    working_messages,
+                    tools,
+                    cancel_event=cancel_event,
+                    on_delta=_on_delta,
+                    on_reasoning=_on_reasoning,
+                    on_fallback=_on_fallback,
+                    stream_fn=_wrapped_stream,
+                )
+                provider_config = active_cfg
+            else:
+                outcome = call_model(provider_config, working_messages, tools, cancel_event, _on_delta, _on_reasoning)
         except AgentError as err:
             emit({"type": "turn.error", "requestId": request_id, "error": err.to_dict()})
             return {

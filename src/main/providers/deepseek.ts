@@ -226,9 +226,12 @@ export interface ValidationFailure {
  * Validate a request locally before spending a network round-trip.
  * Failing here produces a clear message instead of an opaque HTTP 400.
  */
-export function validateRequest(input: BuildRequestBodyInput): ValidationFailure | { ok: true } {
+export function validateRequest(
+  input: BuildRequestBodyInput,
+  allowArbitraryModel = false,
+): ValidationFailure | { ok: true } {
   const caps = getModelCapabilities(input.model);
-  if (!caps) {
+  if (!caps && !allowArbitraryModel) {
     return {
       ok: false,
       error: makeError(
@@ -239,16 +242,22 @@ export function validateRequest(input: BuildRequestBodyInput): ValidationFailure
       ),
     };
   }
+  if (allowArbitraryModel && !input.model.trim()) {
+    return {
+      ok: false,
+      error: makeError('BAD_REQUEST', 'Model identifier cannot be empty.', undefined, false),
+    };
+  }
 
   const hasImages = input.messages.some(
     (m) => m.role === 'user' && m.images && m.images.length > 0,
   );
-  if (hasImages && !modelSupportsVision(input.model)) {
+  if (hasImages && !allowArbitraryModel && !modelSupportsVision(input.model)) {
     return {
       ok: false,
       error: makeError(
         'MODEL_CAPABILITY',
-        `${caps.label} does not accept images.`,
+        `${caps?.label ?? input.model} does not accept images.`,
         `Pixel will use "${VISION_MODEL}" for screen analysis, since it is the only vision-capable DeepSeek model.`,
         false,
       ),
@@ -448,6 +457,8 @@ export interface DeepSeekProviderConfig {
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   baseUrl?: string;
+  /** Permit non-DeepSeek model identifiers when targeting OpenAI-compatible providers. */
+  allowArbitraryModel?: boolean;
 }
 
 export class DeepSeekProvider implements ModelProvider {
@@ -520,7 +531,7 @@ export class DeepSeekProvider implements ModelProvider {
       maxTokens: options.maxTokens,
       tools: options.tools,
       stream: true,
-    });
+    }, Boolean(this.config.allowArbitraryModel));
     if (!validation.ok) {
       onEvent({ type: 'error', requestId, message: validation.error.message, code: validation.error.code });
       throw new ProviderError(validation.error);

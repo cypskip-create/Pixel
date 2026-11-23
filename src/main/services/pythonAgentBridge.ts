@@ -74,6 +74,12 @@ export interface PythonTurnStartOptions {
     maxTokens?: number;
     timeoutMs?: number;
     thinking?: Record<string, unknown>;
+    fallbacks?: Array<{
+      provider: string;
+      model: string;
+      baseUrl?: string;
+      apiKey?: string | null;
+    }>;
   };
   budgets?: {
     maxIterations?: number;

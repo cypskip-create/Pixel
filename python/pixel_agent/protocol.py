@@ -110,6 +110,27 @@ class PixelAgentProtocolServer:
             timeout_ms=int(prov_raw.get("timeoutMs", 60_000)),
             thinking=prov_raw.get("thinking") if isinstance(prov_raw.get("thinking"), dict) else None,
         )
+        fallback_configs: list[ProviderConfig] = []
+        raw_fallbacks = prov_raw.get("fallbacks")
+        if isinstance(raw_fallbacks, list):
+            for fb in raw_fallbacks:
+                if not isinstance(fb, dict):
+                    continue
+                fb_model = str(fb.get("model") or "").strip()
+                if not fb_model:
+                    continue
+                fallback_configs.append(
+                    ProviderConfig(
+                        provider=str(fb.get("provider") or "deepseek"),
+                        model=fb_model,
+                        base_url=str(fb.get("baseUrl") or ""),
+                        api_key=fb.get("apiKey") if isinstance(fb.get("apiKey"), str) else None,
+                        temperature=float(prov_raw.get("temperature", 1.0)),
+                        max_tokens=int(prov_raw.get("maxTokens", 4096)),
+                        timeout_ms=int(prov_raw.get("timeoutMs", 60_000)),
+                        thinking=prov_raw.get("thinking") if isinstance(prov_raw.get("thinking"), dict) else None,
+                    )
+                )
         budget = IterationBudget(
             max_iterations=max(1, min(20, int(budgets_raw.get("maxIterations", 8)))),
             max_tool_calls=max(1, min(40, int(budgets_raw.get("maxToolCalls", 16)))),
@@ -125,6 +146,7 @@ class PixelAgentProtocolServer:
                     messages=messages,
                     tools=tools,
                     provider_config=provider_config,
+                    fallback_configs=fallback_configs,
                     budget=budget,
                     cancel_event=cancel_event,
                     emit=self.send,
