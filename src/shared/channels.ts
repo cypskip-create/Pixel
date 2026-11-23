@@ -171,6 +171,15 @@ export const CHANNELS = {
   googleCalendarStatus: 'plugins:googleCalendarStatus',
   googleCalendarDisconnect: 'plugins:googleCalendarDisconnect',
 
+  terminalRun: 'terminal:run',
+  terminalCancel: 'terminal:cancel',
+  terminalList: 'terminal:list',
+  terminalOutput: 'terminal:output',
+  terminalExit: 'terminal:exit',
+
+  workspaceFsListDir: 'workspaceFs:listDir',
+  workspaceFsReadFile: 'workspaceFs:readFile',
+
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',
 

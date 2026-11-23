@@ -3,7 +3,7 @@ import {
   Maximize2, Minimize2, Minus, ShieldAlert, X,
 } from 'lucide-react';
 import type {
-  AssistantState, AuditEntry, ConversationRecordView, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryOpenResult, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
+  AssistantState, AuditEntry, ConversationSummary, DiagnosticsSnapshot, DocumentLibraryItem, DocumentLibraryOpenResult, DocumentLibraryRead, ImageAttachment, Mode, PermissionDecision,
   PermissionRequest, PluginView, ProjectView, ProviderId, ReasoningEffort, TaskRecord, ToolCatalogEntry, WorkspaceWindowState,
 } from '@shared/types';
 import { getModeDescriptor, getProviderDescriptor, PROVIDER_CATALOG } from '@shared/types';
@@ -11,7 +11,7 @@ import { deriveAssistantState } from '@shared/companion-state';
 import { WorkspaceConversationHeader } from '@/components/WorkspaceConversationHeader';
 import { WorkspaceComposer } from '@/components/WorkspaceComposer';
 import { WorkspaceTabBar } from '@/components/WorkspaceTabBar';
-import { WorkspaceRightRail } from '@/components/WorkspaceRightRail';
+import { WorkspaceRightRail, type LiveTerminalSession } from '@/components/WorkspaceRightRail';
 import { CommandPalette, type PaletteCommand } from '@/components/CommandPalette';
 import { ModelPickerPopover } from '@/components/ModelPickerPopover';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
@@ -26,6 +26,7 @@ import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/Worksp
 import { AgentActivityBar } from '@/components/AgentActivityBar';
 import { useBridge } from '@/hooks/useBridge';
 import { useChat } from '@/hooks/useChat';
+import { useSessionManager } from '@/hooks/useSessionManager';
 import { useSettings } from '@/hooks/useSettings';
 import { useVoicePlaybackState } from '@/hooks/useVoicePlaybackState';
 import { safeSubscribe } from '@/lib/bridge';
@@ -93,7 +94,9 @@ export function Workspace(): React.JSX.Element {
   const [tabsState, setTabsState] = useState<WorkspaceTabsState>(() => loadPersistedTabsState(null));
   const [paneLayout, setPaneLayout] = useState<WorkspacePaneLayout>(() => loadPersistedPaneLayout());
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [secondaryConversation, setSecondaryConversation] = useState<ConversationRecordView | null>(null);
+  const sessions = useSessionManager();
+  const [secondaryDraft, setSecondaryDraft] = useState('');
+  const [terminalSessions, setTerminalSessions] = useState<LiveTerminalSession[]>([]);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottom = useRef(true);
@@ -152,25 +155,43 @@ export function Workspace(): React.JSX.Element {
     );
   }, [chat.conversationId, chat.streaming, history, settings.provider.primaryModel, settings.provider.provider]);
 
-  // Load secondary pane conversation when split view is active.
+  const secondarySessionKey = paneLayout.secondaryConversationId
+    ? `split:${paneLayout.secondaryConversationId}`
+    : 'split:draft';
+  const secondarySlice = sessions.getSlice(secondarySessionKey);
+
+  // Hydrate secondary pane conversation into its own isolated session slice.
   useEffect(() => {
     if (!paneLayout.splitEnabled || !paneLayout.secondaryConversationId || bridge.kind !== 'ready') {
-      setSecondaryConversation(null);
       return;
     }
-    let cancelled = false;
-    void bridge.bridge.history
-      .open(paneLayout.secondaryConversationId)
-      .then((rec: ConversationRecordView | null) => {
-        if (!cancelled) setSecondaryConversation(rec);
-      })
-      .catch(() => {
-        if (!cancelled) setSecondaryConversation(null);
-      });
+    void sessions.hydrateConversation(secondarySessionKey, paneLayout.secondaryConversationId);
+  }, [bridge.kind, paneLayout.secondaryConversationId, paneLayout.splitEnabled, secondarySessionKey, sessions.hydrateConversation]);
+
+  // Subscribe to real backend terminal stdout/stderr and process exit events.
+  useEffect(() => {
+    if (bridge.kind !== 'ready' || !bridge.bridge.terminal) return;
+    const termApi = bridge.bridge.terminal;
+    void termApi.list().then((list) => setTerminalSessions(list)).catch(() => undefined);
+    const unsubOut = termApi.onOutput((evt) => {
+      setTerminalSessions((prev) =>
+        prev.map((s) => (s.id === evt.sessionId ? { ...s, output: s.output + evt.chunk } : s)),
+      );
+    });
+    const unsubExit = termApi.onExit((evt) => {
+      setTerminalSessions((prev) =>
+        prev.map((s) =>
+          s.id === evt.sessionId
+            ? { ...s, status: evt.status, exitCode: evt.exitCode, endedAt: Date.now() }
+            : s,
+        ),
+      );
+    });
     return () => {
-      cancelled = true;
+      unsubOut();
+      unsubExit();
     };
-  }, [bridge, paneLayout.secondaryConversationId, paneLayout.splitEnabled]);
+  }, [bridge]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -679,16 +700,37 @@ export function Workspace(): React.JSX.Element {
     window.addEventListener('mouseup', onUp);
   }, [paneLayout.rightRailWidth]);
 
-  const runTerminalCommand = useCallback(async (command: string): Promise<string> => {
-    if (bridge.kind !== 'ready') return 'Pixel is not connected to its local services.';
-    setView('chat');
-    await chat.send({
-      text: `Run this project command through the authorized terminal tool and report its exact output:\n\`\`\`\n${command}\n\`\`\``,
+  const runTerminalCommand = useCallback(async (command: string): Promise<string | void> => {
+    if (bridge.kind !== 'ready' || !bridge.bridge.terminal) {
+      return 'Pixel terminal backend is not connected.';
+    }
+    const res = await bridge.bridge.terminal.run(command);
+    if (!res.ok) {
+      return res.error || 'Terminal command was not executed.';
+    }
+    if (res.session) {
+      setTerminalSessions((prev) => [res.session!, ...prev.filter((s) => s.id !== res.session!.id)].slice(0, 24));
+    }
+  }, [bridge]);
+
+  const cancelTerminalSession = useCallback((sessionId: string) => {
+    if (bridge.kind !== 'ready' || !bridge.bridge.terminal) return;
+    void bridge.bridge.terminal.cancel(sessionId);
+  }, [bridge]);
+
+  const submitSecondaryPane = useCallback(async () => {
+    const text = secondaryDraft.trim();
+    if (!text) return;
+    setSecondaryDraft('');
+    await sessions.sendInSession(secondarySessionKey, {
+      text,
       images: [],
       mode: activeMode,
+      conversationId: paneLayout.secondaryConversationId,
+      model: settings.provider.primaryModel,
+      provider: settings.provider.provider,
     });
-    return 'Dispatched through Pixel PermissionBroker. Review approval and streamed output in the active conversation.';
-  }, [bridge.kind, chat]);
+  }, [activeMode, paneLayout.secondaryConversationId, secondaryDraft, secondarySessionKey, sessions, settings.provider.primaryModel, settings.provider.provider]);
 
   const handleSelectModel = useCallback((provider: ProviderId, model: string) => {
     const desc = getProviderDescriptor(provider);
@@ -1029,22 +1071,51 @@ export function Workspace(): React.JSX.Element {
                   </button>
                 </div>
                 <div className="workspace-secondary-transcript selectable">
-                  {!secondaryConversation ? (
-                    <p className="workspace-rail-empty">Choose any conversation above to inspect it side-by-side.</p>
+                  {secondarySlice.messages.length === 0 && !secondarySlice.streaming ? (
+                    <p className="workspace-rail-empty">Select a conversation above or send a message below to run an independent split session.</p>
                   ) : (
-                    secondaryConversation.messages.map((msg) => (
-                      <article key={msg.id} className={`workspace-message ${msg.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
-                        <div className="min-w-0 flex-1">
-                          <div className="workspace-message-meta">
-                            <span>{msg.role === 'user' ? 'You' : 'Pixel'}</span>
-                            <time>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                    <>
+                      {secondarySlice.messages.map((msg) => (
+                        <article key={msg.id} className={`workspace-message ${msg.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
+                          <div className="min-w-0 flex-1">
+                            <div className="workspace-message-meta">
+                              <span>{msg.role === 'user' ? 'You' : 'Pixel'}</span>
+                              <time>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                            </div>
+                            <MarkdownMessage text={msg.content || ''} />
                           </div>
-                          <MarkdownMessage text={msg.content || ''} />
-                        </div>
-                      </article>
-                    ))
+                        </article>
+                      ))}
+                      {secondarySlice.streaming ? (
+                        <article className="workspace-message workspace-assistant-message">
+                          <div className="min-w-0 flex-1">
+                            <div className="workspace-message-meta">
+                              <span>Pixel</span>
+                              <span>{secondarySlice.model ?? 'Thinking'}</span>
+                            </div>
+                            <MarkdownMessage text={secondarySlice.content || 'Thinking…'} />
+                          </div>
+                        </article>
+                      ) : null}
+                      {secondarySlice.error ? <p role="alert" className="workspace-error">{secondarySlice.error}</p> : null}
+                    </>
                   )}
                 </div>
+                <WorkspaceComposer
+                  draft={secondaryDraft}
+                  onDraftChange={setSecondaryDraft}
+                  onSubmit={() => void submitSecondaryPane()}
+                  onStop={() => sessions.stopSession(secondarySessionKey)}
+                  streaming={secondarySlice.streaming}
+                  disabled={bridge.kind !== 'ready'}
+                  attachments={[]}
+                  onAttach={() => undefined}
+                  onRemoveAttachment={() => undefined}
+                  onAttachScreenshot={() => undefined}
+                  onToggleListening={() => undefined}
+                  listening={false}
+                  onNotice={setNotice}
+                />
               </section>
             </>
           ) : null}
@@ -1081,9 +1152,13 @@ export function Workspace(): React.JSX.Element {
               onIndexFolder={() => void indexLibraryFolder()}
               onReadDocument={(id) => readLibraryDocument(id, 0)}
               onOpenExternal={async (id) => { await openLibraryDocument(id); }}
+              onListFsDir={bridge.kind === 'ready' && bridge.bridge.workspaceFs ? (rel) => bridge.bridge.workspaceFs!.listDir(rel) : undefined}
+              onReadFsFile={bridge.kind === 'ready' && bridge.bridge.workspaceFs ? (rel) => bridge.bridge.workspaceFs!.readFile(rel) : undefined}
+              terminalSessions={terminalSessions}
               onRunTerminalCommand={runTerminalCommand}
+              onCancelTerminalSession={cancelTerminalSession}
               onStopTerminal={chat.stop}
-              terminalBusy={chat.streaming}
+              terminalBusy={terminalSessions.some((s) => s.status === 'running')}
               tasks={tasks}
               audit={audit}
             />

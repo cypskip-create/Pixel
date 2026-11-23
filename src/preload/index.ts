@@ -348,6 +348,21 @@ const bridge: CypsBridge = {
     delete: (id: string) => ipcRenderer.invoke(CH.proceduralSkillsDelete, id) as Promise<boolean>,
   },
 
+  terminal: {
+    run: (command: string, cwd?: string) => ipcRenderer.invoke(CH.terminalRun, command, cwd),
+    cancel: (sessionId: string) => ipcRenderer.invoke(CH.terminalCancel, sessionId) as Promise<boolean>,
+    list: () => ipcRenderer.invoke(CH.terminalList),
+    onOutput: (handler: (event: { sessionId: string; stream: 'stdout' | 'stderr'; chunk: string }) => void) =>
+      subscribe(CH.terminalOutput, handler),
+    onExit: (handler: (event: { sessionId: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; exitCode: number | null }) => void) =>
+      subscribe(CH.terminalExit, handler),
+  },
+
+  workspaceFs: {
+    listDir: (relativePath?: string) => ipcRenderer.invoke(CH.workspaceFsListDir, relativePath),
+    readFile: (relativePath: string) => ipcRenderer.invoke(CH.workspaceFsReadFile, relativePath),
+  },
+
   app: {
     getVersion: () => ipcRenderer.invoke(CH.appGetVersion) as Promise<string>,
     quit: () => ipcRenderer.invoke(CH.appQuit) as Promise<void>,

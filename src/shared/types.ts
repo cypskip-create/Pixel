@@ -184,6 +184,41 @@ export function getProviderDescriptor(providerId: string): ProviderDescriptor {
   return PROVIDER_CATALOG.find((p) => p.id === providerId) ?? PROVIDER_CATALOG[0]!;
 }
 
+export interface ProviderModelEntry {
+  provider: ProviderId;
+  id: string;
+  label: string;
+  role: 'fast' | 'reasoning';
+  vision: boolean;
+  toolCalls: boolean;
+  thinking: boolean;
+  contextTokens: number;
+  maxOutputTokens: number;
+}
+
+/**
+ * Verified per-model capability catalog across all supported providers.
+ * Used by ModelPickerPopover and runtime capability checks instead of guessing
+ * capabilities from provider names.
+ */
+export const PROVIDER_MODEL_CATALOG: readonly ProviderModelEntry[] = [
+  { provider: 'deepseek', id: 'deepseek-flash', label: 'DeepSeek Flash', role: 'fast', vision: true, toolCalls: true, thinking: true, contextTokens: 1_000_000, maxOutputTokens: 393_216 },
+  { provider: 'deepseek', id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', role: 'reasoning', vision: false, toolCalls: true, thinking: true, contextTokens: 1_000_000, maxOutputTokens: 393_216 },
+  { provider: 'openai', id: 'gpt-4o', label: 'GPT-4o', role: 'fast', vision: true, toolCalls: true, thinking: false, contextTokens: 128_000, maxOutputTokens: 16_384 },
+  { provider: 'openai', id: 'o3-mini', label: 'o3-mini', role: 'reasoning', vision: false, toolCalls: true, thinking: true, contextTokens: 200_000, maxOutputTokens: 100_000 },
+  { provider: 'openrouter', id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 (OR)', role: 'fast', vision: true, toolCalls: true, thinking: true, contextTokens: 200_000, maxOutputTokens: 64_000 },
+  { provider: 'openrouter', id: 'deepseek/deepseek-r1', label: 'DeepSeek R1 (OR)', role: 'reasoning', vision: false, toolCalls: true, thinking: true, contextTokens: 128_000, maxOutputTokens: 32_768 },
+  { provider: 'anthropic', id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', role: 'fast', vision: true, toolCalls: true, thinking: true, contextTokens: 200_000, maxOutputTokens: 64_000 },
+  { provider: 'anthropic', id: 'claude-opus-4-20250514', label: 'Claude Opus 4', role: 'reasoning', vision: true, toolCalls: true, thinking: true, contextTokens: 200_000, maxOutputTokens: 32_000 },
+  { provider: 'gemini', id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', role: 'fast', vision: true, toolCalls: true, thinking: true, contextTokens: 1_000_000, maxOutputTokens: 65_536 },
+  { provider: 'gemini', id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', role: 'reasoning', vision: true, toolCalls: true, thinking: true, contextTokens: 1_000_000, maxOutputTokens: 65_536 },
+  { provider: 'xai', id: 'grok-3', label: 'Grok 3', role: 'fast', vision: false, toolCalls: true, thinking: false, contextTokens: 131_072, maxOutputTokens: 16_384 },
+  { provider: 'xai', id: 'grok-3-mini', label: 'Grok 3 Mini', role: 'reasoning', vision: false, toolCalls: true, thinking: true, contextTokens: 131_072, maxOutputTokens: 16_384 },
+  { provider: 'ollama', id: 'llama3.2', label: 'Llama 3.2 (Local)', role: 'fast', vision: false, toolCalls: true, thinking: false, contextTokens: 128_000, maxOutputTokens: 8_192 },
+  { provider: 'ollama', id: 'deepseek-r1:14b', label: 'DeepSeek R1 14B (Local)', role: 'reasoning', vision: false, toolCalls: false, thinking: true, contextTokens: 64_000, maxOutputTokens: 8_192 },
+  { provider: 'custom', id: 'local-model', label: 'Custom Endpoint Model', role: 'fast', vision: false, toolCalls: true, thinking: false, contextTokens: 128_000, maxOutputTokens: 8_192 },
+] as const;
+
 /**
  * Validate a provider base URL. Requires HTTPS for remote hosts; allows plain
  * HTTP only on loopback (localhost / 127.0.0.1 / [::1]) so credentials never
@@ -1574,6 +1609,53 @@ export interface CypsBridge {
     disable(id: string): Promise<ProceduralSkillView>;
     setPinned(id: string, pinned: boolean): Promise<ProceduralSkillView>;
     delete(id: string): Promise<boolean>;
+  };
+  terminal?: {
+    run(command: string, cwd?: string): Promise<{
+      ok: boolean;
+      session?: {
+        id: string;
+        command: string;
+        cwd: string;
+        status: 'running' | 'completed' | 'failed' | 'cancelled';
+        pid: number | null;
+        exitCode: number | null;
+        startedAt: number;
+        endedAt: number | null;
+        output: string;
+      };
+      error?: string;
+    }>;
+    cancel(sessionId: string): Promise<boolean>;
+    list(): Promise<Array<{
+      id: string;
+      command: string;
+      cwd: string;
+      status: 'running' | 'completed' | 'failed' | 'cancelled';
+      pid: number | null;
+      exitCode: number | null;
+      startedAt: number;
+      endedAt: number | null;
+      output: string;
+    }>>;
+    onOutput(handler: (event: { sessionId: string; stream: 'stdout' | 'stderr'; chunk: string }) => void): () => void;
+    onExit(handler: (event: { sessionId: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; exitCode: number | null }) => void): () => void;
+  };
+  workspaceFs?: {
+    listDir(relativePath?: string): Promise<{
+      ok: boolean;
+      entries: Array<{ name: string; relativePath: string; kind: 'dir' | 'file'; sizeBytes: number; modifiedAt: number }>;
+      error?: string;
+    }>;
+    readFile(relativePath: string): Promise<{
+      ok: boolean;
+      relativePath: string;
+      content?: string;
+      truncated?: boolean;
+      binary?: boolean;
+      sizeBytes?: number;
+      error?: string;
+    }>;
   };
   app: {
     getVersion(): Promise<string>;

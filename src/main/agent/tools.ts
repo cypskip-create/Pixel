@@ -812,6 +812,68 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'process_start',
+    description: 'Start a controlled command process inside the authorized project workspace via Pixel TerminalService (requires approval). Returns the process session ID, PID, and initial state.',
+    category: 'system',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', minLength: 1, maxLength: 4096 },
+        cwd: { type: 'string', minLength: 1, maxLength: 500 },
+      },
+      required: ['command'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'process_poll',
+    description: 'Inspect the current status, exit code, and buffered stdout/stderr output of a running or finished Pixel TerminalService process session.',
+    category: 'system',
+    risk: 'low',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', minLength: 1, maxLength: 120 },
+      },
+      required: ['sessionId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'process_kill',
+    description: 'Terminate a running Pixel TerminalService process tree immediately.',
+    category: 'system',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', minLength: 1, maxLength: 120 },
+      },
+      required: ['sessionId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'process_list',
+    description: 'List active and recent controlled terminal process sessions managed by Pixel TerminalService.',
+    category: 'system',
+    risk: 'low',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 export class ToolRegistry {

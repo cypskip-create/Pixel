@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -23,12 +23,24 @@ import type {
 import type { RightRailTab } from '@/lib/workspaceLayout';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
 
-export interface TerminalLogEntry {
+export interface WorkspaceFsNode {
+  name: string;
+  relativePath: string;
+  kind: 'dir' | 'file';
+  sizeBytes: number;
+  modifiedAt: number;
+}
+
+export interface LiveTerminalSession {
   id: string;
   command: string;
+  cwd: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  pid: number | null;
+  exitCode: number | null;
+  startedAt: number;
+  endedAt: number | null;
   output: string;
-  status: 'running' | 'done' | 'error';
-  timestamp: number;
 }
 
 export interface WorkspaceRightRailProps {
@@ -43,8 +55,13 @@ export interface WorkspaceRightRailProps {
   onIndexFolder: () => void;
   onReadDocument: (documentId: string) => Promise<DocumentLibraryRead | null>;
   onOpenExternal: (documentId: string) => Promise<void>;
-  /** Safe permission-gated terminal command dispatch (runs through Pixel's authorized agent/executor, never direct renderer exec). */
-  onRunTerminalCommand: (command: string) => Promise<string>;
+  /** Real path-jailed project filesystem listing & reading. */
+  onListFsDir?: (relativePath?: string) => Promise<{ ok: boolean; entries: WorkspaceFsNode[]; error?: string }>;
+  onReadFsFile?: (relativePath: string) => Promise<{ ok: boolean; relativePath: string; content?: string; truncated?: boolean; binary?: boolean; error?: string }>;
+  /** Real backend terminal execution (stdout/stderr streaming, exit codes, cancel). */
+  terminalSessions?: LiveTerminalSession[];
+  onRunTerminalCommand: (command: string) => Promise<string | void>;
+  onCancelTerminalSession?: (sessionId: string) => void;
   onStopTerminal: () => void;
   terminalBusy: boolean;
   tasks: TaskRecord[];
@@ -52,11 +69,12 @@ export interface WorkspaceRightRailProps {
 }
 
 interface OpenPreviewTab {
-  documentId: string;
+  key: string;
+  documentId?: string;
   title: string;
   path: string;
   content: string;
-  chunkCount: number;
+  truncated?: boolean;
   loading: boolean;
   error?: string;
 }
@@ -110,7 +128,11 @@ export function WorkspaceRightRail({
   onIndexFolder,
   onReadDocument,
   onOpenExternal,
+  onListFsDir,
+  onReadFsFile,
+  terminalSessions = [],
   onRunTerminalCommand,
+  onCancelTerminalSession,
   onStopTerminal,
   terminalBusy,
   tasks,
@@ -118,64 +140,137 @@ export function WorkspaceRightRail({
 }: WorkspaceRightRailProps): React.JSX.Element {
   const [fileQuery, setFileQuery] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [fsChildren, setFsChildren] = useState<Record<string, WorkspaceFsNode[]>>({});
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
+  const [fsError, setFsError] = useState<string | null>(null);
+  const [fsLoading, setFsLoading] = useState(false);
+
   const [previews, setPreviews] = useState<OpenPreviewTab[]>([]);
-  const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
+  const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null);
 
   const [termCommand, setTermCommand] = useState('');
-  const [termLogs, setTermLogs] = useState<TerminalLogEntry[]>([]);
+  const [termDispatchError, setTermDispatchError] = useState<string | null>(null);
+
+  const loadFsDirectory = useCallback(
+    async (relPath = ''): Promise<void> => {
+      if (!onListFsDir) return;
+      if (!relPath) setFsLoading(true);
+      try {
+        const res = await onListFsDir(relPath);
+        if (res.ok) {
+          setFsError(null);
+          setFsChildren((prev) => ({ ...prev, [relPath]: res.entries }));
+        } else {
+          setFsError(res.error ?? 'Could not list workspace directory.');
+        }
+      } catch (err) {
+        setFsError(err instanceof Error ? err.message : 'Could not list workspace directory.');
+      } finally {
+        if (!relPath) setFsLoading(false);
+      }
+    },
+    [onListFsDir],
+  );
+
+  useEffect(() => {
+    if (activeTab === 'files' && onListFsDir && !fsChildren['']) {
+      void loadFsDirectory('');
+    }
+  }, [activeTab, fsChildren, loadFsDirectory, onListFsDir]);
+
+  const toggleFsDir = useCallback(
+    (relPath: string): void => {
+      setExpandedDirs((prev) => {
+        const nextOpen = !prev[relPath];
+        if (nextOpen && !fsChildren[relPath]) {
+          void loadFsDirectory(relPath);
+        }
+        return { ...prev, [relPath]: nextOpen };
+      });
+    },
+    [fsChildren, loadFsDirectory],
+  );
+
+  const openFsFilePreview = useCallback(
+    async (node: WorkspaceFsNode): Promise<void> => {
+      if (!onReadFsFile) return;
+      const key = `fs:${node.relativePath}`;
+      setActivePreviewKey(key);
+      onSelectTab('preview');
+      setPreviews((prev) => {
+        if (prev.some((p) => p.key === key)) {
+          return prev.map((p) => (p.key === key ? { ...p, loading: true, error: undefined } : p));
+        }
+        return [
+          ...prev.slice(-7),
+          { key, title: node.name, path: node.relativePath, content: '', loading: true },
+        ];
+      });
+      try {
+        const res = await onReadFsFile(node.relativePath);
+        setPreviews((prev) =>
+          prev.map((p) =>
+            p.key === key
+              ? {
+                  ...p,
+                  loading: false,
+                  content: res.ok ? (res.content ?? '') : '',
+                  truncated: res.truncated,
+                  error: res.ok ? undefined : (res.error ?? 'Could not preview file.'),
+                }
+              : p,
+          ),
+        );
+      } catch (err) {
+        setPreviews((prev) =>
+          prev.map((p) =>
+            p.key === key
+              ? { ...p, loading: false, error: err instanceof Error ? err.message : 'Preview failed.' }
+              : p,
+          ),
+        );
+      }
+    },
+    [onReadFsFile, onSelectTab],
+  );
 
   const folderGroups = useMemo(
     () => groupDocumentsByFolder(documents, fileQuery),
     [documents, fileQuery],
   );
 
-  const openFilePreview = useCallback(
+  const openDocumentPreview = useCallback(
     async (doc: DocumentLibraryItem): Promise<void> => {
-      setActivePreviewId(doc.id);
+      const key = `doc:${doc.id}`;
+      setActivePreviewKey(key);
       onSelectTab('preview');
       setPreviews((prev) => {
-        const exists = prev.some((p) => p.documentId === doc.id);
-        if (exists) {
-          return prev.map((p) => (p.documentId === doc.id ? { ...p, loading: true, error: undefined } : p));
+        if (prev.some((p) => p.key === key)) {
+          return prev.map((p) => (p.key === key ? { ...p, loading: true, error: undefined } : p));
         }
         return [
           ...prev.slice(-7),
-          {
-            documentId: doc.id,
-            title: doc.title || doc.fileName,
-            path: doc.fileName,
-            content: '',
-            chunkCount: 0,
-            loading: true,
-          },
+          { key, documentId: doc.id, title: doc.title || doc.fileName, path: doc.fileName, content: '', loading: true },
         ];
       });
       try {
         const read = await onReadDocument(doc.id);
-        if (!read) {
-          setPreviews((prev) =>
-            prev.map((p) =>
-              p.documentId === doc.id ? { ...p, loading: false, error: 'Document could not be loaded.' } : p,
-            ),
-          );
-          return;
-        }
         setPreviews((prev) =>
           prev.map((p) =>
-            p.documentId === doc.id
-              ? {
-                  ...p,
-                  loading: false,
-                  content: read.passages.map((c) => c.content).join('\n\n'),
-                  chunkCount: read.chunkCount,
-                }
+            p.key === key
+              ? read
+                ? { ...p, loading: false, content: read.passages.map((c) => c.content).join('\n\n') }
+                : { ...p, loading: false, error: 'Document could not be loaded.' }
               : p,
           ),
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Preview failed.';
         setPreviews((prev) =>
-          prev.map((p) => (p.documentId === doc.id ? { ...p, loading: false, error: message } : p)),
+          prev.map((p) =>
+            p.key === key
+              ? { ...p, loading: false, error: err instanceof Error ? err.message : 'Preview failed.' }
+              : p,
+          ),
         );
       }
     },
@@ -183,49 +278,82 @@ export function WorkspaceRightRail({
   );
 
   const closePreviewTab = useCallback(
-    (docId: string): void => {
+    (key: string): void => {
       setPreviews((prev) => {
-        const next = prev.filter((p) => p.documentId !== docId);
-        if (activePreviewId === docId) {
-          setActivePreviewId(next[next.length - 1]?.documentId ?? null);
+        const next = prev.filter((p) => p.key !== key);
+        if (activePreviewKey === key) {
+          setActivePreviewKey(next[next.length - 1]?.key ?? null);
         }
         return next;
       });
     },
-    [activePreviewId],
+    [activePreviewKey],
   );
 
-  const activePreview = previews.find((p) => p.documentId === activePreviewId) ?? previews[0] ?? null;
+  const activePreview = previews.find((p) => p.key === activePreviewKey) ?? previews[0] ?? null;
 
   const submitTerminal = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
     const cmd = termCommand.trim();
-    if (!cmd || terminalBusy) return;
-    const entryId = `term_${Date.now().toString(36)}`;
+    if (!cmd) return;
     setTermCommand('');
-    setTermLogs((prev) => [
-      ...prev.slice(-24),
-      { id: entryId, command: cmd, output: 'Dispatching through Pixel PermissionBroker…', status: 'running', timestamp: Date.now() },
-    ]);
+    setTermDispatchError(null);
     try {
-      const output = await onRunTerminalCommand(cmd);
-      setTermLogs((prev) =>
-        prev.map((item) => (item.id === entryId ? { ...item, output, status: 'done' } : item)),
-      );
+      const errMsg = await onRunTerminalCommand(cmd);
+      if (typeof errMsg === 'string' && errMsg) setTermDispatchError(errMsg);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Command failed.';
-      setTermLogs((prev) =>
-        prev.map((item) => (item.id === entryId ? { ...item, output: msg, status: 'error' } : item)),
-      );
+      setTermDispatchError(err instanceof Error ? err.message : 'Command execution failed.');
     }
   };
 
+  const renderFsNodes = (relPath: string, depth: number): React.JSX.Element[] => {
+    const nodes = fsChildren[relPath] ?? [];
+    const q = fileQuery.trim().toLowerCase();
+    const visible = q ? nodes.filter((n) => n.name.toLowerCase().includes(q) || n.relativePath.toLowerCase().includes(q)) : nodes;
+    const rows: React.JSX.Element[] = [];
+    for (const node of visible) {
+      const pad = { paddingLeft: `${8 + depth * 14}px` };
+      if (node.kind === 'dir') {
+        const open = expandedDirs[node.relativePath] === true;
+        rows.push(
+          <button
+            key={node.relativePath}
+            type="button"
+            className="workspace-file-folder"
+            style={pad}
+            aria-expanded={open}
+            onClick={() => toggleFsDir(node.relativePath)}
+          >
+            {open ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
+            {open ? <FolderOpen size={12} aria-hidden="true" /> : <Folder size={12} aria-hidden="true" />}
+            <span className="truncate">{node.name}</span>
+          </button>,
+        );
+        if (open) rows.push(...renderFsNodes(node.relativePath, depth + 1));
+      } else {
+        rows.push(
+          <button
+            key={node.relativePath}
+            type="button"
+            role="treeitem"
+            className={`workspace-file-row ${activePreviewKey === `fs:${node.relativePath}` ? 'is-selected' : ''}`}
+            style={pad}
+            onClick={() => void openFsFilePreview(node)}
+            title={node.relativePath}
+          >
+            {isCodeFile(node.name) ? <FileCode2 size={12} aria-hidden="true" /> : <FileText size={12} aria-hidden="true" />}
+            <span className="truncate">{node.name}</span>
+          </button>,
+        );
+      }
+    }
+    return rows;
+  };
+
+  const runningTermSession = terminalSessions.find((s) => s.status === 'running') ?? null;
+
   return (
-    <aside
-      className="workspace-right-rail"
-      style={{ width: `${width}px` }}
-      aria-label="Workspace tools rail"
-    >
+    <aside className="workspace-right-rail" style={{ width: `${width}px` }} aria-label="Workspace tools rail">
       <div className="workspace-right-rail-header">
         <div className="workspace-right-rail-tabs" role="tablist" aria-label="Right rail sections">
           {(['files', 'preview', 'terminal', 'context'] as const).map((tab) => (
@@ -242,17 +370,12 @@ export function WorkspaceRightRail({
                 : tab === 'preview'
                   ? `Preview${previews.length > 0 ? ` (${previews.length})` : ''}`
                   : tab === 'terminal'
-                    ? 'Terminal'
+                    ? `Terminal${runningTermSession ? ' ●' : ''}`
                     : 'Context'}
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="workspace-rail-close"
-          onClick={onClose}
-          aria-label="Close right panel"
-        >
+        <button type="button" className="workspace-rail-close" onClick={onClose} aria-label="Close right panel">
           <X size={13} aria-hidden="true" />
         </button>
       </div>
@@ -270,19 +393,16 @@ export function WorkspaceRightRail({
                 onChange={(e) => setFileQuery(e.target.value)}
               />
             </div>
-            <button
-              type="button"
-              className="workspace-rail-icon-btn"
-              onClick={onIndexFolder}
-              title="Authorize & index folder"
-              aria-label="Index folder"
-            >
+            <button type="button" className="workspace-rail-icon-btn" onClick={onIndexFolder} title="Index folder into Library" aria-label="Index folder">
               <FolderPlus size={13} aria-hidden="true" />
             </button>
             <button
               type="button"
               className="workspace-rail-icon-btn"
-              onClick={onRefreshDocuments}
+              onClick={() => {
+                void loadFsDirectory('');
+                onRefreshDocuments();
+              }}
               title="Refresh file tree"
               aria-label="Refresh files"
             >
@@ -291,67 +411,61 @@ export function WorkspaceRightRail({
           </div>
 
           <div className="workspace-file-tree" role="tree" aria-label="Project file tree">
-            {documentsLoading ? (
-              <p className="workspace-rail-empty">Loading project files…</p>
-            ) : folderGroups.length === 0 ? (
-              <div className="workspace-rail-empty">
-                <p>No authorized project files indexed yet.</p>
-                <button type="button" className="workspace-rail-cta" onClick={onIndexFolder}>
-                  <FolderPlus size={12} aria-hidden="true" />
-                  Index a project folder
-                </button>
+            {onListFsDir ? (
+              <div className="workspace-file-group">
+                <div className="workspace-palette-group-title">Workspace Filesystem</div>
+                {fsLoading ? (
+                  <p className="workspace-rail-empty">Scanning workspace root…</p>
+                ) : fsError ? (
+                  <p className="workspace-rail-empty">{fsError}</p>
+                ) : (fsChildren['']?.length ?? 0) === 0 ? (
+                  <p className="workspace-rail-empty">Workspace root is empty.</p>
+                ) : (
+                  renderFsNodes('', 0)
+                )}
               </div>
-            ) : (
-              folderGroups.map((group) => {
-                const collapsed = collapsedFolders[group.folder] === true;
-                return (
-                  <div key={group.folder} className="workspace-file-group">
-                    <button
-                      type="button"
-                      className="workspace-file-folder"
-                      aria-expanded={!collapsed}
-                      onClick={() =>
-                        setCollapsedFolders((prev) => ({ ...prev, [group.folder]: !collapsed }))
-                      }
-                    >
-                      {collapsed ? (
-                        <ChevronRight size={12} aria-hidden="true" />
-                      ) : (
-                        <ChevronDown size={12} aria-hidden="true" />
-                      )}
-                      {collapsed ? (
-                        <Folder size={12} aria-hidden="true" />
-                      ) : (
-                        <FolderOpen size={12} aria-hidden="true" />
-                      )}
-                      <span className="truncate">{group.folder}</span>
-                      <span className="workspace-file-count">{group.items.length}</span>
-                    </button>
-                    {!collapsed ? (
-                      <div className="workspace-file-children">
-                        {group.items.map((doc) => (
-                          <button
-                            key={doc.id}
-                            type="button"
-                            role="treeitem"
-                            className={`workspace-file-row ${activePreviewId === doc.id ? 'is-selected' : ''}`}
-                            onClick={() => void openFilePreview(doc)}
-                            title={doc.fileName}
-                          >
-                            {isCodeFile(doc.fileName) ? (
-                              <FileCode2 size={12} aria-hidden="true" />
-                            ) : (
-                              <FileText size={12} aria-hidden="true" />
-                            )}
-                            <span className="truncate">{doc.fileName}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            )}
+            ) : null}
+
+            {documentsLoading ? (
+              <p className="workspace-rail-empty">Loading indexed documents…</p>
+            ) : folderGroups.length > 0 ? (
+              <div className="workspace-file-group">
+                <div className="workspace-palette-group-title">Indexed Library</div>
+                {folderGroups.map((group) => {
+                  const collapsed = collapsedFolders[group.folder] === true;
+                  return (
+                    <div key={group.folder}>
+                      <button
+                        type="button"
+                        className="workspace-file-folder"
+                        aria-expanded={!collapsed}
+                        onClick={() => setCollapsedFolders((prev) => ({ ...prev, [group.folder]: !collapsed }))}
+                      >
+                        {collapsed ? <ChevronRight size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+                        {collapsed ? <Folder size={12} aria-hidden="true" /> : <FolderOpen size={12} aria-hidden="true" />}
+                        <span className="truncate">{group.folder}</span>
+                        <span className="workspace-file-count">{group.items.length}</span>
+                      </button>
+                      {!collapsed
+                        ? group.items.map((doc) => (
+                            <button
+                              key={doc.id}
+                              type="button"
+                              role="treeitem"
+                              className={`workspace-file-row ${activePreviewKey === `doc:${doc.id}` ? 'is-selected' : ''}`}
+                              onClick={() => void openDocumentPreview(doc)}
+                              title={doc.fileName}
+                            >
+                              {isCodeFile(doc.fileName) ? <FileCode2 size={12} aria-hidden="true" /> : <FileText size={12} aria-hidden="true" />}
+                              <span className="truncate">{doc.fileName}</span>
+                            </button>
+                          ))
+                        : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -362,9 +476,9 @@ export function WorkspaceRightRail({
             <div className="workspace-preview-tabs">
               {previews.map((p) => (
                 <div
-                  key={p.documentId}
-                  className={`workspace-preview-tab ${activePreview?.documentId === p.documentId ? 'is-active' : ''}`}
-                  onClick={() => setActivePreviewId(p.documentId)}
+                  key={p.key}
+                  className={`workspace-preview-tab ${activePreview?.key === p.key ? 'is-active' : ''}`}
+                  onClick={() => setActivePreviewKey(p.key)}
                 >
                   <span className="truncate">{p.title}</span>
                   <button
@@ -372,7 +486,7 @@ export function WorkspaceRightRail({
                     aria-label={`Close preview ${p.title}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      closePreviewTab(p.documentId);
+                      closePreviewTab(p.key);
                     }}
                   >
                     <X size={10} aria-hidden="true" />
@@ -384,26 +498,29 @@ export function WorkspaceRightRail({
 
           {!activePreview ? (
             <div className="workspace-rail-empty">
-              <p>Select any file from the Files tab to inspect it here.</p>
+              <p>Select any project file from the Files tab to inspect it here.</p>
             </div>
           ) : (
             <div className="workspace-preview-content">
               <div className="workspace-preview-meta">
                 <span className="truncate" title={activePreview.path}>
                   {activePreview.path}
+                  {activePreview.truncated ? ' (truncated at 128 KB)' : ''}
                 </span>
-                <button
-                  type="button"
-                  className="workspace-rail-icon-btn"
-                  onClick={() => void onOpenExternal(activePreview.documentId)}
-                  title="Open externally"
-                  aria-label="Open file externally"
-                >
-                  <ExternalLink size={12} aria-hidden="true" />
-                </button>
+                {activePreview.documentId ? (
+                  <button
+                    type="button"
+                    className="workspace-rail-icon-btn"
+                    onClick={() => void onOpenExternal(activePreview.documentId!)}
+                    title="Open externally"
+                    aria-label="Open file externally"
+                  >
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
               {activePreview.loading ? (
-                <p className="workspace-rail-empty">Reading document…</p>
+                <p className="workspace-rail-empty">Reading file…</p>
               ) : activePreview.error ? (
                 <p className="workspace-rail-empty">{activePreview.error}</p>
               ) : isMarkdownFile(activePreview.title) ? (
@@ -425,21 +542,37 @@ export function WorkspaceRightRail({
           <div className="workspace-terminal-meta">
             <span className="inline-flex items-center gap-1.5">
               <TerminalIcon size={12} aria-hidden="true" />
-              Project: <strong>{projectName}</strong>
+              <strong>{projectName}</strong>
             </span>
-            <span className="workspace-terminal-badge">Permission-gated</span>
+            <span className="workspace-terminal-badge">
+              {runningTermSession ? `PID ${runningTermSession.pid ?? '…'}` : 'PermissionBroker'}
+            </span>
           </div>
 
           <div className="workspace-terminal-output" role="log" aria-label="Terminal output">
-            {termLogs.length === 0 ? (
+            {termDispatchError ? (
+              <p role="alert" className="workspace-rail-empty">{termDispatchError}</p>
+            ) : null}
+            {terminalSessions.length === 0 ? (
               <p className="workspace-rail-empty">
-                Run project-scoped commands through Pixel&apos;s PermissionBroker. Every shell step is audited and requires approval when state-changing.
+                Commands execute in Pixel&apos;s controlled backend process runner with real stdout/stderr streaming, exit codes, cancellation, PermissionBroker approval, and Emergency Stop kill-all.
               </p>
             ) : (
-              termLogs.map((entry) => (
-                <div key={entry.id} className="workspace-terminal-entry">
-                  <div className="workspace-terminal-cmd">$ {entry.command}</div>
-                  <pre className={`workspace-terminal-res is-${entry.status}`}>{entry.output}</pre>
+              terminalSessions.map((session) => (
+                <div key={session.id} className="workspace-terminal-entry">
+                  <div className="workspace-terminal-cmd flex items-center justify-between gap-2">
+                    <span className="truncate">$ {session.command}</span>
+                    <span className="workspace-terminal-badge">
+                      {session.status === 'running'
+                        ? 'running'
+                        : session.exitCode !== null
+                          ? `exit ${session.exitCode}`
+                          : session.status}
+                    </span>
+                  </div>
+                  <pre className={`workspace-terminal-res is-${session.status}`}>
+                    {session.output || (session.status === 'running' ? 'Running…' : '(no output)')}
+                  </pre>
                 </div>
               ))
             )}
@@ -449,18 +582,23 @@ export function WorkspaceRightRail({
             <input
               type="text"
               aria-label="Terminal command"
-              placeholder="Enter command (dispatched via PermissionBroker)…"
+              placeholder="Run command in workspace…"
               value={termCommand}
               onChange={(e) => setTermCommand(e.target.value)}
-              disabled={terminalBusy}
             />
-            {terminalBusy ? (
+            {runningTermSession || terminalBusy ? (
               <button
                 type="button"
                 className="workspace-rail-icon-btn"
-                onClick={onStopTerminal}
+                onClick={() => {
+                  if (runningTermSession && onCancelTerminalSession) {
+                    onCancelTerminalSession(runningTermSession.id);
+                  } else {
+                    onStopTerminal();
+                  }
+                }}
                 aria-label="Stop running command"
-                title="Stop"
+                title="Cancel process"
               >
                 <Square size={12} aria-hidden="true" />
               </button>

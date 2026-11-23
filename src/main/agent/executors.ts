@@ -30,6 +30,7 @@ import type { DocumentTools } from '../documents/toolset';
 import type { FileTools } from '../files/toolset';
 import type { GitTools } from '../git/toolset';
 import { terminateProcessTree } from '../services/process';
+import type { TerminalService } from '../services/terminalService';
 import { NativeHelperError } from '../services/nativeHelper';
 import type { FindElementsQuery, LastExternalWindowResult, NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
 import { randomUUID } from 'node:crypto';
@@ -169,6 +170,8 @@ export interface ExecutorDeps {
   chooseBoardFile?: (action: 'open' | 'save', format: BoardFileFormat, title: string) => Promise<{ path: string; overwrite?: boolean; replace?: boolean } | null>;
   /** Navigate the trusted Workspace to the Board after an agent edit. */
   focusBoard?: () => void;
+  /** Controlled Windows-compatible terminal/process backend (Hermes process_registry parity). */
+  terminal?: TerminalService;
 }
 
 export class ToolExecutors {
@@ -197,6 +200,9 @@ export class ToolExecutors {
       }
     }
     this.children.clear();
+    if (this.deps.terminal) {
+      killed += this.deps.terminal.killAll();
+    }
     this.clipboardSnapshots.clear();
     if (this.clipboardSnapshotTimer) clearTimeout(this.clipboardSnapshotTimer);
     this.clipboardSnapshotTimer = null;
@@ -621,6 +627,60 @@ export class ToolExecutors {
             content: `Deleted Google Calendar event ${res.eventId}.`,
             detail: res,
             verification: { summary: `Google Calendar deleted event ${res.eventId}.`, source: 'HTTPS DELETE to www.googleapis.com' },
+          };
+        }
+        case 'process_start': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const command = typeof args.command === 'string' ? args.command.trim() : '';
+          const cwd = typeof args.cwd === 'string' && args.cwd.trim() ? args.cwd.trim() : undefined;
+          const res = await this.deps.terminal.run(command, cwd);
+          if (!res.ok || !res.session) {
+            return { ok: false, content: res.error ?? 'Could not start process.', errorCode: 'FAILED' };
+          }
+          return {
+            ok: true,
+            content: `Started process ${res.session.id} (PID ${res.session.pid ?? 'unknown'}) in ${res.session.cwd}.`,
+            detail: { ...res.session },
+          };
+        }
+        case 'process_poll': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const session = this.deps.terminal.get(sessionId);
+          if (!session) {
+            return { ok: false, content: `No terminal process found with ID "${sessionId}".`, errorCode: 'NOT_FOUND' };
+          }
+          return {
+            ok: true,
+            content: `Process ${session.id}: status=${session.status}, exitCode=${session.exitCode ?? 'null'}\n${session.output.slice(-4000)}`,
+            detail: { ...session },
+          };
+        }
+        case 'process_kill': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const killed = this.deps.terminal.cancel(sessionId);
+          return killed
+            ? { ok: true, content: `Terminated process ${sessionId}.` }
+            : { ok: false, content: `Process ${sessionId} was not running.`, errorCode: 'NOT_FOUND' };
+        }
+        case 'process_list': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const list = this.deps.terminal.list();
+          return {
+            ok: true,
+            content: list.length === 0
+              ? 'No terminal processes recorded.'
+              : list.map((s) => `${s.id} [${s.status}] (exit=${s.exitCode ?? '—'}) $ ${s.command}`).join('\n'),
+            detail: { sessions: list },
           };
         }
         default:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Cpu, Search } from 'lucide-react';
 import {
-  PROVIDER_CATALOG,
+  PROVIDER_MODEL_CATALOG,
   getProviderDescriptor,
   type ProviderId,
   type ProviderSettings,
@@ -49,40 +49,38 @@ export function ModelPickerPopover({
   const enabledFallbacks = (providerSettings.fallbackProviders ?? []).filter((f) => f.enabled).length;
 
   const entries = useMemo(() => {
-    const list: Array<{
-      provider: ProviderId;
-      providerLabel: string;
-      model: string;
-      role: 'fast' | 'reasoning';
-      vision: boolean;
-    }> = [];
-    for (const p of PROVIDER_CATALOG) {
-      list.push({
-        provider: p.id,
-        providerLabel: p.label,
-        model: p.defaultModel,
-        role: 'fast',
-        vision: p.id === 'deepseek' || p.id === 'openai' || p.id === 'anthropic' || p.id === 'gemini' || p.id === 'openrouter',
-      });
-      if (p.reasoningModel && p.reasoningModel !== p.defaultModel) {
-        list.push({
-          provider: p.id,
-          providerLabel: p.label,
-          model: p.reasoningModel,
-          role: 'reasoning',
-          vision: p.id === 'anthropic',
-        });
-      }
-    }
+    const customEntries = (providerSettings.customEndpoints ?? [])
+      .filter((ep) => ep.enabled && ep.model)
+      .map((ep) => ({
+        provider: 'custom' as ProviderId,
+        providerLabel: ep.name,
+        id: ep.model,
+        label: ep.model,
+        role: 'fast' as const,
+        vision: false,
+        toolCalls: true,
+        thinking: false,
+        contextTokens: providerSettings.contextLength ?? 128_000,
+      }));
+
+    const combined = [
+      ...PROVIDER_MODEL_CATALOG.map((m) => ({
+        ...m,
+        providerLabel: getProviderDescriptor(m.provider).label,
+      })),
+      ...customEntries,
+    ];
+
     const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
+    if (!q) return combined;
+    return combined.filter(
       (item) =>
-        item.model.toLowerCase().includes(q) ||
+        item.id.toLowerCase().includes(q) ||
+        item.label.toLowerCase().includes(q) ||
         item.providerLabel.toLowerCase().includes(q) ||
         item.provider.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [providerSettings.contextLength, providerSettings.customEndpoints, query]);
 
   return (
     <div className="workspace-model-picker" ref={containerRef}>
@@ -144,26 +142,28 @@ export function ModelPickerPopover({
             {entries.map((item) => {
               const isSelected =
                 providerSettings.provider === item.provider &&
-                providerSettings.primaryModel === item.model;
+                providerSettings.primaryModel === item.id;
               return (
                 <button
-                  key={`${item.provider}:${item.model}`}
+                  key={`${item.provider}:${item.id}:${item.providerLabel}`}
                   type="button"
                   role="option"
                   aria-selected={isSelected}
                   className={`workspace-model-option ${isSelected ? 'is-selected' : ''}`}
                   onClick={() => {
-                    onSelectModel(item.provider, item.model);
+                    onSelectModel(item.provider, item.id);
                     setOpen(false);
                   }}
                 >
                   <span className="workspace-model-option-main">
-                    <span className="workspace-model-option-name">{item.model}</span>
-                    <span className="workspace-model-option-prov">{item.providerLabel}</span>
+                    <span className="workspace-model-option-name">{item.id}</span>
+                    <span className="workspace-model-option-prov">
+                      {item.providerLabel} · {Math.round(item.contextTokens / 1000)}k
+                    </span>
                   </span>
                   <span className="workspace-model-option-caps">
                     {item.vision ? <span className="workspace-cap-badge">vision</span> : null}
-                    <span className="workspace-cap-badge">{item.role}</span>
+                    {item.thinking ? <span className="workspace-cap-badge">reason</span> : null}
                     {isSelected ? <Check size={12} aria-hidden="true" /> : null}
                   </span>
                 </button>

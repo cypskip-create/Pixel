@@ -52,6 +52,8 @@ import { ASSISTANT_STATES, DEFAULT_THINKING, getProviderDescriptor } from '../sh
 import { CHANNELS } from '../shared/channels';
 import { ConversationEngine } from './agent/conversation';
 import { resolveProviderChain } from './providers/catalog';
+import { TerminalService } from './services/terminalService';
+import { listWorkspaceDir, readWorkspaceFile } from './services/workspaceFs';
 import { AgentExecutor } from './agent/executor';
 import { PythonAgentRunner } from './agent/pythonRunner';
 import { buildRoutineToolPlan, buildSkillToolPlan } from './skills/plan';
@@ -638,7 +640,35 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       return executors.killAll();
     },
     completedActions: () => [...completedActions],
-    notify: (report) => context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report),
+    notify: (report) => {
+      terminalService.killAll();
+      context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report);
+    },
+  });
+
+  const terminalService = new TerminalService({
+    isEmergencyStopped: () => emergency.isStopped(),
+    authorize: async (command, cwd) => {
+      const outcome = await permissions.ask({
+        id: `perm_term_${randomUUID().slice(0, 8)}`,
+        toolName: 'process_start',
+        action: `Run terminal command: ${command.slice(0, 120)}`,
+        target: cwd,
+        changesData: true,
+        risk: 'high',
+        duration: 'once',
+        args: { command, cwd },
+        createdAt: Date.now(),
+        allowPersistent: false,
+      });
+      return {
+        allowed: outcome.approved,
+        reason: outcome.approved ? undefined : 'Terminal command was denied by user.',
+      };
+    },
+    onOutput: (evt) => context.sendToRenderer(CHANNELS.terminalOutput, evt),
+    onExit: (evt) => context.sendToRenderer(CHANNELS.terminalExit, evt),
+    defaultCwd: process.cwd(),
   });
 
   /**
@@ -680,6 +710,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const executors = new ToolExecutors({
     clipboard,
+    terminal: terminalService,
     openPath: (path) => shell.openPath(path),
     trashPath: (path) => shell.trashItem(path),
     browser,
@@ -1959,6 +1990,33 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   /* -------------------------------- app ------------------------------ */
+
+  /* --------------------- terminal & workspace fs --------------------- */
+
+  const resolveWorkspaceRoot = (): string => process.cwd();
+
+  registerHandler(CHANNELS.terminalRun, async (_event, command: string, cwd?: string) => {
+    const safeRoot = resolveWorkspaceRoot();
+    const res = await terminalService.run(typeof command === 'string' ? command : '', cwd || safeRoot);
+    audit.record('tool', 'Terminal command', res.ok ? 'ok' : 'error', typeof command === 'string' ? command.slice(0, 80) : '');
+    return res;
+  });
+
+  registerHandler(CHANNELS.terminalCancel, (_event, sessionId: string): boolean => {
+    const cancelled = terminalService.cancel(typeof sessionId === 'string' ? sessionId : '');
+    if (cancelled) audit.record('tool', 'Terminal process cancelled', 'ok', sessionId);
+    return cancelled;
+  });
+
+  registerHandler(CHANNELS.terminalList, () => terminalService.list());
+
+  registerHandler(CHANNELS.workspaceFsListDir, (_event, relativePath?: string) =>
+    listWorkspaceDir(resolveWorkspaceRoot(), typeof relativePath === 'string' ? relativePath : ''),
+  );
+
+  registerHandler(CHANNELS.workspaceFsReadFile, (_event, relativePath: string) =>
+    readWorkspaceFile(resolveWorkspaceRoot(), typeof relativePath === 'string' ? relativePath : ''),
+  );
 
   registerHandler(CHANNELS.appGetVersion, (): string => app.getVersion());
 
