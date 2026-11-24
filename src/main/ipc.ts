@@ -668,7 +668,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     },
     onOutput: (evt) => context.sendToRenderer(CHANNELS.terminalOutput, evt),
     onExit: (evt) => context.sendToRenderer(CHANNELS.terminalExit, evt),
-    defaultCwd: process.cwd(),
+    getAuthorizedRoot: () => resolveWorkspaceRoot(),
   });
 
   /**
@@ -1993,11 +1993,25 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* --------------------- terminal & workspace fs --------------------- */
 
-  const resolveWorkspaceRoot = (): string => process.cwd();
+  const resolveWorkspaceRoot = (): string | null => {
+    const activeProjectId = projectId();
+    const docs = documentIndex.listDocuments(activeProjectId);
+    for (const doc of docs) {
+      const folderPath = documentIndex.resolveFolderPath(activeProjectId, doc.folderId);
+      if (folderPath) return folderPath;
+    }
+    return null;
+  };
 
   registerHandler(CHANNELS.terminalRun, async (_event, command: string, cwd?: string) => {
     const safeRoot = resolveWorkspaceRoot();
-    const res = await terminalService.run(typeof command === 'string' ? command : '', cwd || safeRoot);
+    if (!safeRoot && !cwd) {
+      return {
+        ok: false,
+        error: 'No workspace folder is configured for the active project. Index a project folder in Files first.',
+      };
+    }
+    const res = await terminalService.run(typeof command === 'string' ? command : '', cwd || safeRoot || undefined);
     audit.record('tool', 'Terminal command', res.ok ? 'ok' : 'error', typeof command === 'string' ? command.slice(0, 80) : '');
     return res;
   });
@@ -2010,13 +2024,29 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.terminalList, () => terminalService.list());
 
-  registerHandler(CHANNELS.workspaceFsListDir, (_event, relativePath?: string) =>
-    listWorkspaceDir(resolveWorkspaceRoot(), typeof relativePath === 'string' ? relativePath : ''),
-  );
+  registerHandler(CHANNELS.workspaceFsListDir, (_event, relativePath?: string) => {
+    const root = resolveWorkspaceRoot();
+    if (!root) {
+      return {
+        ok: false,
+        entries: [],
+        error: 'No workspace folder is configured for the active project. Click "Index folder" to authorize a project directory.',
+      };
+    }
+    return listWorkspaceDir(root, typeof relativePath === 'string' ? relativePath : '');
+  });
 
-  registerHandler(CHANNELS.workspaceFsReadFile, (_event, relativePath: string) =>
-    readWorkspaceFile(resolveWorkspaceRoot(), typeof relativePath === 'string' ? relativePath : ''),
-  );
+  registerHandler(CHANNELS.workspaceFsReadFile, (_event, relativePath: string) => {
+    const root = resolveWorkspaceRoot();
+    if (!root) {
+      return {
+        ok: false,
+        relativePath: typeof relativePath === 'string' ? relativePath : '',
+        error: 'No workspace folder is configured for the active project.',
+      };
+    }
+    return readWorkspaceFile(root, typeof relativePath === 'string' ? relativePath : '');
+  });
 
   registerHandler(CHANNELS.appGetVersion, (): string => app.getVersion());
 

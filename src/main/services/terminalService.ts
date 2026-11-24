@@ -14,8 +14,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export type TerminalSessionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -49,6 +49,21 @@ export interface TerminalServiceOptions {
   onOutput?: (event: TerminalOutputEvent) => void;
   onExit?: (event: TerminalExitEvent) => void;
   defaultCwd?: string;
+  /** Optional canonical root directory; when set, `cwdOverride` cannot escape this root (including symlinks/junctions). */
+  authorizedRoot?: string;
+  getAuthorizedRoot?: () => string | null;
+}
+
+function isWithinCanonicalRoot(rootDir: string, targetDir: string): boolean {
+  try {
+    const canonicalRoot = realpathSync(resolve(rootDir));
+    const canonicalTarget = realpathSync(resolve(targetDir));
+    const rel = relative(canonicalRoot, canonicalTarget);
+    if (!rel) return true;
+    return !rel.startsWith('..') && rel !== '..' && !rel.includes(`..${sep}`) && !isAbsolute(rel);
+  } catch {
+    return false;
+  }
 }
 
 interface LiveSession {
@@ -121,9 +136,17 @@ export class TerminalService {
       return { ok: false, error: 'Emergency Stop is active. Clear Emergency Stop before running commands.' };
     }
 
-    const cwd = resolve(cwdOverride || this.options.defaultCwd || process.cwd());
+    const configuredRoot = this.options.getAuthorizedRoot?.() ?? this.options.authorizedRoot ?? null;
+    const rawCwd = cwdOverride || configuredRoot || this.options.defaultCwd;
+    if (!rawCwd) {
+      return { ok: false, error: 'No workspace directory is configured for the active project.' };
+    }
+    const cwd = resolve(rawCwd);
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
       return { ok: false, error: 'Working directory does not exist.' };
+    }
+    if (configuredRoot && !isWithinCanonicalRoot(configuredRoot, cwd)) {
+      return { ok: false, error: 'Requested working directory escapes the authorized project root.' };
     }
 
     if (this.options.authorize) {

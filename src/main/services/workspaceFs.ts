@@ -27,10 +27,15 @@ export interface WorkspaceFsReadResult {
   error?: string;
 }
 
-const SKIPPED_DIRS = new Set(['.git', 'node_modules', 'dist', '.pw-browsers', '__pycache__', '.venv']);
-const BLOCKED_SECRET_RE = /(^\.env(\.|$)|\.(pem|key|pfx|p12|crt)$|^id_(rsa|ed25519)$)/i;
+const SKIPPED_DIRS = new Set(['.git', 'node_modules', 'dist', '.pw-browsers', '__pycache__', '.venv', 'credentials']);
+const BLOCKED_SECRET_RE = /(^\.env(\.|$)|\.(pem|key|pfx|p12|crt|keystore)$|^id_(rsa|ed25519)$|^(credentials|secrets)\.json$|^\.(npmrc|netrc|pypirc)$)/i;
 const MAX_ENTRIES = 200;
 const MAX_READ_BYTES = 128 * 1024;
+
+function isBlockedSecretPath(pathLike: string): boolean {
+  const segments = pathLike.replace(/\\/g, '/').split('/').filter(Boolean);
+  return segments.some((seg) => BLOCKED_SECRET_RE.test(seg) || seg.toLowerCase() === 'credentials');
+}
 
 export function resolveInsideRoot(rootDir: string, relPath = ''): string | null {
   try {
@@ -98,8 +103,7 @@ export function readWorkspaceFile(
   rootDir: string,
   relativePath: string,
 ): WorkspaceFsReadResult {
-  const name = basename(relativePath);
-  if (BLOCKED_SECRET_RE.test(name)) {
+  if (isBlockedSecretPath(relativePath)) {
     return {
       ok: false,
       relativePath,
@@ -112,6 +116,14 @@ export function readWorkspaceFile(
       ok: false,
       relativePath,
       error: 'Path is outside the authorized workspace root.',
+    };
+  }
+  // Re-check canonical target basename/path to block symlinks or aliases pointing to secret files.
+  if (BLOCKED_SECRET_RE.test(basename(target)) || isBlockedSecretPath(target)) {
+    return {
+      ok: false,
+      relativePath,
+      error: 'Sensitive credential/key files cannot be previewed.',
     };
   }
   try {

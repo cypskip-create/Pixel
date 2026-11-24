@@ -177,8 +177,8 @@ export const CHANNELS = {
   terminalOutput: 'terminal:output',
   terminalExit: 'terminal:exit',
 
-  workspaceFsListDir: 'workspaceFs:listDir',
-  workspaceFsReadFile: 'workspaceFs:readFile',
+  workspaceFsListDir: 'workspacefs:listDir',
+  workspaceFsReadFile: 'workspacefs:readFile',
 
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',
