@@ -2,27 +2,25 @@
 
 ## Architectural Split
 
-- **Python (`python/pixel_agent/workspace_services.py`, `protocol.py`):** Authoritative backend for Profiles, Artifacts, Grounded Starmap graph construction, and Session Import (JSON & Markdown parsing, SHA-256 duplicate detection, and persistent registries under `PIXEL_WORKSPACE_DATA_DIR`).
-- **Electron Main + Preload (`src/main/services/pythonAgentBridge.ts`, `src/main/ipc.ts`, `src/preload/index.ts`, `src/shared/channels.ts`, `src/shared/types.ts`):** Typed IPC surface (`profiles:*`, `artifacts:*`, `starmap:build`, `sessionimport:preview`, `sessionimport:commit`) bridged to the Python subprocess.
-- **Renderer (`src/renderer/components/Stage9Destinations.tsx`, `WorkspaceSidebar.tsx`, `Workspace.tsx`):** Full-page, strictly monochrome desktop destinations wired into sidebar navigation and the `Ctrl+K` Command Palette.
+- **Python (`python/pixel_agent/workspace_services.py`, `protocol.py`, `gateway/`):** Authoritative backend for Profiles (registry, isolated directories, instructions & overrides injected into `_dispatch_gateway_turn`), Artifacts registry, Grounded Starmap graph & timeline builder, 2-phase Session Import validation & digest confirmation, and Gateway messaging/webhooks.
+- **Electron Main + Preload (`src/main/services/stage9Helpers.ts`, `src/main/services/pythonAgentBridge.ts`, `src/main/routines/index.ts`, `src/main/ipc/skills.ts`, `src/main/agent/executors.ts`, `src/main/ipc.ts`, `src/preload/index.ts`, `src/shared/channels.ts`, `src/shared/types.ts`):**
+  - **Authoritative Profile Isolation:** Switching profiles updates `activeProfileState` in main process, maps non-default profiles to canonical `profile:<id>` project scope across SQLite `MemoryStore`, `SkillStore`, `ProceduralSkillStore`, `RoutineStore`, `TaskStore`, `HistoryStore`, `Artifacts`, and `Starmap` (zero shadow databases), injects profile instructions into local and remote turns, applies model/provider overrides, and broadcasts `profiles:changed` so the renderer refreshes without leaking cross-profile state.
+  - **Artifacts Production Pipeline:** `ToolExecutors.onArtifactCreated` automatically registers real generated images (`image_generate`) and saved workspace files (`file_write`, `file_create`, `file_patch`, `file_append`, excluding OS temp directories) into Python's registry. `artifacts:open` and `artifacts:reveal` validate paths via `validateArtifactPath` (`realpathSync` + approved root containment) before calling `shell.openPath` / `shell.showItemInFolder`.
+  - **Canonical Cron Scheduler:** `RoutineStore.update(...)` and `LocalRoutineScheduler.runNow(...)` reuse the existing SQLite lease/claim/queue pipeline and are exposed via `routines:update` and `routines:runNow`.
+  - **2-Phase Safe Session Import:** `commitSessionImportSafely(...)` validates via `session_import.preview`, persists conversations into `HistoryStore`, and calls `session_import.confirm(digest)` only after persistence succeeds so failed writes can be retried cleanly.
+- **Renderer (`src/renderer/components/Stage9Destinations.tsx`, `WorkspaceSidebar.tsx`, `Workspace.tsx`):** Full-page, compact monochrome/blue-accent desktop destinations wired into sidebar `Desktop destinations` and `Ctrl+K` Command Palette.
 
-## Full-Page Desktop Destinations
+## Feature-by-Feature Evidence Matrix
 
-| Route (`WorkspaceView`) | Component | Backing Service |
-| --- | --- | --- |
-| `command-center` | `CommandCenterPage` | `history.list`, `system.diagnostics`, `tasks.list`, `gateway.status` |
-| `capabilities` | `WorkspacePluginManager` | Python `PluginManager` (Plugins, MCP, Toolsets, Skills Hub) |
-| `messaging` | `DedicatedMessagingPage` | Python `GatewayService` (start/stop, Telegram polling, pairing, one-time token reveal) |
-| `webhooks` | `DedicatedWebhooksPage` | Python `WebhookRegistry` (routes, one-time HMAC secret reveal, delivery ledger) |
-| `artifacts` | `ArtifactsPage` | Python `WorkspaceServices` (`artifacts.list/register/delete`, profile+project scoped) |
-| `cron` | `CronPage` | Pixel `routines` IPC (`routines.list`, `routines.runNow`) |
-| `profiles` | `ProfilesPage` | Python `WorkspaceServices` (`profiles.list/create/switch/update/delete`) |
-| `agents` | `AgentsPage` | Live `tasks.list` + active Python runtime diagnostics |
-| `starmap` | `StarmapPage` | Python `WorkspaceServices.build_starmap` (grounded memories, skills, sessions, artifacts) |
-| `session-import` | `SessionImportPage` | Python `WorkspaceServices` (`session_import.preview/commit` with SHA-256 deduplication) |
-
-## Design Invariants
-
-- **Monochrome Surface Contract:** All Stage 9 views use CSS custom properties (`--color-surface`, `--color-border`, `--color-ink`, `--color-ink-dim`, `--color-accent`, `--color-danger`) with zero raw chromatic Tailwind classes.
-- **No Synthetic Data:** Command Center usage/health, Agents delegation status, and Starmap nodes/edges are derived strictly from live backend records.
-- **Default Profile Safety:** The `default` profile cannot be deleted; deleting any active non-default profile safely falls back to `default`.
+| Feature | Hermes Source (`352b249f`) | Pixel Target | Status | Tests | Known Limits |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Command Center** | `web/src/pages/SessionsPage.tsx`, `SystemPage.tsx`, `AnalyticsPage.tsx` | `Stage9Destinations.tsx` (`CommandCenterPage`) | **implemented** | `tests/stage8-closure-and-stage9-desktop.test.ts` | Shows measured local counts only; unmeasured token/cost telemetry intentionally omitted. |
+| **Profiles** | `web/src/pages/ProfilesPage.tsx`, `ProfileSwitcher.tsx` | `workspace_services.py`, `stage9Helpers.ts`, `ipc.ts`, `ProfilesPage` | **implemented** | `tests/stage9-functional-completion.test.tsx`, `python/tests/test_stage8_closure_and_stage9.py` | Default profile is protected from deletion. |
+| **Agents & Delegation** | `apps/desktop` task hierarchy | `AgentsPage`, `src/main/agents/coordinator.ts` | **implemented** | `tests/stage9-functional-completion.test.tsx` | Displays real `TaskRecord` parent/child trees only (zero fabricated runs). |
+| **Artifacts** | `web/src/pages/FilesPage.tsx` | `executors.ts`, `stage9Helpers.ts`, `ipc.ts`, `ArtifactsPage` | **implemented** | `tests/stage9-functional-completion.test.tsx`, `tests/stage8-closure-and-stage9-desktop.test.ts` | `open`/`reveal` restricted to approved user/workspace roots; temp files excluded. |
+| **Cron Scheduler** | `web/src/pages/CronPage.tsx`, `ScheduleBuilder.tsx` | `routines/index.ts`, `ipc/skills.ts`, `CronPage` | **implemented** | `tests/stage9-functional-completion.test.tsx`, `tests/phase-e-durable-tasks-scheduler-delegation.test.ts` | Runs only while Pixel main process is alive; missed runs follow configured `missedRunPolicy`. |
+| **Starmap** | Grounded memory/activity graph & timeline | `workspace_services.py`, `ipc.ts`, `StarmapPage` | **implemented** | `tests/stage9-functional-completion.test.tsx`, `python/tests/test_stage8_closure_and_stage9.py` | Displays up to 48 visible nodes in circular cluster layout + full chronological timeline. |
+| **Messaging** | `web/src/pages/ChannelsPage.tsx`, `PairingPage.tsx`, `gateway/platforms/` | `gateway/platforms.py`, `runtime.py`, `DedicatedMessagingPage` | **implemented** (Email: **outbound-only**) | `tests/stage9-functional-completion.test.tsx`, `python/tests/test_stage8_closure_and_stage9.py` | Email implements SMTP outbound only (no IMAP polling); extended platforms are `outbound_webhook` or `external dependency required`; live delivery requires user credentials. |
+| **Webhooks** | `web/src/pages/WebhooksPage.tsx`, `gateway/platforms/webhook*.py` | `gateway/webhooks_and_api.py`, `DedicatedWebhooksPage` | **implemented** | `tests/stage9-functional-completion.test.tsx`, `tests/stage8-gateway-security-integration.test.ts` | Loopback `127.0.0.1` binding by default; signing secrets shown once on creation. |
+| **Session Import** | `web/src/pages/SessionsPage_sources.tsx` | `workspace_services.py`, `stage9Helpers.ts`, `ipc.ts`, `SessionImportPage` | **implemented** | `tests/stage9-functional-completion.test.tsx` | Supports JSON & Markdown exports; 2-phase commit prevents false duplicates on failed writes. |
+| **Capabilities** | `web/src/pages/PluginsPage.tsx`, `McpPage.tsx`, `SkillsPage.tsx` | `WorkspacePluginManager.tsx`, `Workspace.tsx` | **implemented** | `tests/stage7-python-plugins-capabilities.test.ts` | Reuses canonical Python `PluginManager` & MCP store directly. |

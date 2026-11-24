@@ -110,6 +110,15 @@ export interface ExecutorDeps {
   openPath?: (path: string) => Promise<string>;
   /** Uses the operating system Recycle Bin after FileTools validates the path. */
   trashPath?: (path: string) => Promise<void>;
+  /** Registers real generated/saved outputs into the authoritative Python Artifacts registry. */
+  onArtifactCreated?: (artifact: {
+    name: string;
+    kind: string;
+    mimeType: string;
+    filePath: string;
+    sizeBytes?: number;
+    previewText?: string;
+  }) => void;
   /**
    * Capture access. Only called for `analyze_screen`, and only after the
    * permission flow has approved that specific call.
@@ -331,7 +340,40 @@ export class ToolExecutors {
         return await this.deps.files.trash(args, this.deps.trashPath, signal);
       }
       if (this.deps.files?.handles(name)) {
-        return this.deps.files.run(name, args);
+        const result = this.deps.files.run(name, args);
+        if (result.ok && this.deps.onArtifactCreated && (name === 'file_write' || name === 'file_create' || name === 'file_patch' || name === 'file_append')) {
+          const filePath = typeof result.detail?.path === 'string'
+            ? result.detail.path
+            : (typeof args.path === 'string' ? args.path : '');
+          if (filePath && !filePath.toLowerCase().startsWith(tmpdir().toLowerCase())) {
+            const lower = filePath.toLowerCase();
+            const ext = lower.slice(lower.lastIndexOf('.'));
+            const kind = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'].includes(ext)
+              ? 'image'
+              : ['.md', '.txt', '.pdf', '.docx', '.pptx', '.xlsx', '.csv'].includes(ext)
+                ? 'document'
+                : ['.ts', '.tsx', '.js', '.jsx', '.py', '.cs', '.json', '.html', '.css', '.sql', '.yaml', '.yml'].includes(ext)
+                  ? 'code'
+                  : 'file';
+            const mimeType = ext === '.md' ? 'text/markdown'
+              : ext === '.json' ? 'application/json'
+                : ext === '.png' ? 'image/png'
+                  : ext === '.svg' ? 'image/svg+xml'
+                    : ext === '.pdf' ? 'application/pdf'
+                      : 'text/plain';
+            const baseName = filePath.split(/[\\/]/).pop() || 'output';
+            const sizeBytes = typeof result.detail?.bytes === 'number' ? result.detail.bytes : 0;
+            this.deps.onArtifactCreated({
+              name: baseName,
+              kind,
+              mimeType,
+              filePath,
+              sizeBytes,
+              previewText: result.content.slice(0, 300),
+            });
+          }
+        }
+        return result;
       }
       if (this.deps.git?.handles(name)) {
         return await this.deps.git.run(name, args, signal);
@@ -892,6 +934,17 @@ export class ToolExecutors {
             } catch {
               // Artifact path is still returned in detail even if preview read fails.
             }
+          }
+          if (res.filePath && this.deps.onArtifactCreated) {
+            const baseName = res.filePath.split(/[\\/]/).pop() || 'generated.png';
+            this.deps.onArtifactCreated({
+              name: baseName,
+              kind: 'image',
+              mimeType: res.mimeType || 'image/png',
+              filePath: res.filePath,
+              sizeBytes: res.bytes ?? 0,
+              previewText: `Generated (${provider}): ${prompt.slice(0, 200)}`,
+            });
           }
           return {
             ok: true,

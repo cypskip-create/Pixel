@@ -85,6 +85,11 @@ class WorkspaceServices:
     # Profiles (Isolated, Atomic Switch, Default Protected)
     # ------------------------------------------------------------------
 
+    def get_active_profile(self) -> dict[str, Any]:
+        active = str(self._state.get("activeProfileId") or "default")
+        rec = self._state.get("profiles", {}).get(active) or self._state["profiles"]["default"]
+        return {**rec, "active": True, "dataDir": str(self.profiles_dir / rec["id"])}
+
     def list_profiles(self) -> dict[str, Any]:
         active = str(self._state.get("activeProfileId") or "default")
         items = [
@@ -382,12 +387,21 @@ class WorkspaceServices:
             "sessions": sessions,
         }
 
+    def confirm_session_import(self, digest: str) -> dict[str, Any]:
+        clean = (digest or "").strip()
+        if not clean:
+            return {"ok": False, "error": "Import digest is required."}
+        hashes = self._state.setdefault("importedSessionHashes", [])
+        if clean not in hashes:
+            hashes.append(clean)
+            self._save_state()
+        return {"ok": True, "digest": clean}
+
     def commit_session_import(self, raw_text: str, *, format_hint: str = "json") -> dict[str, Any]:
         preview = self.preview_session_import(raw_text, format_hint=format_hint)
         if not preview.get("ok"):
             return preview
         if preview.get("duplicate"):
             return {"ok": False, "duplicate": True, "error": "This session export was already imported."}
-        self._state.setdefault("importedSessionHashes", []).append(preview["digest"])
-        self._save_state()
-        return {"ok": True, "imported": preview["sessionCount"], "messages": preview["messageCount"], "sessions": preview["sessions"]}
+        self.confirm_session_import(str(preview["digest"]))
+        return {"ok": True, "digest": preview["digest"], "imported": preview["sessionCount"], "messages": preview["messageCount"], "sessions": preview["sessions"]}

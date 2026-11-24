@@ -70,7 +70,18 @@ export function registerRoutinesIpc(deps: RoutinesIpcDeps): void {
   );
   registrar.registerHandler(
     CHANNELS.routinesCreate,
-    (_event, input: { skillId: string; name: string; localTime: string; timezone: string; inputValues?: unknown }): RoutineRecord => {
+    (_event, input: {
+      skillId: string;
+      name: string;
+      localTime: string;
+      timezone: string;
+      scheduleKind?: import('../../shared/types').RoutineScheduleKind;
+      cronExpression?: string;
+      intervalMs?: number;
+      runAt?: number;
+      missedRunPolicy?: import('../../shared/types').MissedRunPolicy;
+      inputValues?: unknown;
+    }): RoutineRecord => {
       if (!input || typeof input !== 'object' || typeof input.skillId !== 'string' ||
           typeof input.name !== 'string' || typeof input.localTime !== 'string' || typeof input.timezone !== 'string') {
         throw new Error('Routine settings are required.');
@@ -80,6 +91,15 @@ export function registerRoutinesIpc(deps: RoutinesIpcDeps): void {
       const inputValues = normalizeSkillInputValues(skill.inputs, input.inputValues ?? {});
       buildRoutineToolPlan(skill, 'routine-validation', toolRegistry, inputValues);
       return routineStore.toSummary(routineStore.create({ ...input, inputValues, projectId: projectId() })) as RoutineRecord;
+    },
+  );
+  registrar.registerHandler(
+    CHANNELS.routinesUpdate,
+    (_event, routineId: string, patch: Record<string, unknown>): RoutineRecord | null => {
+      const routine = routineStore.get(routineId);
+      if (!routine || routine.projectId !== projectId()) return null;
+      const updated = routineStore.update(routineId, (patch && typeof patch === 'object' ? patch : {}) as Parameters<RoutineStore['update']>[1]);
+      return updated ? (routineStore.toSummary(updated) as RoutineRecord) : null;
     },
   );
   registrar.registerHandler(CHANNELS.routinesSetEnabled, (_event, routineId: string, enabled: boolean): boolean => {
@@ -106,5 +126,9 @@ export function registerRoutinesIpc(deps: RoutinesIpcDeps): void {
   registrar.registerHandler(CHANNELS.routinesRetry, (_event, routineId: string): boolean => {
     const routine = routineStore.get(routineId);
     return routine?.projectId === projectId() && routines.retry(routineId);
+  });
+  registrar.registerHandler(CHANNELS.routinesRunNow, (_event, routineId: string): boolean => {
+    const routine = routineStore.get(routineId);
+    return routine?.projectId === projectId() && routines.runNow(routineId);
   });
 }

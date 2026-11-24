@@ -78,6 +78,14 @@ import { FileTools, FILE_TOOL_DEFINITIONS } from './files/toolset';
 import { GitTools, GIT_TOOL_DEFINITIONS } from './git/toolset';
 import { PythonWorker } from './services/python-worker';
 import { PythonAgentBridge } from './services/pythonAgentBridge';
+import {
+  DEFAULT_ACTIVE_PROFILE,
+  commitSessionImportSafely,
+  normalizeProfileState,
+  resolveProfileContext,
+  validateArtifactPath,
+  type ActiveProfileState,
+} from './services/stage9Helpers';
 import type { NativeHelper } from './services/nativeHelper';
 import { VoiceService, validateDiagnosticVoiceWav } from './voice/voice';
 import type { RecognitionResult } from './voice/voice';
@@ -234,7 +242,11 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     onLog: (line) => boot.info(line),
   });
   const documentIndex = new DocumentIndex(database, pythonWorker);
-  const projectId = (): string => memoryStore.getActiveProject();
+  let activeProfileState: ActiveProfileState = { ...DEFAULT_ACTIVE_PROFILE };
+  const projectId = (): string =>
+    activeProfileState.id !== 'default'
+      ? memoryStore.ensureProject(`profile:${activeProfileState.id}`)
+      : memoryStore.getActiveProject();
   const history = new HistoryStore(new FileStorage(join(app.getPath('userData'), 'history')));
   const sessionConversations = new Map<string, ConversationRecord>();
   const streamConversations = new Map<string, PendingConversationStream>();
@@ -514,13 +526,17 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const buildTurnMemoryAndSkills = (request: ChatRequest): string => {
     const convId = request.conversationId ?? activeConversationId ?? 'ephemeral';
+    const profileCtx = resolveProfileContext(activeProfileState, {
+      provider: settings.get().provider.provider,
+      model: settings.get().provider.primaryModel,
+    });
     const mem = memorySnapshots.buildTurnContext({
       conversationId: convId,
       projectId: projectId(),
       text: request.text,
     }).text;
     const skillIndex = proceduralSkillStore.buildSkillIndexPrompt(projectId());
-    return [mem, skillIndex].filter(Boolean).join('\n\n');
+    return [profileCtx.instructionsPrompt, mem, skillIndex].filter(Boolean).join('\n\n');
   };
 
   const readGoogleCalendarToken = (): OAuthTokenRecord | null => {
@@ -745,6 +761,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     getPythonBridge: () => pythonAgentBridge,
     getImageGenApiKey: (prov) => settings.getProviderApiKey(prov === 'openai' ? 'openai' : 'fal'),
     imageArtifactDir: join(app.getPath('userData'), 'artifacts', 'images'),
+    onArtifactCreated: (artifact) => {
+      void pythonAgentBridge.artifactsRegister({
+        ...artifact,
+        projectId: projectId(),
+        profileId: activeProfileState.id,
+        sessionId: activeConversationId ?? '',
+      }).catch(() => undefined);
+    },
     openPath: (path) => shell.openPath(path),
     trashPath: (path) => shell.trashItem(path),
     browser,
@@ -1545,10 +1569,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       audit.record('system', 'Ignored renderer-supplied mode', 'denied', `${String(request.mode)} -> ${current.companion.mode}`);
     }
 
+    const profileCtx = resolveProfileContext(activeProfileState, {
+      provider: current.provider.provider,
+      model: current.provider.primaryModel,
+    });
     const runOptions = {
       requestId,
       request: trustedRequest,
-      model: current.provider.primaryModel,
+      model: profileCtx.model,
       thinking: current.provider.thinking ?? DEFAULT_THINKING,
       temperature: current.provider.temperature,
       maxTokens: current.provider.maxTokens,
@@ -1833,7 +1861,12 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------- tasks ----------------------------- */
 
-  registerHandler(CHANNELS.tasksList, (): ReturnType<TaskManager['list']> => tasks.list());
+  registerHandler(CHANNELS.tasksList, (): ReturnType<TaskManager['list']> => {
+    const all = tasks.list();
+    if (activeProfileState.id === 'default') return all;
+    const activeProj = projectId();
+    return all.filter((t) => t.projectId === activeProj);
+  });
   registerHandler(CHANNELS.tasksPause, (_event, taskId: string): void => tasks.pause(taskId));
   registerHandler(CHANNELS.tasksResume, (_event, taskId: string): void => tasks.resume(taskId));
   registerHandler(CHANNELS.tasksCancel, (_event, taskId: string): void => tasks.cancel(taskId));
@@ -2291,11 +2324,20 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     pythonAgentBridge.gatewayWebhookHistory(typeof limit === 'number' ? limit : 50),
   );
 
+  const syncActiveProfileFromList = (res: { activeProfileId?: string; profiles?: Array<Record<string, unknown>> }): void => {
+    const activeId = typeof res.activeProfileId === 'string' ? res.activeProfileId : 'default';
+    const match = Array.isArray(res.profiles) ? res.profiles.find((p) => String(p.id) === activeId) : undefined;
+    activeProfileState = normalizeProfileState(match ?? { id: activeId });
+  };
+  void pythonAgentBridge.profilesList().then(syncActiveProfileFromList).catch(() => undefined);
+
   registerHandler(CHANNELS.profilesList, async () => {
     try {
-      return await pythonAgentBridge.profilesList();
+      const res = await pythonAgentBridge.profilesList();
+      syncActiveProfileFromList(res);
+      return res;
     } catch {
-      return { ok: true, activeProfileId: 'default', profiles: [] };
+      return { ok: true, activeProfileId: activeProfileState.id, profiles: [] };
     }
   });
 
@@ -2303,39 +2345,103 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     pythonAgentBridge.profilesCreate(input ?? { name: '' }),
   );
 
-  registerHandler(CHANNELS.profilesSwitch, async (_event, profileId: string) =>
-    pythonAgentBridge.profilesSwitch(typeof profileId === 'string' ? profileId : 'default'),
-  );
+  registerHandler(CHANNELS.profilesSwitch, async (_event, profileId: string) => {
+    const res = await pythonAgentBridge.profilesSwitch(typeof profileId === 'string' ? profileId : 'default');
+    if (res.ok) {
+      activeProfileState = normalizeProfileState(res.profile as Record<string, unknown> | undefined);
+      activeConversationId = history.list({ limit: 1, projectId: projectId() })[0]?.id ?? null;
+      context.sendToRenderer(CHANNELS.profilesChanged, {
+        activeProfileId: activeProfileState.id,
+        profile: res.profile,
+      });
+    }
+    return res;
+  });
 
-  registerHandler(CHANNELS.profilesUpdate, async (_event, profileId: string, patch: Record<string, unknown>) =>
-    pythonAgentBridge.profilesUpdate(typeof profileId === 'string' ? profileId : 'default', patch && typeof patch === 'object' ? patch : {}),
-  );
+  registerHandler(CHANNELS.profilesUpdate, async (_event, profileId: string, patch: Record<string, unknown>) => {
+    const res = await pythonAgentBridge.profilesUpdate(typeof profileId === 'string' ? profileId : 'default', patch && typeof patch === 'object' ? patch : {});
+    if (res.ok && String(profileId) === activeProfileState.id) {
+      activeProfileState = normalizeProfileState(res.profile as Record<string, unknown> | undefined);
+      context.sendToRenderer(CHANNELS.profilesChanged, {
+        activeProfileId: activeProfileState.id,
+        profile: res.profile,
+      });
+    }
+    return res;
+  });
 
-  registerHandler(CHANNELS.profilesDelete, async (_event, profileId: string) =>
-    pythonAgentBridge.profilesDelete(typeof profileId === 'string' ? profileId : ''),
-  );
+  registerHandler(CHANNELS.profilesDelete, async (_event, profileId: string) => {
+    const res = await pythonAgentBridge.profilesDelete(typeof profileId === 'string' ? profileId : '');
+    if (res.ok) {
+      const listed = await pythonAgentBridge.profilesList().catch(() => ({ ok: true, activeProfileId: 'default', profiles: [] }));
+      syncActiveProfileFromList(listed);
+      activeConversationId = history.list({ limit: 1, projectId: projectId() })[0]?.id ?? null;
+      context.sendToRenderer(CHANNELS.profilesChanged, { activeProfileId: activeProfileState.id });
+    }
+    return res;
+  });
 
   registerHandler(CHANNELS.artifactsList, async (_event, input?: { profileId?: string; projectId?: string; kind?: string; query?: string }) => {
     try {
-      return await pythonAgentBridge.artifactsList(input ?? {});
+      return await pythonAgentBridge.artifactsList({
+        profileId: activeProfileState.id,
+        projectId: input?.projectId ?? projectId(),
+        kind: input?.kind,
+        query: input?.query,
+      });
     } catch {
       return [];
     }
   });
 
   registerHandler(CHANNELS.artifactsRegister, async (_event, input: Record<string, unknown>) =>
-    pythonAgentBridge.artifactsRegister(input && typeof input === 'object' ? input : {}),
+    pythonAgentBridge.artifactsRegister({
+      ...(input && typeof input === 'object' ? input : {}),
+      profileId: activeProfileState.id,
+      projectId: typeof input?.projectId === 'string' && input.projectId ? input.projectId : projectId(),
+    }),
   );
 
   registerHandler(CHANNELS.artifactsDelete, async (_event, artifactId: string) =>
     pythonAgentBridge.artifactsDelete(typeof artifactId === 'string' ? artifactId : ''),
   );
 
+  const resolveAuthorizedArtifactPath = async (artifactId: string): Promise<{ ok: true; resolvedPath: string } | { ok: false; error: string }> => {
+    const list = await pythonAgentBridge.artifactsList({ profileId: activeProfileState.id }).catch(() => []);
+    const item = list.find((a) => String(a.id) === artifactId);
+    if (!item) return { ok: false, error: 'Artifact not found in the active profile.' };
+    const filePath = typeof item.filePath === 'string' ? item.filePath : '';
+    const allowedRoots = [
+      app.getPath('userData'),
+      app.getPath('documents'),
+      app.getPath('desktop'),
+      app.getPath('downloads'),
+      process.cwd(),
+    ];
+    return validateArtifactPath(filePath, allowedRoots);
+  };
+
+  registerHandler(CHANNELS.artifactsOpen, async (_event, artifactId: string) => {
+    const check = await resolveAuthorizedArtifactPath(typeof artifactId === 'string' ? artifactId : '');
+    if (!check.ok) return check;
+    const err = await shell.openPath(check.resolvedPath);
+    return err ? { ok: false, error: err } : { ok: true };
+  });
+
+  registerHandler(CHANNELS.artifactsReveal, async (_event, artifactId: string) => {
+    const check = await resolveAuthorizedArtifactPath(typeof artifactId === 'string' ? artifactId : '');
+    if (!check.ok) return check;
+    shell.showItemInFolder(check.resolvedPath);
+    return { ok: true };
+  });
+
   registerHandler(CHANNELS.starmapBuild, async () => {
     const activeProject = projectId();
     const memories = memoryStore.list({ projectId: activeProject, limit: 100 }).map((m) => ({
       id: m.id,
       content: m.content,
+      kind: m.kind,
+      tags: Array.isArray(m.tags) ? m.tags : [],
       projectId: activeProject,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
@@ -2359,6 +2465,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       memories,
       skills,
       sessions,
+      profileId: activeProfileState.id,
       projectId: activeProject,
     });
   });
@@ -2367,23 +2474,16 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     pythonAgentBridge.sessionImportPreview(typeof rawText === 'string' ? rawText : '', typeof format === 'string' ? format : 'json'),
   );
 
-  registerHandler(CHANNELS.sessionImportCommit, async (_event, rawText: string, format = 'json') => {
-    const res = await pythonAgentBridge.sessionImportCommit(typeof rawText === 'string' ? rawText : '', typeof format === 'string' ? format : 'json');
-    if (res.ok && Array.isArray(res.sessions)) {
-      for (const s of res.sessions as Array<{ title?: string; messages?: Array<{ role?: string; content?: string }> }>) {
-        const conv = HistoryStore.newConversation(s.title || 'Imported session');
-        conv.projectId = projectId();
-        conv.messages = (Array.isArray(s.messages) ? s.messages : []).map((m, idx) => ({
-          id: `imp-${Date.now()}-${idx}`,
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: String(m.content ?? ''),
-          createdAt: Date.now() + idx,
-        }));
-        history.save(conv);
-      }
-    }
-    return res;
-  });
+  registerHandler(CHANNELS.sessionImportCommit, async (_event, rawText: string, format = 'json') =>
+    commitSessionImportSafely({
+      rawText: typeof rawText === 'string' ? rawText : '',
+      format: typeof format === 'string' ? format : 'json',
+      projectId: projectId(),
+      history,
+      preview: (txt, fmt) => pythonAgentBridge.sessionImportPreview(txt, fmt),
+      confirm: (digest) => pythonAgentBridge.sessionImportConfirm(digest),
+    }),
+  );
 
   registerHandler(CHANNELS.browserSessions, () => browserManager.list());
 

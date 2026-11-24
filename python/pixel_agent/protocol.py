@@ -77,18 +77,36 @@ class PixelAgentProtocolServer:
             effective_tools = pm.filter_tools(self._gateway_tools, explicit_allowlist=explicit_allowlist)
             msg_obj = turn_input.get("message") if isinstance(turn_input.get("message"), dict) else {}
             user_text = str(msg_obj.get("text") or "").strip()
+            active_profile = self._workspace_services().get_active_profile()
+            profile_instructions = str(active_profile.get("instructions") or "").strip()
+            system_parts = [
+                f"You are Pixel answering an authorized remote request for project '{project_id}' (profile '{active_profile.get('name', 'Default')}')."
+            ]
+            if profile_instructions:
+                system_parts.append(f"Active profile instructions:\n{profile_instructions}")
             messages = [
-                {
-                    "role": "system",
-                    "content": f"You are Pixel answering an authorized remote request for project '{project_id}'.",
-                },
+                {"role": "system", "content": "\n\n".join(system_parts)},
                 {"role": "user", "content": user_text},
             ]
+            effective_provider_config = self._gateway_provider_config
+            prov_override = str(active_profile.get("providerOverride") or "").strip()
+            model_override = str(active_profile.get("modelOverride") or "").strip()
+            if prov_override or model_override:
+                effective_provider_config = ProviderConfig(
+                    provider=prov_override or self._gateway_provider_config.provider,
+                    model=model_override or self._gateway_provider_config.model,
+                    base_url=self._gateway_provider_config.base_url,
+                    api_key=self._gateway_provider_config.api_key,
+                    temperature=self._gateway_provider_config.temperature,
+                    max_tokens=self._gateway_provider_config.max_tokens,
+                    timeout_ms=self._gateway_provider_config.timeout_ms,
+                    thinking=self._gateway_provider_config.thinking,
+                )
             result = run_agent_turn(
                 request_id=req_id,
                 messages=messages,
                 tools=effective_tools,
-                provider_config=self._gateway_provider_config,
+                provider_config=effective_provider_config,
                 budget=IterationBudget(max_iterations=6, max_tool_calls=12),
                 cancel_event=cancel_ev,
                 emit=self.send,
@@ -769,6 +787,11 @@ class PixelAgentProtocolServer:
                 str(params.get("rawText") or ""),
                 format_hint=str(params.get("format") or "json"),
             )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "session_import.confirm":
+            res = self._workspace_services().confirm_session_import(str(params.get("digest") or ""))
             self.send({"id": req_id, "ok": True, "result": res})
             return True
 

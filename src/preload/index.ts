@@ -250,8 +250,20 @@ const bridge: CypsBridge = {
 
   routines: {
     list: () => ipcRenderer.invoke(CH.routinesList) as Promise<RoutineRecord[]>,
-    create: (input: { skillId: string; name: string; localTime: string; timezone: string; inputValues: Record<string, string> }) =>
-      ipcRenderer.invoke(CH.routinesCreate, input) as Promise<RoutineRecord>,
+    create: (input: {
+      skillId: string;
+      name: string;
+      localTime: string;
+      timezone: string;
+      scheduleKind?: import('../shared/types').RoutineScheduleKind;
+      cronExpression?: string;
+      intervalMs?: number;
+      runAt?: number;
+      missedRunPolicy?: import('../shared/types').MissedRunPolicy;
+      inputValues: Record<string, string>;
+    }) => ipcRenderer.invoke(CH.routinesCreate, input) as Promise<RoutineRecord>,
+    update: (routineId: string, patch: Record<string, unknown>) =>
+      ipcRenderer.invoke(CH.routinesUpdate, routineId, patch) as Promise<RoutineRecord | null>,
     setEnabled: (routineId: string, enabled: boolean) =>
       ipcRenderer.invoke(CH.routinesSetEnabled, routineId, enabled) as Promise<boolean>,
     delete: (routineId: string) => ipcRenderer.invoke(CH.routinesDelete, routineId) as Promise<boolean>,
@@ -259,6 +271,7 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.routinesHistory, routineId, limit) as Promise<RoutineRunRecord[]>,
     cancel: (routineId: string) => ipcRenderer.invoke(CH.routinesCancel, routineId) as Promise<boolean>,
     retry: (routineId: string) => ipcRenderer.invoke(CH.routinesRetry, routineId) as Promise<boolean>,
+    runNow: (routineId: string) => ipcRenderer.invoke(CH.routinesRunNow, routineId) as Promise<boolean>,
   },
 
   memory: {
@@ -388,6 +401,8 @@ const bridge: CypsBridge = {
     switch: (profileId: string) => ipcRenderer.invoke(CH.profilesSwitch, profileId),
     update: (profileId: string, patch: Record<string, unknown>) => ipcRenderer.invoke(CH.profilesUpdate, profileId, patch),
     delete: (profileId: string) => ipcRenderer.invoke(CH.profilesDelete, profileId),
+    onChanged: (handler: (payload: { activeProfileId: string; profile?: Record<string, unknown> }) => void) =>
+      subscribe(CH.profilesChanged, handler),
   },
 
   artifacts: {
@@ -395,6 +410,8 @@ const bridge: CypsBridge = {
       ipcRenderer.invoke(CH.artifactsList, input),
     register: (input: Record<string, unknown>) => ipcRenderer.invoke(CH.artifactsRegister, input),
     delete: (artifactId: string) => ipcRenderer.invoke(CH.artifactsDelete, artifactId),
+    open: (artifactId: string) => ipcRenderer.invoke(CH.artifactsOpen, artifactId),
+    reveal: (artifactId: string) => ipcRenderer.invoke(CH.artifactsReveal, artifactId),
   },
 
   starmap: {

@@ -69,11 +69,14 @@ class Stage8ClosureTests(unittest.TestCase):
     def test_platform_inventory_honest_support_levels(self) -> None:
         self.assertEqual(len(PLATFORM_INVENTORY), 26)
         full = [p["id"] for p in PLATFORM_INVENTORY if p.get("supportLevel") == "full_adapter"]
-        self.assertCountEqual(full, ["telegram", "discord", "slack", "whatsapp_cloud", "matrix", "email"])
+        self.assertCountEqual(full, ["telegram", "discord", "slack", "whatsapp_cloud", "matrix"])
+        email_entry = next(p for p in PLATFORM_INVENTORY if p["id"] == "email")
+        self.assertEqual(email_entry.get("supportLevel"), "outbound_only")
+        self.assertFalse(email_entry.get("supportsPolling"))
         for entry in PLATFORM_INVENTORY:
             self.assertIn(
                 entry.get("supportLevel"),
-                {"full_adapter", "outbound_webhook", "external_dep_required"},
+                {"full_adapter", "outbound_only", "outbound_webhook", "external_dep_required"},
             )
 
     def test_email_adapter_validation(self) -> None:
@@ -395,6 +398,17 @@ class Stage9WorkspaceServicesTests(unittest.TestCase):
             j_commit = svc.commit_session_import(json_raw, format_hint="json")
             self.assertTrue(j_commit["ok"])
             self.assertEqual(j_commit["imported"], 1)
+
+            # 2-phase safe commit: preview never persists digest until confirm_session_import is called
+            md2 = "User: Deferred?\n\nAssistant: Confirmed only after persistence.\n"
+            p1 = svc.preview_session_import(md2, format_hint="markdown")
+            self.assertTrue(p1["ok"])
+            self.assertFalse(p1["duplicate"])
+            p2 = svc.preview_session_import(md2, format_hint="markdown")
+            self.assertFalse(p2["duplicate"])
+            svc.confirm_session_import(str(p1["digest"]))
+            p3 = svc.preview_session_import(md2, format_hint="markdown")
+            self.assertTrue(p3["duplicate"])
 
 
 if __name__ == "__main__":

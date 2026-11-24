@@ -438,7 +438,14 @@ export function Workspace(): React.JSX.Element {
     };
     load();
     const unsubscribe = safeSubscribe(api.onProjectChanged, load);
-    return () => { alive = false; unsubscribe(); };
+    const unsubProfile = bridge.bridge.profiles?.onChanged
+      ? safeSubscribe(bridge.bridge.profiles.onChanged, () => {
+          load();
+          void bridge.bridge.history.list({ limit: 50 }).then((items) => { if (alive) setHistory(items); }).catch(() => undefined);
+          void bridge.bridge.tasks.list().then((items) => { if (alive) setTasks(items); }).catch(() => undefined);
+        })
+      : () => undefined;
+    return () => { alive = false; unsubscribe(); unsubProfile(); };
   }, [bridge]);
 
   useEffect(() => {

@@ -1319,11 +1319,18 @@ export interface RoutineRecord {
   name: string;
   localTime: string;
   timezone: string;
+  scheduleKind?: RoutineScheduleKind;
+  cronExpression?: string;
+  intervalMs?: number;
+  runAt?: number;
+  lastRunAt?: number | null;
+  nextRunAt?: number | null;
+  lastStatus?: string | null;
   enabled: boolean;
   /** Names only; saved values stay in the main process. */
   inputNames: string[];
   retryPolicy: 'manual';
-  missedRunPolicy: 'skip';
+  missedRunPolicy: MissedRunPolicy;
   createdAt: number;
   updatedAt: number;
 }
@@ -1718,12 +1725,33 @@ export interface CypsBridge {
   };
   routines: {
     list(): Promise<RoutineRecord[]>;
-    create(input: { skillId: string; name: string; localTime: string; timezone: string; inputValues: Record<string, string> }): Promise<RoutineRecord>;
+    create(input: {
+      skillId: string;
+      name: string;
+      localTime: string;
+      timezone: string;
+      scheduleKind?: RoutineScheduleKind;
+      cronExpression?: string;
+      intervalMs?: number;
+      runAt?: number;
+      missedRunPolicy?: MissedRunPolicy;
+      inputValues: Record<string, string>;
+    }): Promise<RoutineRecord>;
+    update?(routineId: string, patch: {
+      name?: string;
+      localTime?: string;
+      timezone?: string;
+      scheduleKind?: RoutineScheduleKind;
+      cronExpression?: string;
+      intervalMs?: number;
+      missedRunPolicy?: MissedRunPolicy;
+    }): Promise<RoutineRecord | null>;
     setEnabled(routineId: string, enabled: boolean): Promise<boolean>;
     delete(routineId: string): Promise<boolean>;
     history(routineId: string, limit?: number): Promise<RoutineRunRecord[]>;
     cancel(routineId: string): Promise<boolean>;
     retry(routineId: string): Promise<boolean>;
+    runNow?(routineId: string): Promise<boolean>;
   };
   memory: {
     list(): Promise<MemoryRecordView[]>;
@@ -1822,11 +1850,14 @@ export interface CypsBridge {
     switch(profileId: string): Promise<Record<string, unknown>>;
     update(profileId: string, patch: Record<string, unknown>): Promise<Record<string, unknown>>;
     delete(profileId: string): Promise<Record<string, unknown>>;
+    onChanged?(handler: (payload: { activeProfileId: string; profile?: Record<string, unknown> }) => void): () => void;
   };
   artifacts?: {
     list(input?: { profileId?: string; projectId?: string; kind?: string; query?: string }): Promise<Array<Record<string, unknown>>>;
     register(input: Record<string, unknown>): Promise<Record<string, unknown>>;
     delete(artifactId: string): Promise<Record<string, unknown>>;
+    open?(artifactId: string): Promise<{ ok: boolean; error?: string }>;
+    reveal?(artifactId: string): Promise<{ ok: boolean; error?: string }>;
   };
   starmap?: {
     build(): Promise<Record<string, unknown>>;

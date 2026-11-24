@@ -86,7 +86,7 @@ PLATFORM_INVENTORY: tuple[dict[str, Any], ...] = (
     {"id": "slack", "name": "Slack", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
     {"id": "whatsapp_cloud", "name": "WhatsApp Cloud", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4096, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
     {"id": "matrix", "name": "Matrix", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 8000, "auth": "access_token", "supportsPolling": True, "supportsAttachments": True},
-    {"id": "email", "name": "Email (SMTP/IMAP)", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 32000, "auth": "credentials", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "email", "name": "Email (SMTP Outbound)", "tier": "primary", "supportLevel": "outbound_only", "maxChars": 32000, "auth": "credentials", "supportsPolling": False, "supportsAttachments": False},
     {"id": "teams", "name": "Microsoft Teams", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "webhook_or_bot", "supportsPolling": False, "supportsAttachments": True},
     {"id": "google_chat", "name": "Google Chat", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "webhook_or_oauth", "supportsPolling": False, "supportsAttachments": False},
     {"id": "mattermost", "name": "Mattermost", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},

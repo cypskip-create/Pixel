@@ -744,6 +744,10 @@ export class PythonAgentBridge {
     return this.request('session_import.commit', { rawText, format });
   }
 
+  sessionImportConfirm(digest: string): Promise<Record<string, unknown>> {
+    return this.request('session_import.confirm', { digest });
+  }
+
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {
     const child = this.ensureStarted();
     return new Promise<PythonTurnCompleteResult>((resolve) => {

@@ -215,6 +215,64 @@ export class RoutineStore {
     ]) === 1;
   }
 
+  update(
+    id: string,
+    patch: {
+      name?: string;
+      localTime?: string;
+      timezone?: string;
+      scheduleKind?: RoutineScheduleKind;
+      cronExpression?: string;
+      intervalMs?: number;
+      missedRunPolicy?: MissedRunPolicy;
+    },
+  ): LocalRoutine | null {
+    const current = this.get(id);
+    if (!current) return null;
+    const name = typeof patch.name === 'string' && patch.name.trim() ? patch.name.trim().slice(0, 100) : current.name;
+    const timezone = typeof patch.timezone === 'string' && patch.timezone.trim() ? patch.timezone.trim() : current.timezone;
+    validateTimezone(timezone);
+    const scheduleKind: RoutineScheduleKind = patch.scheduleKind ?? current.scheduleKind;
+    const localTime = typeof patch.localTime === 'string' && patch.localTime.trim() ? patch.localTime.trim() : current.localTime;
+    let cronExpression = patch.cronExpression !== undefined ? patch.cronExpression.trim() || undefined : current.cronExpression;
+    let intervalMs = patch.intervalMs !== undefined ? patch.intervalMs : current.intervalMs;
+
+    if (scheduleKind === 'daily') {
+      validateSchedule(localTime, timezone);
+    } else if (scheduleKind === 'cron' || scheduleKind === 'weekly') {
+      if (!cronExpression) throw new Error('A cron expression is required for cron/weekly schedules.');
+      cronExpression = parseCronExpression(cronExpression).expression;
+    } else if (scheduleKind === 'interval') {
+      if (typeof intervalMs !== 'number' || !Number.isFinite(intervalMs) || intervalMs < 60_000) {
+        throw new Error('Interval schedules must be at least 60,000 ms (1 minute).');
+      }
+      intervalMs = Math.floor(intervalMs);
+    }
+
+    const missedRunPolicy: MissedRunPolicy = patch.missedRunPolicy ?? current.missedRunPolicy;
+    const now = Date.now();
+    const updated: LocalRoutine = {
+      ...current,
+      name,
+      localTime,
+      timezone,
+      scheduleKind,
+      cronExpression,
+      intervalMs,
+      missedRunPolicy,
+      updatedAt: now,
+    };
+    const nextRunAt = computeNextRunAt(updated, now);
+    this.db.execute(
+      `UPDATE routines
+       SET name = ?, local_time = ?, timezone = ?, schedule_kind = ?, cron_expression = ?,
+           interval_ms = ?, missed_run_policy = ?, next_run_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [name, localTime, timezone, scheduleKind, cronExpression ?? null, intervalMs ?? null, missedRunPolicy, nextRunAt, now, id],
+    );
+    return this.get(id);
+  }
+
   delete(id: string): boolean {
     return this.db.execute('DELETE FROM routines WHERE id = ?', [id]) === 1;
   }
@@ -527,6 +585,19 @@ export class LocalRoutineScheduler {
     const routine = this.store.get(routineId);
     if (!routine) return false;
     const occurrence = `manual:${this.now()}:${randomUUID().slice(0, 8)}`;
+    const runId = this.store.claim(routine, occurrence, this.now());
+    if (!runId) return false;
+    this.queue.push({ runId, routine, occurrence, manual: true });
+    void this.drainQueue();
+    return true;
+  }
+
+  /** Run an existing routine immediately through the canonical lease/claim/queue pipeline. */
+  runNow(routineId: string): boolean {
+    if (this.stopped || !this.canRun()) return false;
+    const routine = this.store.get(routineId);
+    if (!routine) return false;
+    const occurrence = `runnow:${this.now()}:${randomUUID().slice(0, 8)}`;
     const runId = this.store.claim(routine, occurrence, this.now());
     if (!runId) return false;
     this.queue.push({ runId, routine, occurrence, manual: true });
