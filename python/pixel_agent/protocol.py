@@ -15,6 +15,7 @@ from .crash_log import install_panic_hook, record_crash
 from .errors import AgentError
 from .loop import run_agent_turn
 from .multimodal import annotate_som_png_base64, assert_vision_capable_model, generate_image_artifact
+from .plugin_manager import PluginManager
 from .providers import ProviderConfig
 from .voice import exchange_gpt_live_sdp_offer, synthesize_cloud, transcribe_cloud
 
@@ -39,6 +40,12 @@ class PixelAgentProtocolServer:
         self._active_turns: dict[str, threading.Event] = {}
         self._pending_tools: dict[str, _PendingToolWait] = {}
         self._shutting_down = False
+        self._plugins: Optional[PluginManager] = None
+
+    def _plugin_manager(self) -> PluginManager:
+        if self._plugins is None:
+            self._plugins = PluginManager()
+        return self._plugins
 
     def send(self, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, ensure_ascii=False) + "\n"
@@ -370,8 +377,116 @@ class PixelAgentProtocolServer:
             })
             return True
 
+        if msg_type == "plugins.list":
+            self.send({"id": req_id, "ok": True, "result": self._plugin_manager().list_plugins()})
+            return True
+
+        if msg_type == "plugins.discover":
+            res = self._plugin_manager().discover(str(params.get("searchDir") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.install":
+            res = self._plugin_manager().install(
+                str(params.get("sourceDir") or ""),
+                provenance=str(params.get("provenance") or "local"),
+                enable=bool(params.get("enable", False)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.enable":
+            res = self._plugin_manager().enable(str(params.get("pluginId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.disable":
+            res = self._plugin_manager().disable(str(params.get("pluginId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.update":
+            res = self._plugin_manager().update(
+                str(params.get("pluginId") or ""),
+                str(params.get("newSourceDir") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.uninstall":
+            res = self._plugin_manager().uninstall(str(params.get("pluginId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.configure":
+            res = self._plugin_manager().configure(
+                str(params.get("pluginId") or ""),
+                params.get("settings") if isinstance(params.get("settings"), dict) else {},
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.tools":
+            self.send({"id": req_id, "ok": True, "result": self._plugin_manager().list_tools()})
+            return True
+
+        if msg_type == "plugins.invoke_tool":
+            res = self._plugin_manager().invoke_tool(
+                str(params.get("name") or ""),
+                params.get("args") if isinstance(params.get("args"), dict) else {},
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.dispatch_hook":
+            res = self._plugin_manager().dispatch_hook(
+                str(params.get("event") or ""),
+                params.get("payload") if isinstance(params.get("payload"), dict) else {},
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "plugins.emergency_stop":
+            stopped = self._plugin_manager().emergency_stop() if self._plugins else 0
+            self.send({"id": req_id, "ok": True, "result": {"stopped": stopped}})
+            return True
+
+        if msg_type == "toolsets.list":
+            active = params.get("activeTools") if isinstance(params.get("activeTools"), list) else []
+            self.send({"id": req_id, "ok": True, "result": self._plugin_manager().list_toolsets([str(x) for x in active])})
+            return True
+
+        if msg_type == "toolsets.set_enabled":
+            res = self._plugin_manager().set_toolset_enabled(
+                str(params.get("toolsetId") or ""),
+                bool(params.get("enabled", True)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "skills.hub_list":
+            self.send({"id": req_id, "ok": True, "result": self._plugin_manager().skills_hub_list()})
+            return True
+
+        if msg_type == "skills.hub_install":
+            res = self._plugin_manager().skills_hub_install(
+                str(params.get("skillId") or ""),
+                markdown=params.get("markdown") if isinstance(params.get("markdown"), str) else None,
+                name=params.get("name") if isinstance(params.get("name"), str) else None,
+                description=params.get("description") if isinstance(params.get("description"), str) else None,
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "skills.hub_remove":
+            res = self._plugin_manager().skills_hub_remove(str(params.get("skillId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
         if msg_type == "shutdown":
             self._shutting_down = True
+            if self._plugins is not None:
+                self._plugins.emergency_stop()
             with self._state_lock:
                 for ev in self._active_turns.values():
                     ev.set()

@@ -740,6 +740,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     clipboard,
     terminal: terminalService,
     computerUse,
+    getPythonBridge: () => pythonAgentBridge,
     getImageGenApiKey: (prov) => settings.getProviderApiKey(prov === 'openai' ? 'openai' : 'fal'),
     imageArtifactDir: join(app.getPath('userData'), 'artifacts', 'images'),
     openPath: (path) => shell.openPath(path),
@@ -806,6 +807,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const pythonAgentBridge = new PythonAgentBridge({
     ownershipPath: join(app.getPath('userData'), 'runtime', 'python-agent-owner.json'),
     crashLogPath: join(app.getPath('userData'), 'logs', 'python-agent-crash.log'),
+    pluginDataDir: join(app.getPath('userData'), 'python-plugins'),
   });
 
   const pythonRunner = new PythonAgentRunner({
@@ -2087,6 +2089,109 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     terminalService.cancel(id, 'user');
     return terminalService.close(id, 'user');
   });
+
+  const registeredPythonPluginTools = new Set<string>();
+  const syncPythonPluginTools = async (): Promise<void> => {
+    try {
+      const activeTools = await pythonAgentBridge.pluginListTools();
+      const nextNames = new Set(activeTools.map((t) => t.name));
+      for (const oldName of [...registeredPythonPluginTools]) {
+        if (!nextNames.has(oldName)) {
+          toolRegistry.unregister(oldName);
+          permissions.revokeForTool(oldName);
+          registeredPythonPluginTools.delete(oldName);
+        }
+      }
+      for (const t of activeTools) {
+        if (!toolRegistry.get(t.name)) {
+          toolRegistry.register({
+            name: t.name,
+            description: t.description,
+            category: 'system',
+            risk: t.risk === 'low' || t.risk === 'high' ? t.risk : 'medium',
+            requiresApproval: t.changesState ? true : t.requiresApproval,
+            changesState: t.changesState,
+            parameters: t.parameters as { type: 'object'; properties: Record<string, unknown> },
+          });
+          registeredPythonPluginTools.add(t.name);
+        }
+      }
+    } catch {
+      // Non-fatal if Python bridge is not yet initialized.
+    }
+  };
+
+  registerHandler(CHANNELS.capabilitiesPluginsList, async () => {
+    try {
+      return await pythonAgentBridge.pluginList();
+    } catch {
+      return [];
+    }
+  });
+
+  registerHandler(CHANNELS.capabilitiesPluginInstall, async (_event, sourceDir: string, enable = true) => {
+    const res = await pythonAgentBridge.pluginInstall({
+      sourceDir: typeof sourceDir === 'string' ? sourceDir.trim() : '',
+      provenance: 'local',
+      enable: Boolean(enable),
+    });
+    if (res.ok) await syncPythonPluginTools();
+    return res;
+  });
+
+  registerHandler(CHANNELS.capabilitiesPluginEnable, async (_event, pluginId: string) => {
+    const res = await pythonAgentBridge.pluginEnable(typeof pluginId === 'string' ? pluginId : '');
+    if (res.ok) await syncPythonPluginTools();
+    return res;
+  });
+
+  registerHandler(CHANNELS.capabilitiesPluginDisable, async (_event, pluginId: string) => {
+    const res = await pythonAgentBridge.pluginDisable(typeof pluginId === 'string' ? pluginId : '');
+    if (res.ok) await syncPythonPluginTools();
+    return res;
+  });
+
+  registerHandler(CHANNELS.capabilitiesPluginUninstall, async (_event, pluginId: string) => {
+    const res = await pythonAgentBridge.pluginUninstall(typeof pluginId === 'string' ? pluginId : '');
+    if (res.ok) await syncPythonPluginTools();
+    return res;
+  });
+
+  registerHandler(CHANNELS.capabilitiesPluginConfigure, async (_event, pluginId: string, patch: Record<string, unknown>) =>
+    pythonAgentBridge.pluginConfigure(
+      typeof pluginId === 'string' ? pluginId : '',
+      patch && typeof patch === 'object' ? patch : {},
+    ),
+  );
+
+  registerHandler(CHANNELS.capabilitiesToolsetsList, async () => {
+    const activeNames = toolRegistry.list().map((t) => t.name);
+    try {
+      return await pythonAgentBridge.toolsetsList(activeNames);
+    } catch {
+      return [];
+    }
+  });
+
+  registerHandler(CHANNELS.capabilitiesToolsetsSetEnabled, async (_event, toolsetId: string, enabled: boolean) =>
+    pythonAgentBridge.toolsetsSetEnabled(typeof toolsetId === 'string' ? toolsetId : '', Boolean(enabled)),
+  );
+
+  registerHandler(CHANNELS.capabilitiesSkillsHubList, async () => {
+    try {
+      return await pythonAgentBridge.skillsHubList();
+    } catch {
+      return [];
+    }
+  });
+
+  registerHandler(CHANNELS.capabilitiesSkillsHubInstall, async (_event, skillId: string) =>
+    pythonAgentBridge.skillsHubInstall({ skillId: typeof skillId === 'string' ? skillId : '' }),
+  );
+
+  registerHandler(CHANNELS.capabilitiesSkillsHubRemove, async (_event, skillId: string) =>
+    pythonAgentBridge.skillsHubRemove(typeof skillId === 'string' ? skillId : ''),
+  );
 
   registerHandler(CHANNELS.browserSessions, () => browserManager.list());
 

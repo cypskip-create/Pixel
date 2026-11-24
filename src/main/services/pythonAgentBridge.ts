@@ -150,6 +150,7 @@ export class PythonAgentBridge {
   private readonly timeoutMs: number;
   private readonly ownershipPath: string | null;
   private readonly crashLogPath: string | null;
+  private readonly pluginDataDir: string | null;
   private readonly parentStartMarker = `${process.pid}:${Date.now()}`;
   private proc: ChildProcessWithoutNullStreams | null = null;
   private currentOwnership: PythonAgentOwnershipEntry | null = null;
@@ -164,12 +165,14 @@ export class PythonAgentBridge {
     timeoutMs?: number;
     ownershipPath?: string;
     crashLogPath?: string;
+    pluginDataDir?: string;
   } = {}) {
     this.pythonExecutable = options.pythonExecutable ?? process.env.PIXEL_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
     this.scriptPath = options.scriptPath ?? join(process.cwd(), 'python', 'agent_service.py');
     this.timeoutMs = options.timeoutMs ?? 8_000;
     this.ownershipPath = options.ownershipPath ?? null;
     this.crashLogPath = options.crashLogPath ?? null;
+    this.pluginDataDir = options.pluginDataDir ?? null;
   }
 
   getHealth(): { running: boolean; pid: number | null; instanceId: string | null; recentStderr: string[] } {
@@ -233,6 +236,7 @@ export class PythonAgentBridge {
 
     const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUTF8: '1' };
     if (this.crashLogPath) env.PIXEL_AGENT_CRASH_LOG = this.crashLogPath;
+    if (this.pluginDataDir) env.PIXEL_PLUGIN_DATA_DIR = this.pluginDataDir;
 
     const child = spawn(this.pythonExecutable, ['-u', this.scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -530,6 +534,90 @@ export class PythonAgentBridge {
     capabilities: Record<string, boolean>;
   }> {
     return this.request('runtime.diagnostics');
+  }
+
+  pluginList(): Promise<Array<Record<string, unknown>>> {
+    return this.request('plugins.list');
+  }
+
+  pluginDiscover(searchDir: string): Promise<{ ok: boolean; plugins: Array<Record<string, unknown>>; error?: string }> {
+    return this.request('plugins.discover', { searchDir });
+  }
+
+  pluginInstall(input: { sourceDir: string; provenance?: string; enable?: boolean }): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }> {
+    return this.request('plugins.install', input);
+  }
+
+  pluginEnable(pluginId: string): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }> {
+    return this.request('plugins.enable', { pluginId });
+  }
+
+  pluginDisable(pluginId: string): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }> {
+    return this.request('plugins.disable', { pluginId });
+  }
+
+  pluginUpdate(pluginId: string, newSourceDir: string): Promise<{ ok: boolean; rolledBack?: boolean; plugin?: Record<string, unknown>; error?: string }> {
+    return this.request('plugins.update', { pluginId, newSourceDir });
+  }
+
+  pluginUninstall(pluginId: string): Promise<{ ok: boolean; uninstalled?: string; error?: string }> {
+    return this.request('plugins.uninstall', { pluginId });
+  }
+
+  pluginConfigure(pluginId: string, settings: Record<string, unknown>): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }> {
+    return this.request('plugins.configure', { pluginId, settings });
+  }
+
+  pluginListTools(): Promise<Array<{
+    pluginId: string;
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    risk: 'low' | 'medium' | 'high';
+    requiresApproval: boolean;
+    changesState: boolean;
+  }>> {
+    return this.request('plugins.tools');
+  }
+
+  pluginInvokeTool(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; content: string; detail?: Record<string, unknown> }> {
+    return this.request('plugins.invoke_tool', { name, args });
+  }
+
+  pluginDispatchHook(event: string, payload: Record<string, unknown>): Promise<{ ok: boolean; event: string; dispatched: number; results: Array<Record<string, unknown>> }> {
+    return this.request('plugins.dispatch_hook', { event, payload });
+  }
+
+  pluginEmergencyStop(): Promise<{ stopped: number }> {
+    return this.request('plugins.emergency_stop');
+  }
+
+  toolsetsList(activeTools: string[] = []): Promise<Array<{
+    id: string;
+    name: string;
+    category: string;
+    description: string;
+    enabled: boolean;
+    toolCount: number;
+    tools: string[];
+  }>> {
+    return this.request('toolsets.list', { activeTools });
+  }
+
+  toolsetsSetEnabled(toolsetId: string, enabled: boolean): Promise<{ ok: boolean; toolsets?: Array<Record<string, unknown>>; error?: string }> {
+    return this.request('toolsets.set_enabled', { toolsetId, enabled });
+  }
+
+  skillsHubList(): Promise<Array<Record<string, unknown>>> {
+    return this.request('skills.hub_list');
+  }
+
+  skillsHubInstall(input: { skillId: string; markdown?: string; name?: string; description?: string }): Promise<{ ok: boolean; skill?: Record<string, unknown>; error?: string }> {
+    return this.request('skills.hub_install', input);
+  }
+
+  skillsHubRemove(skillId: string): Promise<{ ok: boolean; removed?: string; error?: string }> {
+    return this.request('skills.hub_remove', { skillId });
   }
 
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {

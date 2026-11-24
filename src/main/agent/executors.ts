@@ -44,6 +44,7 @@ import type { BoardFileFormat, PixelBoardService } from '../board/service';
 import { isBoardTool } from '../board/tools';
 import type { ProductivityTools } from '../productivity/toolset';
 import type { McpServerManager } from '../plugins/mcpManager';
+import type { PythonAgentBridge } from '../services/pythonAgentBridge';
 import type { GoogleCalendarClient } from '../plugins/googleCalendar';
 import {
   commentGitHubIssue,
@@ -184,6 +185,9 @@ export interface ExecutorDeps {
   getImageGenApiKey?: (provider: 'openai' | 'fal') => string | null;
   /** Directory where generated image artifacts are saved. */
   imageArtifactDir?: string;
+  /** Authoritative Python agent bridge for dynamic Stage 7 plugin tool execution. */
+  pythonBridge?: PythonAgentBridge;
+  getPythonBridge?: () => PythonAgentBridge;
 }
 
 export class ToolExecutors {
@@ -896,12 +900,23 @@ export class ToolExecutors {
             detail: { ...res },
           };
         }
-        default:
+        default: {
+          const pyBridge = this.deps.pythonBridge ?? this.deps.getPythonBridge?.();
+          if (name.startsWith('plugin_') && pyBridge) {
+            const pyTool = await pyBridge.pluginInvokeTool(name, args);
+            return {
+              ok: pyTool.ok,
+              content: pyTool.content,
+              ...(pyTool.detail ? { detail: pyTool.detail } : {}),
+              ...(!pyTool.ok ? { errorCode: 'FAILED' } : {}),
+            };
+          }
           return {
             ok: false,
             content: `Pixel has no implementation for the tool "${name}".`,
             errorCode: 'NOT_FOUND',
           };
+        }
       }
     } catch (error) {
       if (error instanceof NativeHelperError) {

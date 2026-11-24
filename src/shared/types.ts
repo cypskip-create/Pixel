@@ -1646,6 +1646,14 @@ export interface CypsBridge {
   };
   browser: {
     openSearch(query: string, requestText: string, conversationId: string): Promise<{ query: string; provider: SearchProvider }>;
+    sessions?(): Promise<Array<{
+      sessionId: string;
+      ownerId: string;
+      mode: string;
+      attachedViaCdp: boolean;
+      persistentProfileDir: string | null;
+      lastUsedAt: number;
+    }>>;
   };
   screen: {
     listDisplays(): Promise<DiagnosticsSnapshot['displays']>;
@@ -1779,6 +1787,19 @@ export interface CypsBridge {
     setProjects(id: string, allowedProjects: string[]): Promise<McpServerSummaryView>;
     remove(id: string): Promise<boolean>;
   };
+  capabilities?: {
+    pluginsList(): Promise<Array<Record<string, unknown>>>;
+    pluginInstall(sourceDir: string, enable?: boolean): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }>;
+    pluginEnable(pluginId: string): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }>;
+    pluginDisable(pluginId: string): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }>;
+    pluginUninstall(pluginId: string): Promise<{ ok: boolean; uninstalled?: string; error?: string }>;
+    pluginConfigure(pluginId: string, settings: Record<string, unknown>): Promise<{ ok: boolean; plugin?: Record<string, unknown>; error?: string }>;
+    toolsetsList(): Promise<Array<{ id: string; name: string; category: string; description: string; enabled: boolean; toolCount: number; tools: string[] }>>;
+    toolsetsSetEnabled(toolsetId: string, enabled: boolean): Promise<{ ok: boolean; toolsets?: Array<Record<string, unknown>>; error?: string }>;
+    skillsHubList(): Promise<Array<Record<string, unknown>>>;
+    skillsHubInstall(skillId: string): Promise<{ ok: boolean; skill?: Record<string, unknown>; error?: string }>;
+    skillsHubRemove(skillId: string): Promise<{ ok: boolean; removed?: string; error?: string }>;
+  };
   proceduralSkills?: {
     list(): Promise<ProceduralSkillView[]>;
     createDraft(markdown: string): Promise<ProceduralSkillView>;
@@ -1803,6 +1824,15 @@ export interface CypsBridge {
       };
       error?: string;
     }>;
+    openShell?(shell?: 'powershell' | 'cmd' | 'pwsh' | 'sh', cwd?: string, cols?: number, rows?: number): Promise<{
+      ok: boolean;
+      session?: { id: string; command: string; cwd: string; shell?: string; status: string; pid: number | null; output: string };
+      error?: string;
+    }>;
+    write?(sessionId: string, input: string): Promise<{ ok: boolean; error?: string }>;
+    resize?(sessionId: string, cols: number, rows: number): Promise<{ ok: boolean; cols?: number; rows?: number; error?: string }>;
+    read?(sessionId: string, offset?: number): Promise<{ ok: boolean; output?: string; nextOffset?: number; status?: string; error?: string }>;
+    close?(sessionId: string): Promise<boolean>;
     cancel(sessionId: string): Promise<boolean>;
     list(): Promise<Array<{
       id: string;

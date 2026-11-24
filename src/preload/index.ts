@@ -157,6 +157,14 @@ const bridge: CypsBridge = {
   browser: {
     openSearch: (query: string, requestText: string, conversationId: string) =>
       ipcRenderer.invoke(CH.browserOpenSearch, query, requestText, conversationId) as Promise<{ query: string; provider: import('../shared/types').SearchProvider }>,
+    sessions: () => ipcRenderer.invoke(CH.browserSessions) as Promise<Array<{
+      sessionId: string;
+      ownerId: string;
+      mode: string;
+      attachedViaCdp: boolean;
+      persistentProfileDir: string | null;
+      lastUsedAt: number;
+    }>>,
   },
 
   screen: {
@@ -335,6 +343,22 @@ const bridge: CypsBridge = {
     remove: (id: string) => ipcRenderer.invoke(CH.mcpServersRemove, id) as Promise<boolean>,
   },
 
+  capabilities: {
+    pluginsList: () => ipcRenderer.invoke(CH.capabilitiesPluginsList),
+    pluginInstall: (sourceDir: string, enable = true) => ipcRenderer.invoke(CH.capabilitiesPluginInstall, sourceDir, enable),
+    pluginEnable: (pluginId: string) => ipcRenderer.invoke(CH.capabilitiesPluginEnable, pluginId),
+    pluginDisable: (pluginId: string) => ipcRenderer.invoke(CH.capabilitiesPluginDisable, pluginId),
+    pluginUninstall: (pluginId: string) => ipcRenderer.invoke(CH.capabilitiesPluginUninstall, pluginId),
+    pluginConfigure: (pluginId: string, settings: Record<string, unknown>) =>
+      ipcRenderer.invoke(CH.capabilitiesPluginConfigure, pluginId, settings),
+    toolsetsList: () => ipcRenderer.invoke(CH.capabilitiesToolsetsList),
+    toolsetsSetEnabled: (toolsetId: string, enabled: boolean) =>
+      ipcRenderer.invoke(CH.capabilitiesToolsetsSetEnabled, toolsetId, enabled),
+    skillsHubList: () => ipcRenderer.invoke(CH.capabilitiesSkillsHubList),
+    skillsHubInstall: (skillId: string) => ipcRenderer.invoke(CH.capabilitiesSkillsHubInstall, skillId),
+    skillsHubRemove: (skillId: string) => ipcRenderer.invoke(CH.capabilitiesSkillsHubRemove, skillId),
+  },
+
   proceduralSkills: {
     list: () => ipcRenderer.invoke(CH.proceduralSkillsList) as Promise<import('../shared/types').ProceduralSkillView[]>,
     createDraft: (markdown: string) =>
@@ -350,6 +374,12 @@ const bridge: CypsBridge = {
 
   terminal: {
     run: (command: string, cwd?: string) => ipcRenderer.invoke(CH.terminalRun, command, cwd),
+    openShell: (shell?: 'powershell' | 'cmd' | 'pwsh' | 'sh', cwd?: string, cols?: number, rows?: number) =>
+      ipcRenderer.invoke(CH.terminalOpenShell, shell, cwd, cols, rows),
+    write: (sessionId: string, input: string) => ipcRenderer.invoke(CH.terminalWrite, sessionId, input),
+    resize: (sessionId: string, cols: number, rows: number) => ipcRenderer.invoke(CH.terminalResize, sessionId, cols, rows),
+    read: (sessionId: string, offset?: number) => ipcRenderer.invoke(CH.terminalRead, sessionId, offset),
+    close: (sessionId: string) => ipcRenderer.invoke(CH.terminalClose, sessionId) as Promise<boolean>,
     cancel: (sessionId: string) => ipcRenderer.invoke(CH.terminalCancel, sessionId) as Promise<boolean>,
     list: () => ipcRenderer.invoke(CH.terminalList),
     onOutput: (handler: (event: { sessionId: string; stream: 'stdout' | 'stderr'; chunk: string }) => void) =>
@@ -464,6 +494,23 @@ const shell = {
   onVoicePlaybackState: (handler: (speaking: boolean) => void): (() => void) =>
     subscribe(CH.voicePlaybackState, handler),
   voicePlaybackActive: () => ipcRenderer.invoke(CH.voicePlaybackGet) as Promise<boolean>,
+  voiceContinuousStart: () =>
+    ipcRenderer.invoke(CH.voiceContinuousStart) as Promise<{ ok: boolean; state: string; error?: string }>,
+  voiceContinuousStop: () =>
+    ipcRenderer.invoke(CH.voiceContinuousStop) as Promise<{ ok: boolean; state: string }>,
+  voiceContinuousFrame: (rms: number, speaking?: boolean) =>
+    ipcRenderer.invoke(CH.voiceContinuousFrame, rms, speaking) as Promise<{ state: string; event: string | null }>,
+  onVoiceContinuousState: (handler: (payload: { state: string; event?: string | null }) => void): (() => void) =>
+    subscribe(CH.voiceContinuousState, handler),
+  voiceGptLiveOffer: (sdpOffer: string) =>
+    ipcRenderer.invoke(CH.voiceGptLiveOffer, sdpOffer) as Promise<{
+      ok: boolean;
+      sdpAnswer?: string;
+      model?: string;
+      voice?: string;
+      instructions?: string;
+      error?: string;
+    }>,
 };
 
 contextBridge.exposeInMainWorld('cypsShell', shell);

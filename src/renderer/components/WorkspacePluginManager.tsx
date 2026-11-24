@@ -176,6 +176,7 @@ export function WorkspacePluginManager({ plugins, onChange }: WorkspacePluginMan
       {installed.length ? <div className="workspace-plugin-grid">{installed.map(renderPlugin)}</div> : <div className="workspace-empty-card">No plugins installed. Pixel’s built-in tools remain available.</div>}
     </section>
     <ConnectionsAndMcpSection />
+    <CapabilitiesHubSection />
   </section>;
 }
 
@@ -367,6 +368,222 @@ function ConnectionsAndMcpSection(): React.JSX.Element | null {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+type CapabilitiesTab = 'plugins' | 'skills' | 'toolsets';
+
+function CapabilitiesHubSection(): React.JSX.Element {
+  const capApi = typeof window !== 'undefined' ? window.cyps?.capabilities : undefined;
+  const [tab, setTab] = useState<CapabilitiesTab>('plugins');
+  const [search, setSearch] = useState('');
+  const [pyPlugins, setPyPlugins] = useState<Array<Record<string, unknown>>>([]);
+  const [toolsets, setToolsets] = useState<Array<{ id: string; name: string; category: string; description: string; enabled: boolean; toolCount: number; tools: string[] }>>([]);
+  const [skills, setSkills] = useState<Array<Record<string, unknown>>>([]);
+  const [installPath, setInstallPath] = useState('');
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reload = async (): Promise<void> => {
+    if (!capApi) return;
+    try {
+      const [p, t, s] = await Promise.all([
+        capApi.pluginsList(),
+        capApi.toolsetsList(),
+        capApi.skillsHubList(),
+      ]);
+      setPyPlugins(Array.isArray(p) ? p : []);
+      setToolsets(Array.isArray(t) ? t : []);
+      setSkills(Array.isArray(s) ? s : []);
+    } catch {
+      // Ignore initial load errors when Python bridge is unavailable.
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  if (!capApi) return <></>;
+
+  const q = search.trim().toLowerCase();
+  const filteredPlugins = pyPlugins.filter((p) => !q || String(p.name ?? p.id ?? '').toLowerCase().includes(q));
+  const filteredSkills = skills.filter((s) => !q || String(s.name ?? s.id ?? '').toLowerCase().includes(q));
+  const filteredToolsets = toolsets.filter((t) => !q || t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
+
+  const handleInstallLocal = async (): Promise<void> => {
+    if (!installPath.trim() || busy) return;
+    setBusy(true);
+    setStatusMsg(null);
+    try {
+      const res = await capApi.pluginInstall(installPath.trim(), true);
+      if (res.ok) {
+        setInstallPath('');
+        setStatusMsg('Installed and enabled Python plugin.');
+        await reload();
+      } else {
+        setStatusMsg(res.error ?? 'Could not install plugin.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section aria-label="Capabilities Hub" className="mt-6">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="workspace-section-title">Capabilities Hub (Python Plugins, Skills &amp; Toolsets)</h2>
+        <div className="flex items-center gap-1.5" role="tablist" aria-label="Capabilities sections">
+          {(['plugins', 'skills', 'toolsets'] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                tab === key
+                  ? 'border-[var(--color-accent)] bg-[var(--color-surface)] text-[var(--color-ink)]'
+                  : 'border-[var(--color-border)] text-[var(--color-ink-dim)]'
+              }`}
+            >
+              {key === 'plugins' ? 'Python Plugins' : key === 'skills' ? 'Skills Hub' : 'Toolsets'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          aria-label="Search capabilities"
+          placeholder="Search plugins, skills, or toolsets…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="min-w-[200px] flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[11.5px] text-[var(--color-ink)]"
+        />
+        {tab === 'plugins' ? (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              aria-label="Local Python plugin folder"
+              placeholder="C:\\path\\to\\my-plugin"
+              value={installPath}
+              onChange={(e) => setInstallPath(e.target.value)}
+              className="w-[220px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[11.5px] text-[var(--color-ink)]"
+            />
+            <button
+              type="button"
+              disabled={busy || !installPath.trim()}
+              onClick={() => void handleInstallLocal()}
+              className="rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--color-ink)]"
+            >
+              {busy ? 'Installing…' : 'Install Local Plugin'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {statusMsg ? <p className="mb-2 text-[11px] text-[var(--color-ink-dim)]" role="status">{statusMsg}</p> : null}
+
+      {tab === 'plugins' ? (
+        filteredPlugins.length === 0 ? (
+          <div className="workspace-empty-card">No third-party Python plugins installed yet. Provide a local plugin folder containing plugin.json or plugin.yaml above.</div>
+        ) : (
+          <div className="space-y-2">
+            {filteredPlugins.map((p) => {
+              const id = String(p.id ?? '');
+              const enabled = Boolean(p.enabled);
+              const tools = Array.isArray(p.tools) ? p.tools : [];
+              return (
+                <div key={id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[11.5px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <strong className="text-[var(--color-ink)]">{String(p.name ?? id)}</strong>{' '}
+                      <span className="text-[10.5px] text-[var(--color-ink-dim)]">
+                        v{String(p.version ?? '0.0.0')} · {String(p.provenance ?? 'local')} · {tools.length} tool(s)
+                      </span>
+                      <p className="mt-0.5 text-[11px] text-[var(--color-ink-dim)]">{String(p.description ?? '')}</p>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => void (enabled ? capApi.pluginDisable(id) : capApi.pluginEnable(id)).then(reload)}
+                        className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]"
+                      >
+                        {enabled ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void capApi.pluginUninstall(id).then(reload)}
+                        className="text-[var(--color-danger)] hover:underline"
+                      >
+                        Uninstall
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : null}
+
+      {tab === 'skills' ? (
+        <div className="space-y-2">
+          {filteredSkills.map((sk) => {
+            const id = String(sk.id ?? '');
+            const isInstalled = Boolean(sk.installed);
+            return (
+              <div key={id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[11.5px]">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <strong className="text-[var(--color-ink)]">{String(sk.name ?? id)}</strong>{' '}
+                    <span className="text-[10.5px] text-[var(--color-ink-dim)]">
+                      {String(sk.category ?? 'general')} · {String(sk.trust ?? 'local')}
+                    </span>
+                    <p className="mt-0.5 text-[11px] text-[var(--color-ink-dim)]">{String(sk.description ?? '')}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void (isInstalled ? capApi.skillsHubRemove(id) : capApi.skillsHubInstall(id)).then(reload)}
+                    className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-ink)]"
+                  >
+                    {isInstalled ? 'Remove' : 'Install'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {tab === 'toolsets' ? (
+        <div className="space-y-2">
+          {filteredToolsets.map((ts) => (
+            <div key={ts.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[11.5px]">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <strong className="text-[var(--color-ink)]">{ts.name}</strong>{' '}
+                  <span className="text-[10.5px] text-[var(--color-ink-dim)]">
+                    {ts.category} · {ts.toolCount} tool(s)
+                  </span>
+                  <p className="mt-0.5 text-[11px] text-[var(--color-ink-dim)]">{ts.description}</p>
+                </div>
+                <button
+                  type="button"
+                  aria-pressed={ts.enabled}
+                  onClick={() => void capApi.toolsetsSetEnabled(ts.id, !ts.enabled).then(reload)}
+                  className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-ink)]"
+                >
+                  {ts.enabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
