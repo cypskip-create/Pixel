@@ -818,6 +818,82 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <span className="w-8 text-right text-[10px] text-[var(--color-ink-dim)]">{settings.voice.ttsRate.toFixed(1)}×</span>
             </div>
           </Row>
+          <Row label="Voice conversation mode">
+            <select
+              aria-label="Voice conversation mode"
+              value={settings.voice.voiceChatMode ?? 'chained'}
+              onChange={(event) => onPatch({ voice: { voiceChatMode: event.target.value as 'chained' | 'gpt-live' } })}
+              className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="chained">Chained (STT → Agent → TTS)</option>
+              <option value="gpt-live">Full-duplex GPT-Live (OpenAI)</option>
+            </select>
+          </Row>
+          <Row label="STT provider">
+            <select
+              aria-label="STT provider"
+              value={settings.voice.sttProvider ?? 'local'}
+              onChange={(event) => onPatch({ voice: { sttProvider: event.target.value as AppSettings['voice']['sttProvider'] } })}
+              className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="local">Local only (Whisper / Windows)</option>
+              <option value="openai">OpenAI Whisper API</option>
+              <option value="mistral">Mistral Voxtral</option>
+              <option value="deepgram">Deepgram Nova-2</option>
+              <option value="custom">Custom OpenAI-compatible</option>
+            </select>
+          </Row>
+          <Row label="TTS provider">
+            <select
+              aria-label="TTS provider"
+              value={settings.voice.ttsProvider ?? 'system'}
+              onChange={(event) => onPatch({ voice: { ttsProvider: event.target.value as AppSettings['voice']['ttsProvider'] } })}
+              className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="system">Windows System.Speech (Local)</option>
+              <option value="kokoro">Kokoro Neural (Local)</option>
+              <option value="edge">Edge TTS</option>
+              <option value="openai">OpenAI TTS</option>
+              <option value="elevenlabs">ElevenLabs</option>
+              <option value="xai">xAI TTS</option>
+              <option value="gemini">Google Gemini TTS</option>
+              <option value="minimax">MiniMax TTS</option>
+              <option value="mistral">Mistral Voxtral TTS</option>
+            </select>
+          </Row>
+          <Row label="Transcription language">
+            <input
+              aria-label="Transcription language"
+              type="text"
+              value={settings.voice.sttLanguage ?? 'auto'}
+              onChange={(event) => onPatch({ voice: { sttLanguage: event.target.value } })}
+              placeholder="auto, en, es, fr…"
+              className="no-drag w-28 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink)]"
+            />
+          </Row>
+          <Row label="Transcript submit mode">
+            <select
+              aria-label="Transcript submit mode"
+              value={settings.voice.submitMode ?? 'direct'}
+              onChange={(event) => onPatch({ voice: { submitMode: event.target.value as 'direct' | 'draft' } })}
+              className="no-drag max-w-[205px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="direct">Direct submit</option>
+              <option value="draft">Editable draft</option>
+            </select>
+          </Row>
+          <Toggle
+            label="Barge-in interruption"
+            hint="Stop Pixel speaking immediately when you start talking (with echo-floor suppression)."
+            checked={settings.voice.bargeIn !== false}
+            onChange={(value) => onPatch({ voice: { bargeIn: value } })}
+          />
+          <Toggle
+            label="Recording & thinking audio cues"
+            hint="Play subtle start/stop chimes and ambient thinking feedback during voice sessions."
+            checked={settings.voice.beepEnabled !== false}
+            onChange={(value) => onPatch({ voice: { beepEnabled: value, thinkingSound: value } })}
+          />
           <div className="mx-1 flex items-center gap-2 pb-1">
             <button
               type="button"

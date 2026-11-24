@@ -984,6 +984,24 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'image_generate',
+    description: 'Generate an image artifact using a configured provider (OpenAI gpt-image-1 or FAL.ai Flux) and save the verified PNG file into Pixel artifacts.',
+    category: 'system',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', minLength: 1, maxLength: 2000 },
+        provider: { type: 'string', enum: ['openai', 'fal'] },
+        size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'] },
+      },
+      required: ['prompt'],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 export class ToolRegistry {

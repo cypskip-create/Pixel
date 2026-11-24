@@ -723,6 +723,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     clipboard,
     terminal: terminalService,
     computerUse,
+    getImageGenApiKey: (prov) => settings.getProviderApiKey(prov === 'openai' ? 'openai' : 'custom'),
+    imageArtifactDir: join(app.getPath('userData'), 'artifacts', 'images'),
     openPath: (path) => shell.openPath(path),
     trashPath: (path) => shell.trashItem(path),
     browser,

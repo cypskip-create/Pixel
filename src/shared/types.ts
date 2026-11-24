@@ -412,8 +412,11 @@ export type VisualMode = (typeof VISUAL_MODES)[number];
 export const ANIMATION_LEVELS = ['full', 'reduced', 'off'] as const;
 export type AnimationLevel = (typeof ANIMATION_LEVELS)[number];
 
-export type VoiceSttModel = 'tiny.en' | 'base.en' | 'small.en';
+export type VoiceSttModel = 'tiny.en' | 'base.en' | 'small.en' | 'tiny' | 'base' | 'small' | 'large-v3-turbo';
 export type VoiceSynthesisEngine = 'system' | 'kokoro';
+export type VoiceSttProvider = 'local' | 'openai' | 'mistral' | 'deepgram' | 'custom';
+export type VoiceTtsProvider = 'system' | 'kokoro' | 'edge' | 'openai' | 'elevenlabs' | 'xai' | 'gemini' | 'minimax' | 'mistral';
+export type VoiceChatMode = 'chained' | 'gpt-live';
 
 export interface VoiceModelInfo {
   id: VoiceSttModel | 'kokoro-v1.0-int8';
@@ -438,13 +441,51 @@ export interface VoiceSettings {
   pushToTalkAccelerator: string;
   /** Selected microphone device id, or null for system default. */
   inputDeviceId: string | null;
-  /** Local speech-to-text model size for faster-whisper. */
+  /** Local speech-to-text model size for faster-whisper (English & multilingual). */
   sttModel: VoiceSttModel;
-  /** Speak replies using local TTS. */
+  /** Speak replies using TTS. */
   ttsEnabled: boolean;
   ttsEngine: VoiceSynthesisEngine;
   ttsVoice: string | null;
   ttsRate: number;
+  /** Hermes Stage 6: chained (STT -> agent -> TTS) or full-duplex GPT-Live. */
+  voiceChatMode?: VoiceChatMode;
+  /** Speech-to-text provider (defaults to 'local'). */
+  sttProvider?: VoiceSttProvider;
+  /** ISO language code or 'auto' for multilingual transcription. */
+  sttLanguage?: string;
+  /** Text-to-speech provider (defaults to 'system'). */
+  ttsProvider?: VoiceTtsProvider;
+  /** Submit mode after transcription: direct or editable draft. */
+  submitMode?: 'direct' | 'draft';
+  /** Maximum recording length in seconds (10-300, default 120). */
+  maxRecordingSec?: number;
+  /** Auto-TTS scope: all replies or voice_only. */
+  autoTtsMode?: 'all' | 'voice_only';
+  /** RMS silence threshold (50-5000, default 200). */
+  silenceThreshold?: number;
+  /** Silence duration in seconds before auto-stop (0.5-10, default 3.0). */
+  silenceDurationSec?: number;
+  /** Allow interrupting Pixel while speaking. */
+  bargeIn?: boolean;
+  /** Barge-in onset grace period in seconds (0.1-3.0, default 0.5). */
+  bargeInGraceSec?: number;
+  /** Barge-in RMS multiplier over calibrated quiet-room floor (1.5-8.0, default 3.0). */
+  bargeInThresholdMultiplier?: number;
+  /** Play subtle record start/stop audio cues. */
+  beepEnabled?: boolean;
+  /** Audio cue volume (0.0-1.0, default 0.3). */
+  beepVolume?: number;
+  /** Ambient thinking audio cue during voice turns. */
+  thinkingSound?: boolean;
+  /** Spoken phrases that end a voice session immediately. */
+  stopPhrases?: string[];
+  /** Full-duplex GPT-Live model id. */
+  gptLiveModel?: string;
+  /** Full-duplex GPT-Live voice name. */
+  gptLiveVoice?: string;
+  /** Optional extra persona/tone instructions for GPT-Live. */
+  gptLiveInstructions?: string;
 }
 
 export interface PrivacySettings {
@@ -628,6 +669,25 @@ export const DEFAULT_SETTINGS: AppSettings = {
     ttsEngine: 'system',
     ttsVoice: null,
     ttsRate: 1,
+    voiceChatMode: 'chained',
+    sttProvider: 'local',
+    sttLanguage: 'auto',
+    ttsProvider: 'system',
+    submitMode: 'direct',
+    maxRecordingSec: 120,
+    autoTtsMode: 'voice_only',
+    silenceThreshold: 200,
+    silenceDurationSec: 3.0,
+    bargeIn: true,
+    bargeInGraceSec: 0.5,
+    bargeInThresholdMultiplier: 3.0,
+    beepEnabled: true,
+    beepVolume: 0.3,
+    thinkingSound: true,
+    stopPhrases: ['stop'],
+    gptLiveModel: 'gpt-live-1',
+    gptLiveVoice: 'marin',
+    gptLiveInstructions: '',
   },
   privacy: {
     screenshotRequiresApproval: true,
@@ -711,13 +771,34 @@ export function mergeSettings(partial: unknown): AppSettings {
   if (!MODES.includes(base.companion.mode)) base.companion.mode = DEFAULT_MODE;
   if (migrateCursorPresentation) base.companion.cursorCompanionEnabled = true;
   sanitiseCompanion(base.companion);
-  if (!['tiny.en', 'base.en', 'small.en'].includes(base.voice.sttModel)) base.voice.sttModel = DEFAULT_SETTINGS.voice.sttModel;
+  if (!['tiny.en', 'base.en', 'small.en', 'tiny', 'base', 'small', 'large-v3-turbo'].includes(base.voice.sttModel)) base.voice.sttModel = DEFAULT_SETTINGS.voice.sttModel;
   if (typeof base.voice.ttsEnabled !== 'boolean') base.voice.ttsEnabled = DEFAULT_SETTINGS.voice.ttsEnabled;
   if (!['system', 'kokoro'].includes(base.voice.ttsEngine)) base.voice.ttsEngine = DEFAULT_SETTINGS.voice.ttsEngine;
   if (typeof base.voice.inputDeviceId !== 'string' || base.voice.inputDeviceId.trim().length === 0) base.voice.inputDeviceId = null;
   if (typeof base.voice.ttsVoice !== 'string' || base.voice.ttsVoice.trim().length === 0 ||
       base.voice.ttsVoice.length > 160 || /[\u0000-\u001f\u007f]/.test(base.voice.ttsVoice)) base.voice.ttsVoice = null;
   base.voice.ttsRate = finiteWithin(base.voice.ttsRate, 0.7, 1.3, DEFAULT_SETTINGS.voice.ttsRate);
+  if (base.voice.voiceChatMode !== 'chained' && base.voice.voiceChatMode !== 'gpt-live') base.voice.voiceChatMode = 'chained';
+  if (!['local', 'openai', 'mistral', 'deepgram', 'custom'].includes(base.voice.sttProvider ?? '')) base.voice.sttProvider = 'local';
+  if (typeof base.voice.sttLanguage !== 'string' || base.voice.sttLanguage.length > 24) base.voice.sttLanguage = 'auto';
+  if (!['system', 'kokoro', 'edge', 'openai', 'elevenlabs', 'xai', 'gemini', 'minimax', 'mistral'].includes(base.voice.ttsProvider ?? '')) base.voice.ttsProvider = 'system';
+  if (base.voice.submitMode !== 'direct' && base.voice.submitMode !== 'draft') base.voice.submitMode = 'direct';
+  base.voice.maxRecordingSec = Math.round(finiteWithin(base.voice.maxRecordingSec, 10, 300, 120));
+  if (base.voice.autoTtsMode !== 'all' && base.voice.autoTtsMode !== 'voice_only') base.voice.autoTtsMode = 'voice_only';
+  base.voice.silenceThreshold = Math.round(finiteWithin(base.voice.silenceThreshold, 50, 5000, 200));
+  base.voice.silenceDurationSec = Math.round(finiteWithin(base.voice.silenceDurationSec, 0.5, 10, 3.0) * 10) / 10;
+  base.voice.bargeIn = base.voice.bargeIn !== false;
+  base.voice.bargeInGraceSec = Math.round(finiteWithin(base.voice.bargeInGraceSec, 0.1, 3.0, 0.5) * 10) / 10;
+  base.voice.bargeInThresholdMultiplier = Math.round(finiteWithin(base.voice.bargeInThresholdMultiplier, 1.5, 8.0, 3.0) * 10) / 10;
+  base.voice.beepEnabled = base.voice.beepEnabled !== false;
+  base.voice.beepVolume = Math.round(finiteWithin(base.voice.beepVolume, 0, 1, 0.3) * 100) / 100;
+  base.voice.thinkingSound = base.voice.thinkingSound !== false;
+  base.voice.stopPhrases = Array.isArray(base.voice.stopPhrases)
+    ? base.voice.stopPhrases.filter((p): p is string => typeof p === 'string' && p.trim().length > 0).map((p) => p.trim().slice(0, 40)).slice(0, 10)
+    : ['stop'];
+  base.voice.gptLiveModel = typeof base.voice.gptLiveModel === 'string' && base.voice.gptLiveModel.trim() ? base.voice.gptLiveModel.trim().slice(0, 80) : 'gpt-live-1';
+  base.voice.gptLiveVoice = typeof base.voice.gptLiveVoice === 'string' && base.voice.gptLiveVoice.trim() ? base.voice.gptLiveVoice.trim().slice(0, 40) : 'marin';
+  base.voice.gptLiveInstructions = typeof base.voice.gptLiveInstructions === 'string' ? base.voice.gptLiveInstructions.slice(0, 1000) : '';
   base.agent.maxTurns = Math.round(finiteWithin(base.agent.maxTurns, 4, 40, DEFAULT_SETTINGS.agent.maxTurns));
   base.agent.maxConcurrentSpecialists = Math.round(
     finiteWithin(base.agent.maxConcurrentSpecialists, 1, 3, DEFAULT_SETTINGS.agent.maxConcurrentSpecialists),

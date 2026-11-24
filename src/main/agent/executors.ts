@@ -17,7 +17,8 @@
 
 import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { arch, cpus, freemem, networkInterfaces, platform, release, totalmem } from 'node:os';
+import { arch, cpus, freemem, networkInterfaces, platform, release, tmpdir, totalmem } from 'node:os';
+import { join } from 'node:path';
 import type { CaptureResult, DiagnosticsSnapshot, ImageAttachment, ScreenWindowTarget, SearchProvider, VisualGuidanceShape } from '../../shared/types';
 import { createSearchUrl, MAX_SEARCH_QUERY_LENGTH } from '../../shared/browserSearch';
 import { BrowserSession } from './browser';
@@ -32,6 +33,7 @@ import type { GitTools } from '../git/toolset';
 import { terminateProcessTree } from '../services/process';
 import type { TerminalService } from '../services/terminalService';
 import { ComputerUseController, type ComputerUseRequest } from './computerUse';
+import { generateImageArtifact } from './multimodal';
 import { NativeHelperError } from '../services/nativeHelper';
 import type { FindElementsQuery, LastExternalWindowResult, NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
 import { randomUUID } from 'node:crypto';
@@ -175,6 +177,10 @@ export interface ExecutorDeps {
   terminal?: TerminalService;
   /** Consolidated Windows computer-use controller (Hermes computer_use parity). */
   computerUse?: ComputerUseController;
+  /** Optional API key resolver for image_generate (OpenAI or FAL.ai). */
+  getImageGenApiKey?: (provider: 'openai' | 'fal') => string | null;
+  /** Directory where generated image artifacts are saved. */
+  imageArtifactDir?: string;
 }
 
 export class ToolExecutors {
@@ -741,6 +747,30 @@ export class ToolExecutors {
             content: `[${outcome.interactionMode}] ${outcome.content}`,
             ...(outcome.detail ? { detail: outcome.detail } : {}),
             ...(!outcome.ok ? { errorCode: 'FAILED' } : {}),
+          };
+        }
+        case 'image_generate': {
+          const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+          const provider = args.provider === 'fal' ? 'fal' : 'openai';
+          const size =
+            args.size === '1536x1024' || args.size === '1024x1536' ? args.size : '1024x1024';
+          const apiKey = this.deps.getImageGenApiKey?.(provider) ?? null;
+          const outputDir = this.deps.imageArtifactDir ?? join(tmpdir(), 'pixel-images');
+          const res = await generateImageArtifact({
+            provider,
+            prompt,
+            size,
+            apiKey,
+            outputDir,
+            signal,
+          });
+          if (!res.ok) {
+            return { ok: false, content: res.error ?? 'Image generation failed.', errorCode: 'FAILED' };
+          }
+          return {
+            ok: true,
+            content: `Generated image saved to ${res.filePath} (${res.bytes} bytes).`,
+            detail: { ...res },
           };
         }
         default:
