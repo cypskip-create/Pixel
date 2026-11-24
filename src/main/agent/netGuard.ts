@@ -93,7 +93,7 @@ export class NetworkGuard {
     }
     const host = url.hostname;
     if (isCloudMetadataHost(host)) {
-      return `Pixel will never open "${host}": cloud metadata endpoints are unconditionally blocked.`;
+      return `Pixel will never open "${host}": private cloud metadata endpoints are unconditionally blocked.`;
     }
 
     // Floor 2: website denylist / allowlist policy.
@@ -119,7 +119,7 @@ export class NetworkGuard {
       if (addresses.length === 0) return `"${host}" did not resolve to any address.`;
       const metadataHit = addresses.find((address) => isCloudMetadataHost(address));
       if (metadataHit !== undefined) {
-        return `"${host}" resolves to a cloud metadata endpoint (${metadataHit}), which is unconditionally blocked.`;
+        return `"${host}" resolves to a private-network address (${metadataHit}, cloud metadata endpoint), which is unconditionally blocked.`;
       }
       const bad = addresses.find((address) => isPrivateHost(address));
       if (bad !== undefined) {
