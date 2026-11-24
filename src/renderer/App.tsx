@@ -23,12 +23,11 @@ import { getModeDescriptor } from '@shared/types';
 import { InputBar } from '@/components/InputBar';
 import { ConversationTranscript } from '@/components/ConversationTranscript';
 import { PermissionCard } from '@/components/PermissionCard';
-import { PixelMark } from '@/components/PixelMark';
 import { DynamicIslandHorseCanvas } from '@/components/DynamicIslandHorseCanvas';
 import { applyThemePreset, loadSavedThemeId } from '@/lib/themeEngine';
 import { RecentChatsPanel } from '@/components/RecentChatsPanel';
 import { ResponseBubble } from '@/components/ResponseBubble';
-import { SettingsPanel } from '@/components/SettingsPanel';
+import { HermesSettingsView } from '@/components/HermesSettingsView';
 import { TaskStrip } from '@/components/TaskStrip';
 import { VisualGuidanceOverlay } from '@/components/VisualGuidanceOverlay';
 import { BridgeContext } from '@/hooks/useBridge';
@@ -115,8 +114,8 @@ function SettingsWindow(): React.JSX.Element {
   }, []);
 
   return (
-    <div className="flex min-h-screen w-full justify-center bg-[var(--color-surface-raised)] p-3 text-[var(--color-ink)]">
-      <SettingsPanel
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--color-app-bg)] text-[var(--color-ink)]">
+      <HermesSettingsView
         settings={settings}
         displays={displays}
         onPatch={patch}
@@ -144,7 +143,7 @@ function CursorCompanionWindow(): React.JSX.Element {
 
 function Companion(): React.JSX.Element {
   const bridge = readBridge();
-  const { settings, hasApiKey, error: settingsError, patch, setMode } = useSettings();
+  const { settings, error: settingsError, patch, setMode } = useSettings();
   const chat = useChat(settings.privacy.persistHistory);
   const reducedMotion = useMotionPolicy(settings.companion.reducedMotion);
 
@@ -278,11 +277,11 @@ function Companion(): React.JSX.Element {
       resolveSurface({
         windowHidden: false,
         hasPermission: permission !== null,
-        hasActiveTask: hasActiveTask && islandExpanded,
+        hasActiveTask: hasActiveTask || chat.streaming,
         bubbleVisible,
         inputOpen: islandExpanded || historyOpen,
       }),
-    [permission, hasActiveTask, bubbleVisible, islandExpanded, historyOpen],
+    [permission, hasActiveTask, chat.streaming, bubbleVisible, islandExpanded, historyOpen],
   );
 
   usePresentationLayout(layoutRef, nextSurface);
@@ -954,11 +953,7 @@ function Companion(): React.JSX.Element {
           aria-label={pushToTalkState !== 'idle' ? pushToTalkLabel
             : `Open Pixel. ${island.state === 'RESPONSE_AVAILABLE' ? 'A response is ready. ' : ''}Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className={
-            hasActiveTask || chat.streaming
-              ? 'group relative flex h-[96px] w-[320px] flex-col items-center justify-between overflow-hidden rounded-[28px] border border-[var(--color-border-strong)] bg-[#000000] px-3 py-2 outline-none transition-all duration-300 hover:scale-[1.01] cursor-pointer'
-              : 'group relative flex h-[36px] w-[164px] items-center justify-between rounded-full border border-[var(--color-border-strong)] bg-[#000000] px-3.5 outline-none transition-all duration-300 hover:scale-[1.02] cursor-pointer'
-          }
+          className="group relative flex h-[36px] w-[132px] items-center justify-center overflow-hidden rounded-full bg-[#000000] outline-none transition-transform duration-200 hover:scale-[1.03] cursor-pointer"
         >
           {pushToTalkState === 'recording' ? (
             <span className="island-ptt-indicator flex items-center gap-2" aria-hidden="true">
@@ -968,24 +963,8 @@ function Companion(): React.JSX.Element {
                 return <i key={index} style={{ height: `${Math.max(2, Math.round((height + 2) * amplitude))}px` }} />;
               })}</span>
             </span>
-          ) : hasActiveTask || chat.streaming ? (
-            <div className="flex w-full flex-col items-center gap-1">
-              <div className="flex w-full items-center justify-between text-[10px] font-mono text-[var(--color-ink-muted)]">
-                <span className="truncate">{chat.streaming ? 'Running response…' : 'Running background task…'}</span>
-                <span className="text-[var(--color-accent)]">LIVE</span>
-              </div>
-              <DynamicIslandHorseCanvas running reducedMotion={reducedMotion} width={292} height={64} />
-            </div>
           ) : (
-            <>
-              <span className="flex items-center gap-2 text-[11px] font-medium text-[var(--color-ink)]">
-                <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-                Pixel
-              </span>
-              <span className="font-mono text-[10px] text-[var(--color-ink-dim)]">
-                {compactAssistantState === 'idle' ? 'READY' : compactAssistantState.toUpperCase()}
-              </span>
-            </>
+            <DynamicIslandHorseCanvas running={false} reducedMotion={reducedMotion} width={116} height={28} compact />
           )}
         </button>
       ) : islandExpanded || nextSurface !== 'idle' ? (
@@ -994,6 +973,20 @@ function Companion(): React.JSX.Element {
           className="animate-slide-down flex w-full flex-col items-center gap-2 px-2"
           data-no-drag
         >
+          {/* Expanded Dynamic Island Pixel-Art Running Horse (Inspora dynamic-island-pixel-art-horse) */}
+          <div
+            onClick={() => {
+              if (!islandExpanded) openIsland();
+            }}
+            className="flex h-[118px] w-[364px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[38px] bg-[#000000] px-3 py-2"
+          >
+            <DynamicIslandHorseCanvas
+              running={hasActiveTask || chat.streaming || islandExpanded}
+              reducedMotion={reducedMotion}
+              width={340}
+              height={96}
+            />
+          </div>
           {stopped ? (
             <div
               role="alert"
@@ -1108,87 +1101,81 @@ function Companion(): React.JSX.Element {
             />
           ) : null}
 
-          <div className="relative" data-layout-panel>
-            <InputBar
-              mode={mode}
-              state={assistantState}
-              draft={draft}
-              onDraftChange={setDraft}
-              onSubmit={submit}
-              onStop={chat.stop}
-              onCollapse={collapse}
-              onAttachScreenshot={attachScreenshot}
-              onAttachFile={pickFile}
-              onToggleListening={toggleListening}
-              listening={listening}
-              attachments={attachments}
-              onRemoveAttachment={(index) =>
-                setAttachments((prev) => prev.filter((_, i) => i !== index))
-              }
-              onRequestMode={requestMode}
-              modeMenuOpen={modeMenuOpen}
-              onToggleModeMenu={() => setModeMenuOpen((open) => !open)}
-              onCloseModeMenu={() => setModeMenuOpen(false)}
-              busy={busy}
-              disabled={bridge.kind !== 'ready' || chat.historyLoading || searchPending || historyOpen}
-              autoFocus={island.state === 'CLICK_EXPANDED' && !historyOpen}
-            />
+          {islandExpanded ? (
+            <div className="relative" data-layout-panel>
+              <InputBar
+                mode={mode}
+                state={assistantState}
+                draft={draft}
+                onDraftChange={setDraft}
+                onSubmit={submit}
+                onStop={chat.stop}
+                onCollapse={collapse}
+                onAttachScreenshot={attachScreenshot}
+                onAttachFile={pickFile}
+                onToggleListening={toggleListening}
+                listening={listening}
+                attachments={attachments}
+                onRemoveAttachment={(index) =>
+                  setAttachments((prev) => prev.filter((_, i) => i !== index))
+                }
+                onRequestMode={requestMode}
+                modeMenuOpen={modeMenuOpen}
+                onToggleModeMenu={() => setModeMenuOpen((open) => !open)}
+                onCloseModeMenu={() => setModeMenuOpen(false)}
+                busy={busy}
+                disabled={bridge.kind !== 'ready' || chat.historyLoading || searchPending || historyOpen}
+                autoFocus={island.state === 'CLICK_EXPANDED' && !historyOpen}
+              />
 
-            <div className="mt-1.5 flex items-center justify-center gap-1">
-              <span className="pixel-brand-lockup" aria-label="Pixel">
-                <PixelMark size={16} />
-                <span className="pixel-brand-divider" />
-                <span className="pixel-wordmark">PIXEL</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => historyOpen ? closeHistory() : openHistory()}
-                aria-label="Recent chats"
-                aria-expanded={historyOpen}
-                disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null || bridge.kind !== 'ready'}
-                className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-neutral-400/70 disabled:opacity-40 ${historyOpen ? 'bg-neutral-300/12 text-neutral-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
-              >
-                <History aria-hidden="true" className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={openWorkspace}
-                aria-label="Open Pixel Workspace"
-                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-300/12 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
-              >
-                <LayoutDashboard aria-hidden="true" className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={openSettings}
-                aria-label="Pixel settings"
-                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)] focus-visible:ring-2 focus-visible:ring-neutral-400/70"
-              >
-                <Settings aria-hidden="true" className="size-3.5" />
-              </button>
-              {busy ? (
+              <div className="mt-1.5 flex items-center justify-center gap-1 rounded-full bg-[#090909] px-3 py-1">
                 <button
                   type="button"
-                  onClick={chat.stop}
-                  aria-label="Stop answering"
-                  className="grid size-6 place-items-center rounded-md text-neutral-200 hover:bg-neutral-500/20 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
+                  onClick={() => historyOpen ? closeHistory() : openHistory()}
+                  aria-label="Recent chats"
+                  aria-expanded={historyOpen}
+                  disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null || bridge.kind !== 'ready'}
+                  className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-neutral-400/70 disabled:opacity-40 ${historyOpen ? 'bg-neutral-300/12 text-neutral-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
                 >
-                  <Square aria-hidden="true" className="size-3" />
+                  <History aria-hidden="true" className="size-3.5" />
                 </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={emergencyStop}
-                aria-label="Emergency stop: block all further actions"
-                className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-500/20 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
-              >
-                <ShieldAlert aria-hidden="true" className="size-3.5" />
-              </button>
-              <span className="ml-1 text-[10px] text-[var(--color-ink-dim)]">
-                {hasApiKey === false ? 'No API key' : modeDescriptor.label}
-              </span>
+                <button
+                  type="button"
+                  onClick={openWorkspace}
+                  aria-label="Open Pixel Workspace"
+                  className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-300/12 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
+                >
+                  <LayoutDashboard aria-hidden="true" className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={openSettings}
+                  aria-label="Pixel settings"
+                  className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)] focus-visible:ring-2 focus-visible:ring-neutral-400/70"
+                >
+                  <Settings aria-hidden="true" className="size-3.5" />
+                </button>
+                {busy ? (
+                  <button
+                    type="button"
+                    onClick={chat.stop}
+                    aria-label="Stop answering"
+                    className="grid size-6 place-items-center rounded-md text-neutral-200 hover:bg-neutral-500/20 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
+                  >
+                    <Square aria-hidden="true" className="size-3" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={emergencyStop}
+                  aria-label="Emergency stop: block all further actions"
+                  className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-500/20 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
+                >
+                  <ShieldAlert aria-hidden="true" className="size-3.5" />
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -10,8 +10,6 @@ import {
   FolderPlus,
   RefreshCw,
   Search,
-  Square,
-  Terminal as TerminalIcon,
   X,
 } from 'lucide-react';
 import type {
@@ -22,6 +20,7 @@ import type {
 } from '@shared/types';
 import type { RightRailTab } from '@/lib/workspaceLayout';
 import { MarkdownMessage } from '@/components/MarkdownMessage';
+import { InteractiveTerminalView } from '@/components/InteractiveTerminalView';
 
 export interface WorkspaceFsNode {
   name: string;
@@ -131,10 +130,6 @@ export function WorkspaceRightRail({
   onListFsDir,
   onReadFsFile,
   terminalSessions = [],
-  onRunTerminalCommand,
-  onCancelTerminalSession,
-  onStopTerminal,
-  terminalBusy,
   tasks,
   audit,
 }: WorkspaceRightRailProps): React.JSX.Element {
@@ -147,9 +142,6 @@ export function WorkspaceRightRail({
 
   const [previews, setPreviews] = useState<OpenPreviewTab[]>([]);
   const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null);
-
-  const [termCommand, setTermCommand] = useState('');
-  const [termDispatchError, setTermDispatchError] = useState<string | null>(null);
 
   const loadFsDirectory = useCallback(
     async (relPath = ''): Promise<void> => {
@@ -291,20 +283,6 @@ export function WorkspaceRightRail({
   );
 
   const activePreview = previews.find((p) => p.key === activePreviewKey) ?? previews[0] ?? null;
-
-  const submitTerminal = async (event: React.FormEvent): Promise<void> => {
-    event.preventDefault();
-    const cmd = termCommand.trim();
-    if (!cmd) return;
-    setTermCommand('');
-    setTermDispatchError(null);
-    try {
-      const errMsg = await onRunTerminalCommand(cmd);
-      if (typeof errMsg === 'string' && errMsg) setTermDispatchError(errMsg);
-    } catch (err) {
-      setTermDispatchError(err instanceof Error ? err.message : 'Command execution failed.');
-    }
-  };
 
   const renderFsNodes = (relPath: string, depth: number): React.JSX.Element[] => {
     const nodes = fsChildren[relPath] ?? [];
@@ -538,76 +516,8 @@ export function WorkspaceRightRail({
       ) : null}
 
       {activeTab === 'terminal' ? (
-        <div className="workspace-rail-body workspace-terminal-pane">
-          <div className="workspace-terminal-meta">
-            <span className="inline-flex items-center gap-1.5">
-              <TerminalIcon size={12} aria-hidden="true" />
-              <strong>{projectName}</strong>
-            </span>
-            <span className="workspace-terminal-badge">
-              {runningTermSession ? `PID ${runningTermSession.pid ?? '…'}` : 'PermissionBroker'}
-            </span>
-          </div>
-
-          <div className="workspace-terminal-output" role="log" aria-label="Terminal output">
-            {termDispatchError ? (
-              <p role="alert" className="workspace-rail-empty">{termDispatchError}</p>
-            ) : null}
-            {terminalSessions.length === 0 ? (
-              <p className="workspace-rail-empty">
-                Commands execute in Pixel&apos;s controlled backend process runner with real stdout/stderr streaming, exit codes, cancellation, PermissionBroker approval, and Emergency Stop kill-all.
-              </p>
-            ) : (
-              terminalSessions.map((session) => (
-                <div key={session.id} className="workspace-terminal-entry">
-                  <div className="workspace-terminal-cmd flex items-center justify-between gap-2">
-                    <span className="truncate">$ {session.command}</span>
-                    <span className="workspace-terminal-badge">
-                      {session.status === 'running'
-                        ? 'running'
-                        : session.exitCode !== null
-                          ? `exit ${session.exitCode}`
-                          : session.status}
-                    </span>
-                  </div>
-                  <pre className={`workspace-terminal-res is-${session.status}`}>
-                    {session.output || (session.status === 'running' ? 'Running…' : '(no output)')}
-                  </pre>
-                </div>
-              ))
-            )}
-          </div>
-
-          <form className="workspace-terminal-form" onSubmit={(e) => void submitTerminal(e)}>
-            <input
-              type="text"
-              aria-label="Terminal command"
-              placeholder="Run command in workspace…"
-              value={termCommand}
-              onChange={(e) => setTermCommand(e.target.value)}
-            />
-            {runningTermSession || terminalBusy ? (
-              <button
-                type="button"
-                className="workspace-rail-icon-btn"
-                onClick={() => {
-                  if (runningTermSession && onCancelTerminalSession) {
-                    onCancelTerminalSession(runningTermSession.id);
-                  } else {
-                    onStopTerminal();
-                  }
-                }}
-                aria-label="Stop running command"
-                title="Cancel process"
-              >
-                <Square size={12} aria-hidden="true" />
-              </button>
-            ) : (
-              <button type="submit" className="workspace-rail-cta" disabled={!termCommand.trim()}>
-                Run
-              </button>
-            )}
-          </form>
+        <div className="workspace-rail-body flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+          <InteractiveTerminalView />
         </div>
       ) : null}
 

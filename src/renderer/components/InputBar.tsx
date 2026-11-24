@@ -45,9 +45,9 @@ interface InputBarProps {
 }
 
 const PLACEHOLDER: Record<Mode, string> = {
-  guide: 'Ask Pixel to explain something…',
-  hybrid: 'Ask Pixel, or tell it what you need…',
-  agent: 'Tell Pixel what to do on this computer…',
+  guide: 'Ask Pixel anything…',
+  hybrid: 'Ask Pixel anything…',
+  agent: 'Ask Pixel anything…',
 };
 
 export function InputBar(props: InputBarProps) {

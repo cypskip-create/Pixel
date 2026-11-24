@@ -22,7 +22,10 @@ import { DynamicIslandHorseCanvas } from '@/components/DynamicIslandHorseCanvas'
 import { ThinkingParticleCore } from '@/components/ThinkingParticleCore';
 import { InteractiveTerminalView } from '@/components/InteractiveTerminalView';
 import { BotCreatorPanel } from '@/components/BotCreatorPanel';
-import { SettingsPanel, type SettingsPage } from '@/components/SettingsPanel';
+import { HermesSettingsView } from '@/components/HermesSettingsView';
+import { applyThemePreset, loadSavedThemeId } from '@/lib/themeEngine';
+import type { AsciiCreatureKind } from '@/lib/asciiSharks';
+import type { SettingsPage } from '@/components/SettingsPanel';
 import type { PluginLifecycleAction, PluginProjectAvailability, PluginSettingChange } from '@/components/WorkspacePluginManager';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
 import { WorkspaceTaskActivity, WorkspaceTaskDetails } from '@/components/WorkspaceTaskActivity';
@@ -107,6 +110,7 @@ export function Workspace(): React.JSX.Element {
   const [tabsState, setTabsState] = useState<WorkspaceTabsState>(() => loadPersistedTabsState(null));
   const [paneLayout, setPaneLayout] = useState<WorkspacePaneLayout>(() => loadPersistedPaneLayout());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [ambientCreature, setAmbientCreature] = useState<AsciiCreatureKind | 'auto'>('auto');
   const sessions = useSessionManager();
   const [secondaryDraft, setSecondaryDraft] = useState('');
   const [terminalSessions, setTerminalSessions] = useState<LiveTerminalSession[]>([]);
@@ -337,15 +341,17 @@ export function Workspace(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-  const media = window.matchMedia('(prefers-color-scheme: light)');
     const apply = (): void => {
-      const light = settings.theme === 'light' || (settings.theme === 'system' && media.matches);
-      document.documentElement.classList.toggle('theme-light', light);
-      document.documentElement.classList.toggle('theme-dark', !light);
+      const savedId = loadSavedThemeId();
+      if (settings.theme === 'light') {
+        applyThemePreset(savedId.includes('light') ? savedId : 'paper-light');
+      } else {
+        // Default to matte dark theme (never let OS light mode force a white workspace!)
+        applyThemePreset(savedId.includes('light') ? 'obsidian-dark' : savedId);
+      }
     };
     apply();
-    media.addEventListener('change', apply);
-    return () => media.removeEventListener('change', apply);
+    return undefined;
   }, [settings.theme]);
 
   useEffect(() => {
@@ -1023,6 +1029,7 @@ export function Workspace(): React.JSX.Element {
               mode={chat.messages.length === 0 && !chat.streaming ? 'empty' : 'active'}
               reducedMotion={settings.companion.reducedMotion}
               theme={settings.theme === 'light' ? 'light' : 'dark'}
+              creature={ambientCreature}
             />
             <WorkspaceConversationHeader
               title={title}
@@ -1056,24 +1063,42 @@ export function Workspace(): React.JSX.Element {
               </div>;
             })() : null}
             {chat.messages.length === 0 && !chat.streaming && draft.trim().length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-12" data-testid="workspace-centered-hero">
-                <h2 className="text-3xl font-light tracking-tight text-[var(--color-ink)]">what&apos;s on your mind?</h2>
-                <div className="w-full max-w-[660px]">
-                  <WorkspaceComposer
-                    draft={draft}
-                    onDraftChange={setDraft}
-                    onSubmit={() => void submit()}
-                    onStop={chat.stop}
-                    streaming={chat.streaming}
-                    disabled={bridge.kind !== 'ready' || chat.historyLoading}
-                    attachments={attachments}
-                    onAttach={(attachment) => setAttachments((items) => [...items, attachment].slice(0, 4))}
-                    onRemoveAttachment={(index) => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}
-                    onAttachScreenshot={() => void attachScreenshot()}
-                    onToggleListening={() => void toggleVoice()}
-                    listening={listening}
-                    onNotice={setNotice}
-                  />
+              <div className="relative flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-12" data-testid="workspace-centered-hero">
+                <div className="flex w-full max-w-[660px] flex-col items-center gap-6 rounded-3xl bg-[var(--color-app-bg)]/85 px-6 py-7">
+                  <h2 className="text-4xl font-light tracking-tight text-[var(--color-ink)]">what&apos;s on your mind?</h2>
+                  <div className="w-full">
+                    <WorkspaceComposer
+                      draft={draft}
+                      onDraftChange={setDraft}
+                      onSubmit={() => void submit()}
+                      onStop={chat.stop}
+                      streaming={chat.streaming}
+                      disabled={bridge.kind !== 'ready' || chat.historyLoading}
+                      attachments={attachments}
+                      onAttach={(attachment) => setAttachments((items) => [...items, attachment].slice(0, 4))}
+                      onRemoveAttachment={(index) => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                      onAttachScreenshot={() => void attachScreenshot()}
+                      onToggleListening={() => void toggleVoice()}
+                      listening={listening}
+                      onNotice={setNotice}
+                    />
+                  </div>
+                </div>
+                <div className="absolute bottom-3 left-5 flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-mono text-[10.5px] text-[var(--color-ink-dim)]">
+                  {(['auto', 'sharks', 'jellyfish', 'dolphin', 'horse'] as const).map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => setAmbientCreature(kind)}
+                      className={
+                        ambientCreature === kind
+                          ? 'rounded-full bg-[var(--color-accent)] px-2 py-0.5 font-semibold text-white'
+                          : 'rounded-full px-2 py-0.5 hover:text-[var(--color-ink)]'
+                      }
+                    >
+                      {kind === 'auto' ? 'Auto' : kind.charAt(0).toUpperCase() + kind.slice(1)}
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : (
@@ -1253,7 +1278,27 @@ export function Workspace(): React.JSX.Element {
           {view === 'session-import' ? <Suspense fallback={<WorkspacePanelLoading />}><SessionImportPage /></Suspense> : null}
           {view === 'notes' ? <Suspense fallback={<WorkspacePanelLoading />}><ProductivityPanel /></Suspense> : null}
           {view === 'board' ? <Suspense fallback={<WorkspacePanelLoading />}><PixelBoard emergencyStopped={stopped} /></Suspense> : null}
-          {view === 'settings' ? <div className="workspace-settings"><Suspense fallback={<WorkspacePanelLoading />}><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout initialPage={settingsInitialPage} tools={tools} plugins={plugins} onPluginChange={handlePluginChange} /></Suspense></div> : null}
+          {view === 'settings' ? (
+            <div className="workspace-settings flex h-full w-full flex-1 overflow-hidden">
+              <HermesSettingsView
+                settings={settings}
+                displays={displays}
+                onPatch={patch}
+                onRequestMode={chooseMode}
+                onClose={returnFromSettings}
+                hasApiKey={hasApiKey}
+                onSaveApiKey={saveApiKey}
+                onRemoveApiKey={removeApiKey}
+                onTestConnection={testApiKeyConnection}
+                error={settingsError}
+                saving={saving}
+                initialPage={settingsInitialPage}
+                tools={tools}
+                plugins={plugins}
+                onPluginChange={handlePluginChange}
+              />
+            </div>
+          ) : null}
         </main>
 
         {paneLayout.rightRailOpen && view !== 'settings' ? (

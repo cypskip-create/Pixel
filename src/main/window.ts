@@ -520,14 +520,14 @@ export class WindowManager {
     }
 
     const win = new BrowserWindow({
-      width: 500,
-      height: 540,
+      width: 1120,
+      height: 760,
       title: 'Pixel Settings',
       show: false,
       resizable: true,
       minimizable: true,
-      maximizable: false,
-      backgroundColor: '#1b1b1b',
+      maximizable: true,
+      backgroundColor: '#0a0b0e',
       autoHideMenuBar: true,
       webPreferences: {
         preload: this.deps.preloadPath,

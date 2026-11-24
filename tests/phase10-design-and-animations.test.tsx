@@ -8,6 +8,8 @@ import { BotCreatorPanel } from '../src/renderer/components/BotCreatorPanel';
 import { InteractiveTerminalView } from '../src/renderer/components/InteractiveTerminalView';
 import { PIXEL_THEME_PRESETS } from '../src/shared/themes';
 import { applyThemePreset } from '../src/renderer/lib/themeEngine';
+import { HERMES_SETTINGS_TREE, HermesSettingsView } from '../src/renderer/components/HermesSettingsView';
+import { mergeSettings } from '../src/shared/types';
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -82,6 +84,48 @@ describe('Phase 10: Redesign, 60 FPS Animations, Theme Engine, Terminal & Bot Cr
 
     expect(container.querySelector('[data-testid="interactive-terminal-view"]')).toBeTruthy();
     expect(container.querySelector('input[aria-label="Terminal command input"]')).toBeTruthy();
+
+    act(() => { root.unmount(); });
+    container.remove();
+  });
+
+  it('renders full HermesSettingsView with all 21 Hermes categories, Model > Main model breadcrumb, and Apply button', () => {
+    const onPatch = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <HermesSettingsView
+          settings={mergeSettings(null)}
+          displays={[]}
+          onPatch={onPatch}
+          onRequestMode={vi.fn()}
+          onClose={vi.fn()}
+          hasApiKey
+          onSaveApiKey={async () => ({ ok: true })}
+          onRemoveApiKey={async () => ({ ok: true })}
+          onTestConnection={async () => ({ ok: true, latencyMs: 42 })}
+          error={null}
+          saving={false}
+        />,
+      );
+    });
+
+    expect(HERMES_SETTINGS_TREE.length).toBe(21);
+    expect(container.querySelector('[data-testid="hermes-settings-view"]')).toBeTruthy();
+    expect(container.textContent).toContain('Main model');
+    expect(container.textContent).toContain('chief of staff');
+    expect(container.textContent).toContain('Passwords & Logins');
+    expect(container.textContent).toContain('Gateways');
+    expect(container.textContent).toContain('Keyboard Shortcuts');
+    expect(container.textContent).toContain('Backup & Transfer');
+
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Apply');
+    expect(applyBtn).toBeTruthy();
+    act(() => { applyBtn?.click(); });
+    expect(onPatch).toHaveBeenCalledTimes(1);
 
     act(() => { root.unmount(); });
     container.remove();

@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { PixelSharkEngine, type SharkSceneMode } from '@/lib/asciiSharks';
+import { PixelSharkEngine, type AsciiCreatureKind, type SharkSceneMode } from '@/lib/asciiSharks';
 
 export interface AsciiSharkBackgroundProps {
   /** 'empty' for a new empty conversation; 'active' for quieter background behind messages. */
   mode: SharkSceneMode;
   reducedMotion: boolean;
   theme?: 'dark' | 'light';
+  creature?: AsciiCreatureKind | 'auto';
 }
 
 /**
@@ -19,6 +20,7 @@ export function AsciiSharkBackground({
   mode,
   reducedMotion,
   theme = 'dark',
+  creature = 'auto',
 }: AsciiSharkBackgroundProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<PixelSharkEngine | null>(null);
@@ -26,7 +28,7 @@ export function AsciiSharkBackground({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const engine = new PixelSharkEngine(canvas, { mode, reducedMotion, theme });
+    const engine = new PixelSharkEngine(canvas, { mode, reducedMotion, theme, creature });
     engineRef.current = engine;
     return () => {
       engine.destroy();
@@ -37,8 +39,8 @@ export function AsciiSharkBackground({
   }, []);
 
   useEffect(() => {
-    engineRef.current?.setOptions({ mode, reducedMotion, theme });
-  }, [mode, reducedMotion, theme]);
+    engineRef.current?.setOptions({ mode, reducedMotion, theme, creature });
+  }, [mode, reducedMotion, theme, creature]);
 
   return (
     <div
