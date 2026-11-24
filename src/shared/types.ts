@@ -1677,6 +1677,32 @@ export interface CypsBridge {
     }): Promise<CaptureResult>;
     onGuidanceUpdate(handler: (snapshot: VisualGuidanceSnapshot) => void): () => void;
   };
+  drawing?: {
+    add(request: ScreenDrawingAddRequest): Promise<ScreenDrawingSceneSnapshot>;
+    remove(id: string): Promise<ScreenDrawingSceneSnapshot>;
+    undo(): Promise<ScreenDrawingSceneSnapshot>;
+    redo(): Promise<ScreenDrawingSceneSnapshot>;
+    clear(): Promise<ScreenDrawingSceneSnapshot>;
+    snapshot(): Promise<ScreenDrawingSceneSnapshot>;
+    setInteractive(interactive: boolean): Promise<ScreenDrawingSceneSnapshot>;
+    mapCoord(input: {
+      x: number;
+      y: number;
+      sourceWidth: number;
+      sourceHeight: number;
+      displayX?: number;
+      displayY?: number;
+      displayWidth?: number;
+      displayHeight?: number;
+      scaleFactor?: number;
+      inputIsPhysicalPx?: boolean;
+    }): Promise<{
+      x: number;
+      y: number;
+      computerUseResolution: { width: number; height: number };
+    }>;
+    onUpdate(handler: (snapshot: ScreenDrawingSceneSnapshot) => void): () => void;
+  };
   board: {
     getState(): Promise<BoardSnapshot>;
     apply(operations: BoardOperation[], expectedRevision?: number): Promise<BoardSnapshot>;
@@ -2059,4 +2085,79 @@ export interface HistoryQuery {
   limit?: number;
   offset?: number;
   search?: string;
+}
+
+export type ScreenDrawingKind =
+  | 'freehand'
+  | 'arrow'
+  | 'box'
+  | 'circle'
+  | 'callout'
+  | 'spotlight'
+  | 'pointer_flight';
+
+export interface ScreenDrawingPoint {
+  x: number;
+  y: number;
+}
+
+export interface ScreenDrawingRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ScreenDrawingAnnotation {
+  id: string;
+  kind: ScreenDrawingKind;
+  createdAt: number;
+  expiresAt: number | null;
+  strokeWidth: number;
+  opacity: number;
+  dashed: boolean;
+  pinned: boolean;
+  label?: string;
+  step?: number;
+  bounds?: ScreenDrawingRect;
+  start?: ScreenDrawingPoint;
+  end?: ScreenDrawingPoint;
+  anchor?: ScreenDrawingPoint;
+  points?: ScreenDrawingPoint[];
+  svgPath?: string;
+  dimOpacity?: number;
+  arcHeight?: number;
+  displayId?: string;
+}
+
+export interface ScreenDrawingAddRequest {
+  id?: string;
+  kind: ScreenDrawingKind;
+  strokeWidth?: number;
+  opacity?: number;
+  dashed?: boolean;
+  pinned?: boolean;
+  durationMs?: number;
+  label?: string;
+  step?: number;
+  bounds?: ScreenDrawingRect;
+  start?: ScreenDrawingPoint;
+  end?: ScreenDrawingPoint;
+  anchor?: ScreenDrawingPoint;
+  points?: ScreenDrawingPoint[];
+  curved?: boolean;
+  dimOpacity?: number;
+  arcHeight?: number;
+  displayId?: string;
+}
+
+export interface ScreenDrawingSceneSnapshot {
+  visible: boolean;
+  interactive: boolean;
+  generation: number;
+  annotations: ScreenDrawingAnnotation[];
+  canUndo: boolean;
+  canRedo: boolean;
+  updatedAt: number;
+  viewport?: ScreenDrawingRect | null;
 }

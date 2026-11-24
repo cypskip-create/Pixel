@@ -660,6 +660,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       pythonRunner.cancel('stop');
       routineScheduler?.cancelAll();
       windows.clearVisualGuidance();
+      windows.clearScreenDrawing();
+      void pythonAgentBridge.drawingEmergencyStop().catch(() => undefined);
       return wasRunning;
     },
     killChildren: () => {
@@ -2525,6 +2527,33 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   );
 
   registerHandler(CHANNELS.browserSessions, () => browserManager.list());
+
+  // Phase 9 Python-first screen drawing & live transparent overlay IPCs
+  const publishDrawing = async (snap: import('../shared/types').ScreenDrawingSceneSnapshot) => {
+    await windows.publishScreenDrawing(snap);
+    return snap;
+  };
+  registerHandler(CHANNELS.drawingAdd, async (_event, request: Record<string, unknown>) => {
+    if (emergency.isStopped()) return pythonAgentBridge.drawingSnapshot();
+    const snap = await pythonAgentBridge.drawingAdd(request && typeof request === 'object' ? request : {});
+    return publishDrawing(snap);
+  });
+  registerHandler(CHANNELS.drawingRemove, async (_event, id: string) => {
+    const snap = await pythonAgentBridge.drawingRemove(typeof id === 'string' ? id : '');
+    return publishDrawing(snap);
+  });
+  registerHandler(CHANNELS.drawingUndo, async () => publishDrawing(await pythonAgentBridge.drawingUndo()));
+  registerHandler(CHANNELS.drawingRedo, async () => publishDrawing(await pythonAgentBridge.drawingRedo()));
+  registerHandler(CHANNELS.drawingClear, async () => publishDrawing(await pythonAgentBridge.drawingClear()));
+  registerHandler(CHANNELS.drawingSnapshot, async () => pythonAgentBridge.drawingSnapshot());
+  registerHandler(CHANNELS.drawingSetInteractive, async (_event, interactive: boolean) => {
+    if (emergency.isStopped() && interactive) return pythonAgentBridge.drawingSnapshot();
+    const snap = await pythonAgentBridge.drawingSetInteractive(Boolean(interactive));
+    return publishDrawing(snap);
+  });
+  registerHandler(CHANNELS.drawingMapCoord, async (_event, input: Record<string, unknown>) =>
+    pythonAgentBridge.drawingMapCoord(input && typeof input === 'object' ? input : {}),
+  );
 
   registerHandler(CHANNELS.voiceContinuousStart, () => {
     if (emergency.isStopped()) {

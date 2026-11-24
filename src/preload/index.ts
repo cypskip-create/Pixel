@@ -188,6 +188,42 @@ const bridge: CypsBridge = {
       subscribe(CH.screenGuidanceUpdate, handler),
   },
 
+  drawing: {
+    add: (request: import('../shared/types').ScreenDrawingAddRequest) =>
+      ipcRenderer.invoke(CH.drawingAdd, request) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    remove: (id: string) =>
+      ipcRenderer.invoke(CH.drawingRemove, id) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    undo: () =>
+      ipcRenderer.invoke(CH.drawingUndo) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    redo: () =>
+      ipcRenderer.invoke(CH.drawingRedo) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    clear: () =>
+      ipcRenderer.invoke(CH.drawingClear) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    snapshot: () =>
+      ipcRenderer.invoke(CH.drawingSnapshot) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    setInteractive: (interactive: boolean) =>
+      ipcRenderer.invoke(CH.drawingSetInteractive, interactive) as Promise<import('../shared/types').ScreenDrawingSceneSnapshot>,
+    mapCoord: (input: {
+      x: number;
+      y: number;
+      sourceWidth: number;
+      sourceHeight: number;
+      displayX?: number;
+      displayY?: number;
+      displayWidth?: number;
+      displayHeight?: number;
+      scaleFactor?: number;
+      inputIsPhysicalPx?: boolean;
+    }) =>
+      ipcRenderer.invoke(CH.drawingMapCoord, input) as Promise<{
+        x: number;
+        y: number;
+        computerUseResolution: { width: number; height: number };
+      }>,
+    onUpdate: (handler: (snapshot: import('../shared/types').ScreenDrawingSceneSnapshot) => void) =>
+      subscribe(CH.drawingUpdate, handler),
+  },
+
   board: {
     getState: () => ipcRenderer.invoke(CH.boardGetState) as Promise<BoardSnapshot>,
     apply: (operations: BoardOperation[], expectedRevision?: number) =>

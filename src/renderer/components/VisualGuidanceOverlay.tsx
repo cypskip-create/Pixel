@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { VisualGuidanceSnapshot } from '@shared/types';
 import { useBridge } from '@/hooks/useBridge';
+import { ScreenDrawingOverlay } from './ScreenDrawingOverlay';
 
 const EMPTY: VisualGuidanceSnapshot = { visible: false, bounds: null, annotations: [] };
 
-/** Passive transparent renderer for the main-process owned guidance window. */
+/** Passive transparent renderer for the main-process owned guidance & screen-drawing window. */
 export function VisualGuidanceOverlay(): React.JSX.Element {
   const bridgeStatus = useBridge();
   const [snapshot, setSnapshot] = useState<VisualGuidanceSnapshot>(EMPTY);
@@ -13,17 +14,19 @@ export function VisualGuidanceOverlay(): React.JSX.Element {
     return bridgeStatus.bridge.screen.onGuidanceUpdate(setSnapshot);
   }, [bridgeStatus]);
 
-  if (!snapshot.visible || !snapshot.bounds) return <div aria-hidden="true" />;
-  const viewport = snapshot.bounds;
+  const viewport = snapshot.visible && snapshot.bounds ? snapshot.bounds : null;
   return (
-    <svg
-      aria-hidden="true"
-      className="pointer-events-none block h-full w-full overflow-hidden"
-      width="100%"
-      height="100%"
-      viewBox={'0 0 ' + viewport.width + ' ' + viewport.height}
-      preserveAspectRatio="none"
-    >
+    <>
+      <ScreenDrawingOverlay />
+      {viewport && (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none block h-full w-full overflow-hidden"
+          width="100%"
+          height="100%"
+          viewBox={'0 0 ' + viewport.width + ' ' + viewport.height}
+          preserveAspectRatio="none"
+        >
       {snapshot.annotations.map((annotation) => {
         const x = annotation.bounds.x - viewport.x;
         const y = annotation.bounds.y - viewport.y;
@@ -71,6 +74,8 @@ export function VisualGuidanceOverlay(): React.JSX.Element {
           </g>
         );
       })}
-    </svg>
+        </svg>
+      )}
+    </>
   );
 }

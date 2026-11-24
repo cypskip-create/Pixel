@@ -17,6 +17,7 @@ import type {
   CompanionSettings,
   AssistantState,
   ScreenWindowTarget,
+  ScreenDrawingSceneSnapshot,
   Surface,
   VisualGuidanceAnnotation,
   VisualGuidanceShape,
@@ -99,6 +100,7 @@ export class WindowManager {
     bounds?: { x: number; y: number; width: number; height: number };
   }>) | null = null;
   private guidanceVisible = false;
+  private drawingScene: ScreenDrawingSceneSnapshot | null = null;
   private surface: Surface = 'idle';
   private anchorDisplayId: string | null = null;
   private topOffset = DEFAULT_OFFSET_FROM_TOP;
@@ -304,12 +306,15 @@ export class WindowManager {
     });
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+    // Mirror HeyClicky OverlayWindow WDA_EXCLUDEFROMCAPTURE so Pixel never captures its own drawings.
+    win.setContentProtection(true);
     win.setFocusable(false);
     win.setIgnoreMouseEvents(true, { forward: true });
     win.once('ready-to-show', () => {
       if (this.guidanceWindow !== win || win.isDestroyed()) return;
       this.guidanceWindowReady = true;
       void this.refreshGuidance();
+      if (this.drawingScene) void this.publishScreenDrawing(this.drawingScene);
     });
     this.hardenWindow(win, 'guidance', false);
     win.on('closed', () => {
@@ -428,6 +433,83 @@ export class WindowManager {
       }
     } catch {
       this.clearVisualGuidance();
+    }
+  }
+
+  /**
+   * Publish a Python-authored ScreenDrawingSceneSnapshot to the transparent
+   * overlay window (reusing `guidanceWindow` with capture exclusion enabled).
+   */
+  async publishScreenDrawing(snapshot: ScreenDrawingSceneSnapshot): Promise<void> {
+    if (this.sessionLocked) {
+      this.clearScreenDrawing();
+      return;
+    }
+    const display = this.anchorDisplay();
+    const viewport = { ...display.bounds };
+    const enriched: ScreenDrawingSceneSnapshot = { ...snapshot, viewport };
+    this.drawingScene = enriched;
+
+    if (!enriched.visible) {
+      const win = this.guidanceWindow;
+      if (win && !win.isDestroyed()) {
+        win.setFocusable(false);
+        win.setIgnoreMouseEvents(true, { forward: true });
+        if (this.guidanceWindowReady) {
+          win.webContents.send(CHANNELS.drawingUpdate, enriched);
+        }
+        if (this.guidanceEntries.size === 0 && win.isVisible()) {
+          win.hide();
+        }
+      }
+      return;
+    }
+
+    this.createGuidanceWindow();
+    await this.waitForGuidanceReady(2_000);
+    const win = this.guidanceWindow;
+    if (!win || win.isDestroyed() || !this.guidanceWindowReady) return;
+    try {
+      const current = win.getBounds();
+      if (!sameBounds(current, viewport)) win.setBounds(viewport, false);
+      if (enriched.interactive) {
+        win.setFocusable(true);
+        win.setIgnoreMouseEvents(false);
+        if (!win.isVisible()) win.show();
+        win.focus();
+      } else {
+        win.setFocusable(false);
+        win.setIgnoreMouseEvents(true, { forward: true });
+        if (!win.isVisible()) win.showInactive();
+      }
+      win.webContents.send(CHANNELS.drawingUpdate, enriched);
+    } catch {
+      this.clearScreenDrawing();
+    }
+  }
+
+  clearScreenDrawing(): void {
+    const empty: ScreenDrawingSceneSnapshot = {
+      visible: false,
+      interactive: false,
+      generation: (this.drawingScene?.generation ?? 0) + 1,
+      annotations: [],
+      canUndo: false,
+      canRedo: false,
+      updatedAt: Date.now(),
+      viewport: null,
+    };
+    this.drawingScene = empty;
+    const win = this.guidanceWindow;
+    if (win && !win.isDestroyed()) {
+      win.setFocusable(false);
+      win.setIgnoreMouseEvents(true, { forward: true });
+      if (this.guidanceWindowReady) {
+        win.webContents.send(CHANNELS.drawingUpdate, empty);
+      }
+      if (this.guidanceEntries.size === 0 && win.isVisible()) {
+        win.hide();
+      }
     }
   }
 

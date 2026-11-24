@@ -748,6 +748,46 @@ export class PythonAgentBridge {
     return this.request('session_import.confirm', { digest });
   }
 
+  drawingAdd(payload: Record<string, unknown>): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.add', payload);
+  }
+
+  drawingRemove(id: string): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.remove', { id });
+  }
+
+  drawingUndo(): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.undo', {});
+  }
+
+  drawingRedo(): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.redo', {});
+  }
+
+  drawingClear(): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.clear', {});
+  }
+
+  drawingEmergencyStop(): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.emergency_stop', {});
+  }
+
+  drawingSetInteractive(interactive: boolean): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.set_interactive', { interactive });
+  }
+
+  drawingSnapshot(): Promise<import('../../shared/types').ScreenDrawingSceneSnapshot> {
+    return this.request('drawing.snapshot', {});
+  }
+
+  drawingMapCoord(input: Record<string, unknown>): Promise<{
+    x: number;
+    y: number;
+    computerUseResolution: { width: number; height: number };
+  }> {
+    return this.request('drawing.map_coord', input);
+  }
+
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {
     const child = this.ensureStarted();
     return new Promise<PythonTurnCompleteResult>((resolve) => {

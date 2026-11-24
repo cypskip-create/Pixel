@@ -227,6 +227,16 @@ export const CHANNELS = {
   workspaceFsListDir: 'workspacefs:listDir',
   workspaceFsReadFile: 'workspacefs:readFile',
 
+  drawingAdd: 'drawing:add',
+  drawingRemove: 'drawing:remove',
+  drawingUndo: 'drawing:undo',
+  drawingRedo: 'drawing:redo',
+  drawingClear: 'drawing:clear',
+  drawingSnapshot: 'drawing:snapshot',
+  drawingSetInteractive: 'drawing:setInteractive',
+  drawingMapCoord: 'drawing:mapCoord',
+  drawingUpdate: 'drawing:update',
+
   appGetVersion: 'app:getVersion',
   appQuit: 'app:quit',
 

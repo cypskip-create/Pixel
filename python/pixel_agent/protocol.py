@@ -28,6 +28,12 @@ from .cron_tools import list_automation_blueprints, scan_scheduled_prompt
 from .media_pipeline import multimodal_provider_catalog
 from .tools.todo import TodoManager
 from .mcp_health import McpHealthController
+from .screen_drawing import (
+    SCREEN_DRAWING_TOOL_SPECS,
+    ScreenDrawingEngine,
+    choose_computer_use_resolution,
+    normalize_to_display,
+)
 
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # 4 MiB guard against unbounded frame memory
 
@@ -57,6 +63,7 @@ class PixelAgentProtocolServer:
         self._prompt_builder = PromptBuilder()
         self._todos = TodoManager()
         self._mcp_health = McpHealthController()
+        self._drawing = ScreenDrawingEngine()
         self._gateway_provider_config: Optional[ProviderConfig] = None
         self._gateway_tools: list[dict[str, Any]] = []
 
@@ -875,8 +882,72 @@ class PixelAgentProtocolServer:
             self.send({"id": req_id, "ok": True, "result": {"servers": self._mcp_health.snapshot()}})
             return True
 
+        # Phase 9 Python-first screen drawing & live annotation RPCs
+        if msg_type == "drawing.add":
+            try:
+                res = self._drawing.add(params)
+                self.send({"id": req_id, "ok": True, "result": res})
+            except ValueError as exc:
+                self.send({"id": req_id, "ok": False, "error": str(exc)})
+            return True
+
+        if msg_type == "drawing.remove":
+            res = self._drawing.remove(str(params.get("id") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "drawing.undo":
+            self.send({"id": req_id, "ok": True, "result": self._drawing.undo()})
+            return True
+
+        if msg_type == "drawing.redo":
+            self.send({"id": req_id, "ok": True, "result": self._drawing.redo()})
+            return True
+
+        if msg_type == "drawing.clear":
+            self.send({"id": req_id, "ok": True, "result": self._drawing.clear()})
+            return True
+
+        if msg_type == "drawing.emergency_stop":
+            self.send({"id": req_id, "ok": True, "result": self._drawing.emergency_stop()})
+            return True
+
+        if msg_type == "drawing.set_interactive":
+            res = self._drawing.set_interactive(bool(params.get("interactive", False)))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "drawing.snapshot":
+            self.send({"id": req_id, "ok": True, "result": self._drawing.snapshot()})
+            return True
+
+        if msg_type == "drawing.map_coord":
+            mapped = normalize_to_display(
+                float(params.get("x") or 0.0),
+                float(params.get("y") or 0.0),
+                source_width=float(params.get("sourceWidth") or 1366.0),
+                source_height=float(params.get("sourceHeight") or 768.0),
+                display_x=float(params.get("displayX") or 0.0),
+                display_y=float(params.get("displayY") or 0.0),
+                display_width=float(params.get("displayWidth") or 1920.0),
+                display_height=float(params.get("displayHeight") or 1080.0),
+                scale_factor=float(params.get("scaleFactor") or 1.0),
+                input_is_physical_px=bool(params.get("inputIsPhysicalPx", False)),
+            )
+            cu_w, cu_h = choose_computer_use_resolution(
+                float(params.get("displayWidth") or 1920.0),
+                float(params.get("displayHeight") or 1080.0),
+            )
+            self.send({"id": req_id, "ok": True, "result": {**mapped, "computerUseResolution": {"width": cu_w, "height": cu_h}}})
+            return True
+
+        if msg_type == "drawing.tools":
+            self.send({"id": req_id, "ok": True, "result": {"tools": SCREEN_DRAWING_TOOL_SPECS}})
+            return True
+
         if msg_type == "shutdown":
             self._shutting_down = True
+            self._drawing.emergency_stop()
             if self._gateway is not None:
                 self._gateway.stop()
             if self._plugins is not None:
