@@ -28,8 +28,7 @@ export type WorkspaceView =
   | 'board'
   | 'settings';
 
-const NAV_ITEMS: Array<{ id: 'command-center' | 'projects' | 'library' | 'board' | 'tasks'; label: string; icon: typeof FolderKanban }> = [
-  { id: 'command-center', label: 'Command Center', icon: Compass },
+const NAV_ITEMS: Array<{ id: 'projects' | 'library' | 'board' | 'tasks'; label: string; icon: typeof FolderKanban }> = [
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'library', label: 'Library', icon: FolderOpen },
   { id: 'board', label: 'Pixel Board', icon: LayoutGrid },
@@ -37,10 +36,11 @@ const NAV_ITEMS: Array<{ id: 'command-center' | 'projects' | 'library' | 'board'
 ];
 
 const DESKTOP_DESTINATIONS: Array<{
-  id: 'capabilities' | 'messaging' | 'webhooks' | 'artifacts' | 'cron' | 'profiles' | 'agents' | 'starmap' | 'session-import';
+  id: 'command-center' | 'capabilities' | 'messaging' | 'webhooks' | 'artifacts' | 'cron' | 'profiles' | 'agents' | 'starmap' | 'session-import';
   label: string;
   icon: typeof FolderKanban;
 }> = [
+  { id: 'command-center', label: 'Command Center', icon: Compass },
   { id: 'capabilities', label: 'Capabilities', icon: Puzzle },
   { id: 'messaging', label: 'Messaging', icon: Radio },
   { id: 'webhooks', label: 'Webhooks', icon: Webhook },
