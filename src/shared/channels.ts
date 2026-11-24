@@ -172,10 +172,16 @@ export const CHANNELS = {
   googleCalendarDisconnect: 'plugins:googleCalendarDisconnect',
 
   terminalRun: 'terminal:run',
+  terminalOpenShell: 'terminal:openShell',
+  terminalWrite: 'terminal:write',
+  terminalResize: 'terminal:resize',
+  terminalRead: 'terminal:read',
+  terminalClose: 'terminal:close',
   terminalCancel: 'terminal:cancel',
   terminalList: 'terminal:list',
   terminalOutput: 'terminal:output',
   terminalExit: 'terminal:exit',
+  browserSessions: 'browser:sessions',
 
   workspaceFsListDir: 'workspacefs:listDir',
   workspaceFsReadFile: 'workspacefs:readFile',
@@ -209,6 +215,11 @@ export const CHANNELS = {
   voiceCaptureAcquire: 'voice:captureAcquire',
   voiceCaptureRelease: 'voice:captureRelease',
   voiceCaptureCancel: 'voice:captureCancel',
+  voiceContinuousStart: 'voice:continuousStart',
+  voiceContinuousStop: 'voice:continuousStop',
+  voiceContinuousFrame: 'voice:continuousFrame',
+  voiceContinuousState: 'voice:continuousState',
+  voiceGptLiveOffer: 'voice:gptLiveOffer',
   shortcutsGetStatus: 'shortcuts:getStatus',
 } as const;
 

@@ -22,7 +22,7 @@ afterEach(() => {
 describe('Stage 1 Hermes Source Integration: Runtime, Memory, Delegation, Compression & Display Parity', () => {
   it('validates defaults, valid updates, clamping, and restart persistence for all Stage 1A + 1B settings', () => {
     expect(DEFAULT_SETTINGS.agent).toMatchObject({
-      runtimeEngine: 'typescript',
+      runtimeEngine: 'python',
       maxTurns: 12,
       maxConcurrentSpecialists: 3,
       delegationMaxIterations: 12,

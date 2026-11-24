@@ -59,8 +59,10 @@ import { PythonAgentRunner } from './agent/pythonRunner';
 import { buildRoutineToolPlan, buildSkillToolPlan } from './skills/plan';
 import { ToolExecutors } from './agent/executors';
 import { PermissionGrantStore } from './agent/permissionStore';
-import { BrowserSession, validateBrowserUploadFile } from './agent/browser';
+import { BrowserSession, BrowserSessionManager, validateBrowserUploadFile } from './agent/browser';
 import { ComputerUseController } from './agent/computerUse';
+import { ContinuousVoiceController, exchangeGptLiveSdpOffer } from './voice/conversationMode';
+import type { ProviderId } from '../shared/types';
 import { JsonlAuditSink } from './agent/auditStore';
 import { openDatabase } from './data/database';
 import { boot } from './startup/boot';
@@ -571,7 +573,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     },
     onRevokeTool: (toolName) => permissions.revokeForTool(toolName),
   });
-  const voice = new VoiceService(pythonWorker, voiceModelManager);
+  const voice = new VoiceService(pythonWorker, voiceModelManager, {
+    getSettings: () => settings.get().voice,
+    isLocalOnly: () => settings.get().voice.sttProvider === 'local' && settings.get().voice.ttsProvider === 'system',
+    getProviderApiKey: (prov) => settings.getProviderApiKey(prov as ProviderId),
+    getPythonBridge: () => pythonAgentBridge,
+  });
+  const continuousVoice = new ContinuousVoiceController();
   let activePtt: {
     id: number;
     controller: AbortController;
@@ -642,7 +650,9 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     },
     completedActions: () => [...completedActions],
     notify: (report) => {
-      terminalService.killAll();
+      continuousVoice.stop();
+      terminalService.adminKillAll();
+      void browserManager.closeAll();
       computerUse.invalidateSnapshots();
       context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report);
     },
@@ -707,23 +717,30 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return result.content?.trim() ?? '';
   };
 
-  // Browser session consuming live persisted BrowserAutomationSettings (headless, CDP, domain policy, timeouts).
+  // Browser session & multi-session manager consuming live persisted BrowserAutomationSettings.
+  const persistentProfilesRoot = join(app.getPath('userData'), 'browser-profiles');
   const browser = new BrowserSession({
     getSettings: () => settings.get().browser,
+    persistentProfilesRoot,
+  });
+  const browserManager = new BrowserSessionManager({
+    getSettings: () => settings.get().browser,
+    persistentProfilesRoot,
   });
 
-  // Persistent ComputerUseController shared across tool calls so capture -> element action works end to end.
+  // Persistent session-isolated ComputerUseController with Python Set-of-Marks PNG annotation.
   const computerUse = new ComputerUseController({
     nativeHelper,
     isEmergencyStopped: () => emergency.isStopped(),
     getSettings: () => settings.get().computerUse,
+    annotateSom: (req) => pythonAgentBridge.annotateSomPng(req),
   });
 
   const executors = new ToolExecutors({
     clipboard,
     terminal: terminalService,
     computerUse,
-    getImageGenApiKey: (prov) => settings.getProviderApiKey(prov === 'openai' ? 'openai' : 'custom'),
+    getImageGenApiKey: (prov) => settings.getProviderApiKey(prov === 'openai' ? 'openai' : 'fal'),
     imageArtifactDir: join(app.getPath('userData'), 'artifacts', 'images'),
     openPath: (path) => shell.openPath(path),
     trashPath: (path) => shell.trashItem(path),
@@ -831,7 +848,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const resolveRuntimeEngine = (): 'typescript' | 'python' => {
     const envOverride = process.env.PIXEL_AGENT_RUNTIME?.trim().toLowerCase();
     if (envOverride === 'python' || envOverride === 'typescript') return envOverride;
-    return settings.get().agent?.runtimeEngine === 'python' ? 'python' : 'typescript';
+    return settings.get().agent?.runtimeEngine === 'typescript' ? 'typescript' : 'python';
   };
 
   const startPushToTalk = (): void => {
@@ -2036,7 +2053,110 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return cancelled;
   });
 
-  registerHandler(CHANNELS.terminalList, () => terminalService.list());
+  registerHandler(CHANNELS.terminalList, () => terminalService.list('user'));
+
+  registerHandler(CHANNELS.terminalOpenShell, async (_event, shell?: string, cwd?: string, cols?: number, rows?: number) => {
+    const safeRoot = resolveWorkspaceRoot();
+    if (!safeRoot && !cwd) {
+      return { ok: false, error: 'No workspace folder is configured for the active project.' };
+    }
+    const shellKind = shell === 'cmd' || shell === 'pwsh' || shell === 'sh' ? shell : 'powershell';
+    return terminalService.openShell({
+      shell: shellKind,
+      cwd: cwd || safeRoot || undefined,
+      ownerId: 'user',
+      cols: typeof cols === 'number' ? cols : 120,
+      rows: typeof rows === 'number' ? rows : 32,
+    });
+  });
+
+  registerHandler(CHANNELS.terminalWrite, (_event, sessionId: string, input: string) =>
+    terminalService.writeStdin(typeof sessionId === 'string' ? sessionId : '', typeof input === 'string' ? input : '', 'user'),
+  );
+
+  registerHandler(CHANNELS.terminalResize, (_event, sessionId: string, cols: number, rows: number) =>
+    terminalService.resize(typeof sessionId === 'string' ? sessionId : '', Number(cols) || 120, Number(rows) || 32, 'user'),
+  );
+
+  registerHandler(CHANNELS.terminalRead, (_event, sessionId: string, offset?: number) =>
+    terminalService.readOutput(typeof sessionId === 'string' ? sessionId : '', typeof offset === 'number' ? offset : 0, 'user'),
+  );
+
+  registerHandler(CHANNELS.terminalClose, (_event, sessionId: string) => {
+    const id = typeof sessionId === 'string' ? sessionId : '';
+    terminalService.cancel(id, 'user');
+    return terminalService.close(id, 'user');
+  });
+
+  registerHandler(CHANNELS.browserSessions, () => browserManager.list());
+
+  registerHandler(CHANNELS.voiceContinuousStart, () => {
+    if (emergency.isStopped()) {
+      return { ok: false, state: continuousVoice.getPhase(), error: 'Emergency Stop is active.' };
+    }
+    const v = settings.get().voice;
+    continuousVoice.updateConfig({
+      mode: v.voiceChatMode === 'gpt-live' ? 'gpt-live' : 'chained',
+      silenceThreshold: v.silenceThreshold,
+      silenceDurationSec: v.silenceDurationSec,
+      bargeIn: v.bargeIn,
+      bargeInGraceSec: v.bargeInGraceSec,
+      bargeInThresholdMultiplier: v.bargeInThresholdMultiplier,
+      stopPhrases: v.stopPhrases,
+    });
+    continuousVoice.start();
+    context.sendToRenderer(CHANNELS.voiceContinuousState, { state: continuousVoice.getPhase() });
+    return { ok: true, state: continuousVoice.getPhase() };
+  });
+
+  registerHandler(CHANNELS.voiceContinuousStop, () => {
+    continuousVoice.stop();
+    voice.cancelAll();
+    context.sendToRenderer(CHANNELS.voiceContinuousState, { state: continuousVoice.getPhase() });
+    return { ok: true, state: continuousVoice.getPhase() };
+  });
+
+  registerHandler(CHANNELS.voiceContinuousFrame, (_event, rms: number, speaking?: boolean) => {
+    if (speaking === true && continuousVoice.getPhase() !== 'speaking') {
+      continuousVoice.beginSpeaking();
+    } else if (speaking === false && continuousVoice.getPhase() === 'speaking') {
+      continuousVoice.start();
+    }
+    const evt = continuousVoice.ingestMicRms(Number(rms) || 0);
+    if (evt === 'barge_in') {
+      voice.cancelAll();
+    }
+    const state = continuousVoice.getPhase();
+    if (evt) {
+      context.sendToRenderer(CHANNELS.voiceContinuousState, { state, event: evt });
+    }
+    return { state, event: evt };
+  });
+
+  registerHandler(CHANNELS.voiceGptLiveOffer, async (_event, sdpOffer: string) => {
+    if (emergency.isStopped()) {
+      return { ok: false, error: 'Emergency Stop is active.' };
+    }
+    const voiceCfg = settings.get().voice;
+    const apiKey = settings.getProviderApiKey('openai') ?? '';
+    try {
+      return await pythonAgentBridge.voiceGptLiveSdp({
+        sdpOffer: typeof sdpOffer === 'string' ? sdpOffer : '',
+        apiKey,
+        model: voiceCfg.gptLiveModel ?? 'gpt-realtime',
+        voice: voiceCfg.gptLiveVoice ?? 'marin',
+        instructions: voiceCfg.gptLiveInstructions ?? '',
+      });
+    } catch {
+      return exchangeGptLiveSdpOffer({
+        sdpOffer: typeof sdpOffer === 'string' ? sdpOffer : '',
+        apiKey,
+        model: voiceCfg.gptLiveModel ?? 'gpt-realtime',
+        voice: voiceCfg.gptLiveVoice ?? 'marin',
+        instructions: voiceCfg.gptLiveInstructions ?? '',
+      });
+    }
+  });
 
   registerHandler(CHANNELS.workspaceFsListDir, (_event, relativePath?: string) => {
     const root = resolveWorkspaceRoot();

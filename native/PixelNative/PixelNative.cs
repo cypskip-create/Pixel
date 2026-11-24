@@ -59,6 +59,20 @@ internal static class Program
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref NativeMessage message);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsDelegate callback, IntPtr state);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    [DllImport("user32.dll")] private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    private const int SwRestore = 9;
+    private const uint MouseEventLeftDown = 0x0002;
+    private const uint MouseEventLeftUp = 0x0004;
+    private const uint MouseEventRightDown = 0x0008;
+    private const uint MouseEventRightUp = 0x0010;
+    private const uint MouseEventMiddleDown = 0x0020;
+    private const uint MouseEventMiddleUp = 0x0040;
+    private const uint KeyEventKeyUp = 0x0002;
 
     private const uint EventSystemForeground = 0x0003;
     private const uint EventSystemMinimizeStart = 0x0016;
@@ -330,6 +344,12 @@ internal static class Program
                 return SetElementValue(args);
             case "control_element":
                 return ControlElement(args);
+            case "focus_window":
+                return FocusWindow(args);
+            case "mouse_action":
+                return MouseAction(args);
+            case "send_keys":
+                return SendKeysAction(args);
             default:
                 throw new InvalidOperationException("Unknown command: " + command);
         }
@@ -1347,6 +1367,122 @@ internal static class Program
         if (name.StartsWith(needle, StringComparison.Ordinal)) return 1;
         if (name.Contains(needle)) return 2;
         return -1;
+    }
+
+    private static object FocusWindow(Dictionary<string, object> args)
+    {
+        WindowRecord target = ResolveRecord(args);
+        if (IsIconic(target.Handle)) ShowWindow(target.Handle, SwRestore);
+        bool focused = SetForegroundWindow(target.Handle);
+        return new Dictionary<string, object> {
+            { "window", PublicWindow(target) },
+            { "focused", focused || GetForegroundWindow() == target.Handle }
+        };
+    }
+
+    private static object MouseAction(Dictionary<string, object> args)
+    {
+        WindowRecord target = ResolveRecord(args);
+        string action = args != null && args.ContainsKey("action") ? Convert.ToString(args["action"]) : "click";
+        int x = args != null && args.ContainsKey("x") ? Convert.ToInt32(args["x"]) : target.X + (target.Width / 2);
+        int y = args != null && args.ContainsKey("y") ? Convert.ToInt32(args["y"]) : target.Y + (target.Height / 2);
+        int toX = args != null && args.ContainsKey("toX") ? Convert.ToInt32(args["toX"]) : x;
+        int toY = args != null && args.ContainsKey("toY") ? Convert.ToInt32(args["toY"]) : y;
+
+        // Clamp coordinates inside the verified target window bounds so input cannot escape the target window.
+        x = Math.Max(target.X, Math.Min(target.X + Math.Max(1, target.Width - 1), x));
+        y = Math.Max(target.Y, Math.Min(target.Y + Math.Max(1, target.Height - 1), y));
+        toX = Math.Max(target.X, Math.Min(target.X + Math.Max(1, target.Width - 1), toX));
+        toY = Math.Max(target.Y, Math.Min(target.Y + Math.Max(1, target.Height - 1), toY));
+
+        if (IsIconic(target.Handle)) ShowWindow(target.Handle, SwRestore);
+        SetForegroundWindow(target.Handle);
+        Thread.Sleep(40);
+        SetCursorPos(x, y);
+        Thread.Sleep(20);
+
+        switch ((action ?? "click").ToLowerInvariant())
+        {
+            case "double_click":
+                mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+                Thread.Sleep(40);
+                mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+                break;
+            case "right_click":
+                mouse_event(MouseEventRightDown, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MouseEventRightUp, 0, 0, 0, UIntPtr.Zero);
+                break;
+            case "middle_click":
+                mouse_event(MouseEventMiddleDown, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MouseEventMiddleUp, 0, 0, 0, UIntPtr.Zero);
+                break;
+            case "drag":
+                mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+                Thread.Sleep(35);
+                SetCursorPos(toX, toY);
+                Thread.Sleep(35);
+                mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+                break;
+            default:
+                mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+                break;
+        }
+
+        return new Dictionary<string, object> {
+            { "window", PublicWindow(target) },
+            { "action", action },
+            { "x", x },
+            { "y", y },
+            { "executed", true }
+        };
+    }
+
+    private static object SendKeysAction(Dictionary<string, object> args)
+    {
+        WindowRecord target = ResolveRecord(args);
+        string combo = args != null && args.ContainsKey("key") ? Convert.ToString(args["key"]) : "";
+        if (string.IsNullOrWhiteSpace(combo))
+            throw new InvalidOperationException("A key or key combination (e.g. Enter, Ctrl+S) is required.");
+
+        if (IsIconic(target.Handle)) ShowWindow(target.Handle, SwRestore);
+        SetForegroundWindow(target.Handle);
+        Thread.Sleep(40);
+
+        string[] parts = combo.Split(new[] { '+' }, StringSplitOptions.RemoveEmptyEntries);
+        var modifiers = new List<byte>();
+        byte primary = 0;
+
+        foreach (string rawPart in parts)
+        {
+            string p = rawPart.Trim();
+            int vk;
+            bool isModifier;
+            if (!TryVirtualKey(p, out vk, out isModifier))
+                throw new InvalidOperationException("Unsupported key name: " + rawPart);
+            if (isModifier) modifiers.Add((byte)vk);
+            else primary = (byte)vk;
+        }
+
+        if (primary == 0 && modifiers.Count == 0)
+            throw new InvalidOperationException("No valid keys resolved from: " + combo);
+
+        foreach (byte mod in modifiers) keybd_event(mod, 0, 0, UIntPtr.Zero);
+        if (primary != 0)
+        {
+            keybd_event(primary, 0, 0, UIntPtr.Zero);
+            keybd_event(primary, 0, KeyEventKeyUp, UIntPtr.Zero);
+        }
+        for (int i = modifiers.Count - 1; i >= 0; i--)
+            keybd_event(modifiers[i], 0, KeyEventKeyUp, UIntPtr.Zero);
+
+        return new Dictionary<string, object> {
+            { "window", PublicWindow(target) },
+            { "key", combo },
+            { "executed", true }
+        };
     }
 
     private static string RoleName(ControlType type)

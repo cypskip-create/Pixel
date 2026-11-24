@@ -1,15 +1,20 @@
 /**
  * Consolidated Windows Computer Use Controller (Hermes `tools/computer_use` parity).
  *
- * Persistent across separate agent tool calls:
+ * Session-isolated & multimodal:
+ *  - Snapshots are strictly scoped per `scopeKey` (trusted conversation/project/agent ID)
+ *    and bound to `(snapshotId, windowId, processId, capturedAt)` with 30s TTL expiry.
+ *    A capture from Conversation A NEVER overwrites Conversation B's active snapshot.
  *  - `ax` mode: structured UIA accessibility tree + verified target window/process identity.
  *  - `vision` mode: real PNG screenshot via `capture_window` + window bounds.
- *  - `som` mode: real PNG screenshot + 1-based Set-of-Marks element index table bound to
- *    `(snapshotId, windowId, processId, capturedAt)` with 30s TTL expiry.
- *  - Distinct action semantics: `click` (UIA select/invoke), `set_value`/`type` (UIA ValuePattern),
- *    `scroll` (UIA ScrollPattern), `verify` (`verify_element_state`), while `double_click`,
- *    `right_click`, `middle_click`, `drag`, and `key` explicitly report `foreground_required`
- *    instead of silently masquerading as UIA `select`.
+ *  - `som` mode: real PNG screenshot annotated via Python Set-of-Marks (`annotateSom`)
+ *    with crisp visible bounding boxes & 1-based numbered badges matching the element table.
+ *  - Distinct action semantics:
+ *    - Background UIA: `click`, `set_value`/`type`, `scroll`, `verify`.
+ *    - Foreground Win32 (`PixelNative.exe` `mouse_action`/`send_keys`/`focus_window`):
+ *      `double_click`, `right_click`, `middle_click`, `drag`, `key`, `focus_window`
+ *      execute against the revalidated target window when `allowForegroundFallback === true`,
+ *      and explicitly refuse with `foreground_required` when foreground input is disabled.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -22,10 +27,13 @@ export type ComputerUseAction =
   | 'click'
   | 'double_click'
   | 'right_click'
+  | 'middle_click'
+  | 'drag'
   | 'type'
   | 'set_value'
   | 'key'
   | 'scroll'
+  | 'focus_window'
   | 'wait'
   | 'verify';
 
@@ -43,47 +51,62 @@ export interface SomElementRef {
 
 export interface ComputerUseSnapshot {
   snapshotId: string;
+  scopeKey: string;
   windowId: string;
   windowTitle: string;
   processId: number;
   processName: string;
+  windowBounds?: { x: number; y: number; width: number; height: number };
   capturedAt: number;
   mode: ComputerUseCaptureMode;
   elements: SomElementRef[];
   image?: ImageAttachment;
+  somAnnotated?: boolean;
 }
 
 export interface ComputerUseRequest {
   action: ComputerUseAction;
   mode?: ComputerUseCaptureMode;
   windowId?: string;
+  snapshotId?: string;
   element?: number;
+  targetElement?: number;
   text?: string;
   key?: string;
   direction?: 'up' | 'down';
   durationMs?: number;
   expected?: string;
+  /** Trusted runtime scope (conversation/project/task). Set by ToolExecutors, never model args. */
+  scopeKey?: string;
 }
 
 export interface ComputerUseOutcome {
   ok: boolean;
   action: ComputerUseAction;
-  interactionMode: 'background_uia' | 'foreground_required' | 'read_only';
+  interactionMode: 'background_uia' | 'foreground_approved' | 'foreground_required' | 'read_only';
   content: string;
   image?: ImageAttachment;
   detail?: Record<string, unknown>;
 }
 
+export type SomAnnotator = (input: {
+  pngBase64: string;
+  elements: Array<{ index: number; bounds?: { x: number; y: number; width: number; height: number } }>;
+  windowBounds?: { x: number; y: number; width: number; height: number };
+}) => Promise<{ ok: boolean; annotatedBase64?: string; width?: number; height?: number; annotatedCount?: number; error?: string }>;
+
 const SNAPSHOT_TTL_MS = 30_000;
+const DEFAULT_SCOPE = 'default-session';
 
 export class ComputerUseController {
-  private lastSnapshot: ComputerUseSnapshot | null = null;
+  private readonly snapshots = new Map<string, ComputerUseSnapshot>();
 
   constructor(
     private readonly deps: {
       nativeHelper?: NativeHelper;
       isEmergencyStopped?: () => boolean;
       getSettings?: () => ComputerUseSettings;
+      annotateSom?: SomAnnotator;
       now?: () => number;
     } = {},
   ) {}
@@ -92,32 +115,47 @@ export class ComputerUseController {
     return this.deps.now ? this.deps.now() : Date.now();
   }
 
-  recordSnapshot(snapshot: ComputerUseSnapshot): void {
-    this.lastSnapshot = snapshot;
+  private normalizeScope(scopeKey?: string): string {
+    return (scopeKey && scopeKey.trim()) ? scopeKey.trim() : DEFAULT_SCOPE;
   }
 
-  getSnapshot(): ComputerUseSnapshot | null {
-    return this.lastSnapshot;
+  recordSnapshot(snapshot: ComputerUseSnapshot, scopeKey?: string): void {
+    const scope = this.normalizeScope(scopeKey ?? snapshot.scopeKey);
+    this.snapshots.set(scope, { ...snapshot, scopeKey: scope });
+  }
+
+  getSnapshot(scopeKey?: string): ComputerUseSnapshot | null {
+    return this.snapshots.get(this.normalizeScope(scopeKey)) ?? null;
   }
 
   resolveElement(
     index: number,
     expectedWindowId?: string,
+    scopeKey?: string,
+    expectedSnapshotId?: string,
   ): { ok: true; ref: SomElementRef; snapshot: ComputerUseSnapshot } | { ok: false; error: string } {
-    if (!this.lastSnapshot) {
-      return { ok: false, error: 'No active capture snapshot. Run computer_use(action="capture") first.' };
+    const scope = this.normalizeScope(scopeKey);
+    const snap = this.snapshots.get(scope);
+    if (!snap) {
+      return { ok: false, error: 'No active capture snapshot for this session. Run computer_use(action="capture") first.' };
     }
-    if (this.now() - this.lastSnapshot.capturedAt > SNAPSHOT_TTL_MS) {
-      this.lastSnapshot = null;
+    if (this.now() - snap.capturedAt > SNAPSHOT_TTL_MS) {
+      this.snapshots.delete(scope);
       return { ok: false, error: 'Capture snapshot expired (stale element reference). Re-run capture.' };
     }
-    if (expectedWindowId && this.lastSnapshot.windowId !== expectedWindowId) {
+    if (expectedSnapshotId && snap.snapshotId !== expectedSnapshotId) {
       return {
         ok: false,
-        error: `Target window mismatch: snapshot belongs to "${this.lastSnapshot.windowId}", not "${expectedWindowId}".`,
+        error: `Snapshot mismatch: expected "${expectedSnapshotId}", active session snapshot is "${snap.snapshotId}".`,
       };
     }
-    const ref = this.lastSnapshot.elements.find((e) => e.index === index);
+    if (expectedWindowId && snap.windowId !== expectedWindowId) {
+      return {
+        ok: false,
+        error: `Target window mismatch: snapshot belongs to "${snap.windowId}", not "${expectedWindowId}".`,
+      };
+    }
+    const ref = snap.elements.find((e) => e.index === index);
     if (!ref) {
       return { ok: false, error: `Element index ${index} was not found in the last capture.` };
     }
@@ -127,14 +165,20 @@ export class ComputerUseController {
     if (ref.isEnabled === false) {
       return { ok: false, error: `Element ${index} ("${ref.name}") is disabled.` };
     }
-    return { ok: true, ref, snapshot: this.lastSnapshot };
+    return { ok: true, ref, snapshot: snap };
   }
 
-  invalidateSnapshots(): void {
-    this.lastSnapshot = null;
+  invalidateSnapshots(scopeKey?: string): void {
+    if (scopeKey) {
+      this.snapshots.delete(this.normalizeScope(scopeKey));
+    } else {
+      this.snapshots.clear();
+    }
   }
 
   async execute(req: ComputerUseRequest): Promise<ComputerUseOutcome> {
+    const scope = this.normalizeScope(req.scopeKey);
+
     if (this.deps.isEmergencyStopped?.()) {
       this.invalidateSnapshots();
       return {
@@ -157,6 +201,7 @@ export class ComputerUseController {
     }
 
     const helper = this.deps.nativeHelper;
+    const settings = this.deps.getSettings?.();
 
     if (req.action === 'list_windows') {
       if (!helper) {
@@ -178,14 +223,16 @@ export class ComputerUseController {
       if (!helper) {
         return { ok: false, action: 'capture', interactionMode: 'read_only', content: 'Windows UIA helper is unavailable.' };
       }
-      const mode: ComputerUseCaptureMode = req.mode ?? this.deps.getSettings?.().captureMode ?? 'som';
+      const mode: ComputerUseCaptureMode = req.mode ?? settings?.captureMode ?? 'som';
       const fg = await helper.lastExternalForegroundWindow();
       const targetWin = 'window' in fg ? fg.window : null;
       if (!targetWin) {
         return { ok: false, action: 'capture', interactionMode: 'read_only', content: 'No target external window is available to capture.' };
       }
 
-      let image: ImageAttachment | undefined;
+      let rawPngBase64 = '';
+      let capWidth = targetWin.rect?.width ?? 0;
+      let capHeight = targetWin.rect?.height ?? 0;
       if (mode === 'vision' || mode === 'som') {
         try {
           const cap = await helper.call('capture_window', {
@@ -196,17 +243,12 @@ export class ComputerUseController {
             requireForeground: false,
           });
           if (cap && typeof cap.base64 === 'string' && cap.base64.length > 0) {
-            image = {
-              dataUrl: `data:image/png;base64,${cap.base64}`,
-              mimeType: 'image/png',
-              width: cap.width,
-              height: cap.height,
-              source: 'screenshot',
-              label: `${targetWin.title} (${mode})`,
-            };
+            rawPngBase64 = cap.base64;
+            capWidth = cap.width;
+            capHeight = cap.height;
           }
         } catch {
-          // If PrintWindow capture is unavailable for this window, fall back cleanly to AX metadata.
+          // PrintWindow may fail on protected/minimized windows; fall back cleanly to AX metadata.
         }
       }
 
@@ -231,25 +273,59 @@ export class ComputerUseController {
         }));
       }
 
+      let finalPngBase64 = rawPngBase64;
+      let somAnnotated = false;
+      if (mode === 'som' && rawPngBase64 && refs.length > 0 && this.deps.annotateSom) {
+        try {
+          const ann = await this.deps.annotateSom({
+            pngBase64: rawPngBase64,
+            elements: refs.map((r) => ({ index: r.index, bounds: r.bounds })),
+            windowBounds: targetWin.rect,
+          });
+          if (ann.ok && ann.annotatedBase64) {
+            finalPngBase64 = ann.annotatedBase64;
+            somAnnotated = true;
+          }
+        } catch {
+          // Keep unannotated screenshot if annotator is temporarily unavailable.
+        }
+      }
+
+      const image: ImageAttachment | undefined = finalPngBase64
+        ? {
+            dataUrl: `data:image/png;base64,${finalPngBase64}`,
+            mimeType: 'image/png',
+            width: capWidth,
+            height: capHeight,
+            source: 'screenshot',
+            label: `${targetWin.title} (${mode}${somAnnotated ? ' annotated' : ''})`,
+          }
+        : undefined;
+
       const snap: ComputerUseSnapshot = {
         snapshotId: `snap_${randomUUID().slice(0, 8)}`,
+        scopeKey: scope,
         windowId: targetWin.windowId,
         windowTitle: targetWin.title,
         processId: targetWin.pid,
         processName: targetWin.processName,
+        windowBounds: targetWin.rect,
         capturedAt: this.now(),
         mode,
         elements: refs,
         ...(image ? { image } : {}),
+        somAnnotated,
       };
-      this.recordSnapshot(snap);
+      this.recordSnapshot(snap, scope);
 
-      const summary = refs.map((r) => `[${r.index}] ${r.controlType}: "${r.name}"${r.bounds ? ` @(${r.bounds.x},${r.bounds.y},${r.bounds.width}x${r.bounds.height})` : ''}`).join('\n');
+      const summary = refs
+        .map((r) => `[${r.index}] ${r.controlType}: "${r.name}"${r.bounds ? ` @(${r.bounds.x},${r.bounds.y},${r.bounds.width}x${r.bounds.height})` : ''}`)
+        .join('\n');
       return {
         ok: true,
         action: 'capture',
         interactionMode: 'read_only',
-        content: `Captured ${snap.windowTitle} (${snap.processName}) in ${mode} mode [${snap.snapshotId}]${image ? ` with ${image.width}x${image.height} PNG screenshot` : ''} and ${refs.length} element(s).${summary ? `\n${summary}` : ''}`,
+        content: `Captured ${snap.windowTitle} (${snap.processName}) in ${mode}${somAnnotated ? ' (Set-of-Marks annotated)' : ''} mode [${snap.snapshotId}]${image ? ` with ${image.width}x${image.height} PNG screenshot` : ''} and ${refs.length} element(s).${summary ? `\n${summary}` : ''}`,
         ...(image ? { image } : {}),
         detail: { snapshot: snap },
       };
@@ -259,7 +335,7 @@ export class ComputerUseController {
       if (typeof req.element !== 'number') {
         return { ok: false, action: req.action, interactionMode: 'background_uia', content: 'An explicit element index from capture is required.' };
       }
-      const resolved = this.resolveElement(req.element, req.windowId);
+      const resolved = this.resolveElement(req.element, req.windowId, scope, req.snapshotId);
       if (!resolved.ok) {
         return { ok: false, action: req.action, interactionMode: 'background_uia', content: resolved.error };
       }
@@ -287,7 +363,7 @@ export class ComputerUseController {
       if (typeof req.element !== 'number') {
         return { ok: false, action: 'click', interactionMode: 'background_uia', content: 'An explicit element index from capture is required.' };
       }
-      const resolved = this.resolveElement(req.element, req.windowId);
+      const resolved = this.resolveElement(req.element, req.windowId, scope, req.snapshotId);
       if (!resolved.ok) {
         return { ok: false, action: 'click', interactionMode: 'background_uia', content: resolved.error };
       }
@@ -315,7 +391,7 @@ export class ComputerUseController {
       if (typeof req.element !== 'number') {
         return { ok: false, action: 'scroll', interactionMode: 'background_uia', content: 'An explicit element index from capture is required to scroll.' };
       }
-      const resolved = this.resolveElement(req.element, req.windowId);
+      const resolved = this.resolveElement(req.element, req.windowId, scope, req.snapshotId);
       if (!resolved.ok) {
         return { ok: false, action: 'scroll', interactionMode: 'background_uia', content: resolved.error };
       }
@@ -342,7 +418,8 @@ export class ComputerUseController {
     }
 
     if (req.action === 'verify') {
-      if (!helper || !this.lastSnapshot) {
+      const snap = this.getSnapshot(scope);
+      if (!helper || !snap) {
         return { ok: false, action: 'verify', interactionMode: 'read_only', content: 'Capture a window first before verifying element state.' };
       }
       const selector = req.expected?.trim() || '';
@@ -351,10 +428,10 @@ export class ComputerUseController {
       }
       const res = await helper.call('verify_element_state', {
         selector,
-        targetWindowId: this.lastSnapshot.windowId,
-        expectedWindowTitle: this.lastSnapshot.windowTitle,
-        expectedProcessId: this.lastSnapshot.processId,
-        expectedProcessName: this.lastSnapshot.processName,
+        targetWindowId: snap.windowId,
+        expectedWindowTitle: snap.windowTitle,
+        expectedProcessId: snap.processId,
+        expectedProcessName: snap.processName,
         state: 'present',
       });
       return {
@@ -363,16 +440,121 @@ export class ComputerUseController {
         interactionMode: 'read_only',
         content: res.matches
           ? `Verified "${selector}" is present (${res.matchedCount} match(es)).`
-          : `Verification failed: "${selector}" was not found in ${this.lastSnapshot.windowTitle}.`,
+          : `Verification failed: "${selector}" was not found in ${snap.windowTitle}.`,
       };
     }
 
-    // Distinct foreground-only pointer/keyboard actions (never silently aliased to UIA select!).
+    // Foreground-only Win32 pointer/keyboard/focus actions: require explicit allowForegroundFallback!
+    const foregroundAllowed = settings?.allowForegroundFallback === true;
+    if (!foregroundAllowed) {
+      return {
+        ok: false,
+        action: req.action,
+        interactionMode: 'foreground_required',
+        content: `Action "${req.action}" requires foreground pointer/keyboard control (enable "Allow foreground fallback" in Computer Use settings).`,
+      };
+    }
+
+    if (!helper) {
+      return {
+        ok: false,
+        action: req.action,
+        interactionMode: 'foreground_approved',
+        content: 'Windows UIA/Win32 native helper is unavailable.',
+      };
+    }
+
+    const snap = this.getSnapshot(scope);
+    if (!snap) {
+      return {
+        ok: false,
+        action: req.action,
+        interactionMode: 'foreground_approved',
+        content: 'Capture a window first before issuing foreground actions.',
+      };
+    }
+
+    if (req.action === 'focus_window') {
+      const res = await helper.call('focus_window', {
+        targetWindowId: snap.windowId,
+        expectedWindowTitle: snap.windowTitle,
+        expectedProcessId: snap.processId,
+        expectedProcessName: snap.processName,
+      });
+      return {
+        ok: res.focused,
+        action: 'focus_window',
+        interactionMode: 'foreground_approved',
+        content: res.focused ? `Focused window "${snap.windowTitle}".` : `Could not focus "${snap.windowTitle}".`,
+      };
+    }
+
+    if (req.action === 'key') {
+      const keyStr = req.key?.trim() || '';
+      if (!keyStr) {
+        return { ok: false, action: 'key', interactionMode: 'foreground_approved', content: 'Specify a key or shortcut (e.g. Enter, Ctrl+S).' };
+      }
+      const res = await helper.call('send_keys', {
+        targetWindowId: snap.windowId,
+        expectedWindowTitle: snap.windowTitle,
+        expectedProcessId: snap.processId,
+        expectedProcessName: snap.processName,
+        key: keyStr,
+      });
+      return {
+        ok: res.executed,
+        action: 'key',
+        interactionMode: 'foreground_approved',
+        content: `Sent key "${keyStr}" to "${snap.windowTitle}".`,
+      };
+    }
+
+    if (req.action === 'double_click' || req.action === 'right_click' || req.action === 'middle_click' || req.action === 'drag') {
+      if (typeof req.element !== 'number') {
+        return { ok: false, action: req.action, interactionMode: 'foreground_approved', content: 'An explicit element index from capture is required.' };
+      }
+      const resolved = this.resolveElement(req.element, req.windowId, scope, req.snapshotId);
+      if (!resolved.ok) {
+        return { ok: false, action: req.action, interactionMode: 'foreground_approved', content: resolved.error };
+      }
+      const b = resolved.ref.bounds;
+      if (!b) {
+        return { ok: false, action: req.action, interactionMode: 'foreground_approved', content: `Element [${resolved.ref.index}] has no screen bounds.` };
+      }
+      const cx = Math.round(b.x + b.width / 2);
+      const cy = Math.round(b.y + b.height / 2);
+      let toX = cx;
+      let toY = cy;
+      if (req.action === 'drag' && typeof req.targetElement === 'number') {
+        const dest = this.resolveElement(req.targetElement, req.windowId, scope, req.snapshotId);
+        if (dest.ok && dest.ref.bounds) {
+          toX = Math.round(dest.ref.bounds.x + dest.ref.bounds.width / 2);
+          toY = Math.round(dest.ref.bounds.y + dest.ref.bounds.height / 2);
+        }
+      }
+      const res = await helper.call('mouse_action', {
+        targetWindowId: resolved.snapshot.windowId,
+        expectedWindowTitle: resolved.snapshot.windowTitle,
+        expectedProcessId: resolved.snapshot.processId,
+        expectedProcessName: resolved.snapshot.processName,
+        action: req.action,
+        x: cx,
+        y: cy,
+        ...(req.action === 'drag' ? { toX, toY } : {}),
+      });
+      return {
+        ok: res.executed,
+        action: req.action,
+        interactionMode: 'foreground_approved',
+        content: `Performed foreground ${req.action} on [${resolved.ref.index}] "${resolved.ref.name}" at (${res.x},${res.y}).`,
+      };
+    }
+
     return {
       ok: false,
       action: req.action,
       interactionMode: 'foreground_required',
-      content: `Action "${req.action}" requires foreground pointer/keyboard driver control and is not silently emulated via UIA select.`,
+      content: `Unsupported computer_use action "${String(req.action)}".`,
     };
   }
 }

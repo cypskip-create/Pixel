@@ -2,7 +2,15 @@ import { createHash } from 'node:crypto';
 import { open, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export type VoiceModelId = 'tiny.en' | 'base.en' | 'small.en' | 'kokoro-v1.0-int8';
+export type VoiceModelId =
+  | 'tiny.en'
+  | 'base.en'
+  | 'small.en'
+  | 'tiny'
+  | 'base'
+  | 'small'
+  | 'large-v3-turbo'
+  | 'kokoro-v1.0-int8';
 export type VoiceModelKind = 'stt' | 'tts';
 
 export interface VoiceModelInfo {
@@ -35,13 +43,26 @@ export interface VoiceModelCatalogEntry extends VoiceModelInfo {
   files: readonly VoiceModelFile[];
 }
 
-const STT_FILES = (repository: string, revision: string, weightsBytes: number, weightsSha256: string): readonly VoiceModelFile[] => {
-  const base = `https://huggingface.co/Systran/${repository}/resolve/${revision}`;
+const STT_FILES = (
+  repository: string,
+  revision: string,
+  weightsBytes: number,
+  weightsSha256?: string,
+  org = 'Systran',
+  maxWeightsBytes = 900_000_000,
+): readonly VoiceModelFile[] => {
+  const base = `https://huggingface.co/${org}/${repository}/resolve/${revision}`;
   return [
-    { name: 'model.bin', url: `${base}/model.bin`, estimatedBytes: weightsBytes, maxBytes: 600_000_000, sha256: weightsSha256 },
+    {
+      name: 'model.bin',
+      url: `${base}/model.bin`,
+      estimatedBytes: weightsBytes,
+      maxBytes: maxWeightsBytes,
+      ...(weightsSha256 ? { sha256: weightsSha256 } : {}),
+    },
     { name: 'config.json', url: `${base}/config.json`, estimatedBytes: 3_000, maxBytes: 100_000 },
     { name: 'tokenizer.json', url: `${base}/tokenizer.json`, estimatedBytes: 2_130_000, maxBytes: 10_000_000 },
-    { name: 'vocabulary.txt', url: `${base}/vocabulary.txt`, estimatedBytes: 500_000, maxBytes: 1_000_000 },
+    { name: 'vocabulary.txt', url: `${base}/vocabulary.txt`, estimatedBytes: 500_000, maxBytes: 2_000_000 },
   ];
 };
 
@@ -60,6 +81,26 @@ export const VOICE_MODEL_CATALOG: readonly VoiceModelCatalogEntry[] = [
     id: 'small.en', label: 'Small English · higher memory', kind: 'stt', sizeBytes: 507_000_000,
     downloaded: false, valid: false, license: 'MIT', source: 'Systran/faster-whisper-small.en @ d1d751a (pinned revision)',
     files: STT_FILES('faster-whisper-small.en', 'd1d751a', 483_500_000, '62b2a45b05ee59acb4a5341b33ee35e041395d378d418a18acfe4c9e768ee37a'),
+  },
+  {
+    id: 'tiny', label: 'Tiny Multilingual · 99 languages', kind: 'stt', sizeBytes: 80_000_000,
+    downloaded: false, valid: false, license: 'MIT', source: 'Systran/faster-whisper-tiny @ main',
+    files: STT_FILES('faster-whisper-tiny', 'main', 75_500_000),
+  },
+  {
+    id: 'base', label: 'Base Multilingual · balanced', kind: 'stt', sizeBytes: 153_000_000,
+    downloaded: false, valid: false, license: 'MIT', source: 'Systran/faster-whisper-base @ main',
+    files: STT_FILES('faster-whisper-base', 'main', 145_200_000),
+  },
+  {
+    id: 'small', label: 'Small Multilingual · accurate', kind: 'stt', sizeBytes: 508_000_000,
+    downloaded: false, valid: false, license: 'MIT', source: 'Systran/faster-whisper-small @ main',
+    files: STT_FILES('faster-whisper-small', 'main', 483_500_000),
+  },
+  {
+    id: 'large-v3-turbo', label: 'Large v3 Turbo Multilingual · highest quality', kind: 'stt', sizeBytes: 860_000_000,
+    downloaded: false, valid: false, license: 'MIT', source: 'mobiuslabsgmbh/faster-whisper-large-v3-turbo @ main',
+    files: STT_FILES('faster-whisper-large-v3-turbo', 'main', 809_000_000, undefined, 'mobiuslabsgmbh', 1_200_000_000),
   },
   {
     id: 'kokoro-v1.0-int8', label: 'Kokoro English · natural neural voice', kind: 'tts', sizeBytes: 143_000_000,

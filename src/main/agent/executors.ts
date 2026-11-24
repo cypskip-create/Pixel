@@ -16,6 +16,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import { arch, cpus, freemem, networkInterfaces, platform, release, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
@@ -67,6 +68,8 @@ export interface ToolResult {
   ok: boolean;
   /** Text fed back to the model as the tool message. */
   content: string;
+  /** Optional multimodal image attachment forwarded directly to vision-capable models and UI previews. */
+  image?: { mediaType: string; dataBase64: string; label?: string };
   /** Structured detail kept for the audit trail and the task rail. */
   detail?: Record<string, unknown>;
   /** Present when the tool failed, for classification in the UI. */
@@ -221,17 +224,35 @@ export class ToolExecutors {
   }
 
   /** Dispatch one call. Never throws: failures become ToolResult. */
-  async run(name: string, args: Record<string, unknown>, signal?: AbortSignal, context?: { taskId: string }): Promise<ToolResult> {
+  async run(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    context?: { taskId: string; ownerId?: string; conversationId?: string; projectId?: string },
+  ): Promise<ToolResult> {
     if (signal?.aborted) return cancelledResult(name);
 
+    const isMutatingComputerUse =
+      name === 'computer_use' &&
+      typeof args.action === 'string' &&
+      !['list_windows', 'capture', 'wait', 'verify'].includes(args.action);
+
     let releaseInput: (() => void) | null = null;
-    if (name === 'type_text' || name === 'clipboard_paste' || name === 'invoke_ui_element' || name === 'control_ui_element') {
+    if (
+      name === 'type_text' ||
+      name === 'clipboard_paste' ||
+      name === 'invoke_ui_element' ||
+      name === 'control_ui_element' ||
+      isMutatingComputerUse
+    ) {
       releaseInput = await this.inputLease.acquire(signal);
       if (!releaseInput || signal?.aborted) {
         releaseInput?.();
         return cancelledResult(name);
       }
     }
+
+    const trustedOwnerId = context?.ownerId || context?.conversationId || context?.projectId || context?.taskId || 'default-session';
 
     // Anything this call starts is killed if the signal fires. Tools run one at
     // a time, so "children that did not exist before this call" is exactly the
@@ -246,7 +267,7 @@ export class ToolExecutors {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      const result = await this.dispatch(name, args, signal, context?.taskId);
+      const result = await this.dispatch(name, args, signal, context?.taskId, trustedOwnerId);
       if (signal?.aborted && isBrowserTool && this.deps.browser) await this.deps.browser.close();
       // The OS browser launch cannot be undone once accepted. Report the real
       // result if cancellation races with the short external-launch call.
@@ -276,6 +297,7 @@ export class ToolExecutors {
     args: Record<string, unknown>,
     signal?: AbortSignal,
     taskId?: string,
+    ownerId = 'default-session',
   ): Promise<ToolResult> {
     try {
       // Wave 3 tool sets own their own dispatch; they are composed here so the
@@ -644,7 +666,7 @@ export class ToolExecutors {
           }
           const command = typeof args.command === 'string' ? args.command.trim() : '';
           const cwd = typeof args.cwd === 'string' && args.cwd.trim() ? args.cwd.trim() : undefined;
-          const res = await this.deps.terminal.run(command, cwd);
+          const res = await this.deps.terminal.run(command, { cwd, ownerId });
           if (!res.ok || !res.session) {
             return { ok: false, content: res.error ?? 'Could not start process.', errorCode: 'FAILED' };
           }
@@ -659,9 +681,9 @@ export class ToolExecutors {
             return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
           }
           const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-          const session = this.deps.terminal.get(sessionId);
+          const session = this.deps.terminal.get(sessionId, ownerId);
           if (!session) {
-            return { ok: false, content: `No terminal process found with ID "${sessionId}".`, errorCode: 'NOT_FOUND' };
+            return { ok: false, content: `No owned terminal process found with ID "${sessionId}".`, errorCode: 'NOT_FOUND' };
           }
           return {
             ok: true,
@@ -674,20 +696,20 @@ export class ToolExecutors {
             return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
           }
           const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-          const killed = this.deps.terminal.cancel(sessionId);
+          const killed = this.deps.terminal.cancel(sessionId, ownerId);
           return killed
             ? { ok: true, content: `Terminated process ${sessionId}.` }
-            : { ok: false, content: `Process ${sessionId} was not running.`, errorCode: 'NOT_FOUND' };
+            : { ok: false, content: `Owned process ${sessionId} was not running.`, errorCode: 'NOT_FOUND' };
         }
         case 'process_list': {
           if (!this.deps.terminal) {
             return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
           }
-          const list = this.deps.terminal.list();
+          const list = this.deps.terminal.list(ownerId);
           return {
             ok: true,
             content: list.length === 0
-              ? 'No terminal processes recorded.'
+              ? 'No terminal processes recorded for this session.'
               : list.map((s) => `${s.id} [${s.status}] (exit=${s.exitCode ?? '—'}) $ ${s.command}`).join('\n'),
             detail: { sessions: list },
           };
@@ -698,7 +720,7 @@ export class ToolExecutors {
           }
           const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
           const input = typeof args.input === 'string' ? args.input : '';
-          const res = this.deps.terminal.writeStdin(sessionId, input);
+          const res = this.deps.terminal.writeStdin(sessionId, input, ownerId);
           return res.ok
             ? { ok: true, content: `Wrote ${input.length} char(s) to stdin of ${sessionId}.` }
             : { ok: false, content: res.error ?? 'Could not write to stdin.', errorCode: 'FAILED' };
@@ -709,7 +731,7 @@ export class ToolExecutors {
           }
           const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
           const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : 15_000;
-          const res = await this.deps.terminal.wait(sessionId, timeoutMs);
+          const res = await this.deps.terminal.wait(sessionId, timeoutMs, ownerId);
           if (!res.ok || !res.session) {
             return { ok: false, content: res.error ?? 'Could not wait for process.', errorCode: 'NOT_FOUND' };
           }
@@ -718,6 +740,77 @@ export class ToolExecutors {
             content: `Process ${res.session.id}: status=${res.session.status}, exitCode=${res.session.exitCode ?? 'null'}${res.timedOut ? ' (wait timed out)' : ''}\n${res.session.output.slice(-4000)}`,
             detail: { ...res.session, timedOut: Boolean(res.timedOut) },
           };
+        }
+        case 'terminal_open': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const shell =
+            args.shell === 'cmd' || args.shell === 'pwsh' || args.shell === 'sh' || args.shell === 'powershell'
+              ? args.shell
+              : undefined;
+          const cwd = typeof args.cwd === 'string' && args.cwd.trim() ? args.cwd.trim() : undefined;
+          const cols = typeof args.cols === 'number' ? args.cols : undefined;
+          const rows = typeof args.rows === 'number' ? args.rows : undefined;
+          const res = await this.deps.terminal.openShell({ shell, cwd, cols, rows, ownerId });
+          if (!res.ok || !res.session) {
+            return { ok: false, content: res.error ?? 'Could not open persistent shell.', errorCode: 'FAILED' };
+          }
+          return {
+            ok: true,
+            content: `Opened persistent ${res.session.shell} shell ${res.session.id} (PID ${res.session.pid ?? 'unknown'}) in ${res.session.cwd}.`,
+            detail: { ...res.session },
+          };
+        }
+        case 'terminal_write': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const input = typeof args.input === 'string' ? args.input : '';
+          const res = this.deps.terminal.writeStdin(sessionId, input, ownerId);
+          return res.ok
+            ? { ok: true, content: `Sent ${input.length} char(s) to terminal ${sessionId}.` }
+            : { ok: false, content: res.error ?? 'Could not write to terminal.', errorCode: 'FAILED' };
+        }
+        case 'terminal_read': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const offset = typeof args.offset === 'number' ? args.offset : 0;
+          const res = this.deps.terminal.readOutput(sessionId, offset, ownerId);
+          if (!res.ok) {
+            return { ok: false, content: res.error ?? 'Could not read terminal output.', errorCode: 'NOT_FOUND' };
+          }
+          return {
+            ok: true,
+            content: `Terminal ${sessionId} [${res.status}] (offset=${offset}->${res.nextOffset}):\n${(res.output ?? '').slice(-4000)}`,
+            detail: { sessionId, status: res.status, nextOffset: res.nextOffset, output: res.output },
+          };
+        }
+        case 'terminal_resize': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const cols = typeof args.cols === 'number' ? args.cols : 120;
+          const rows = typeof args.rows === 'number' ? args.rows : 32;
+          const res = this.deps.terminal.resize(sessionId, cols, rows, ownerId);
+          return res.ok
+            ? { ok: true, content: `Resized terminal ${sessionId} to ${res.cols}x${res.rows}.`, detail: res }
+            : { ok: false, content: res.error ?? 'Could not resize terminal.', errorCode: 'FAILED' };
+        }
+        case 'terminal_close': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          this.deps.terminal.cancel(sessionId, ownerId);
+          const closed = this.deps.terminal.close(sessionId, ownerId);
+          return closed
+            ? { ok: true, content: `Closed terminal session ${sessionId}.` }
+            : { ok: false, content: `Owned terminal session ${sessionId} not found.`, errorCode: 'NOT_FOUND' };
         }
         case 'browser_hover': {
           if (!this.deps.browser) return { ok: false, content: 'Browser session is unavailable.', errorCode: 'UNAVAILABLE' };
@@ -741,10 +834,26 @@ export class ToolExecutors {
           const controller =
             this.deps.computerUse ??
             new ComputerUseController({ nativeHelper: this.deps.nativeHelper });
-          const outcome = await controller.execute(args as unknown as ComputerUseRequest);
+          const outcome = await controller.execute({
+            ...(args as unknown as ComputerUseRequest),
+            scopeKey: ownerId,
+          });
+          let image: ToolResult['image'] | undefined;
+          if (outcome.image?.dataUrl) {
+            const commaIdx = outcome.image.dataUrl.indexOf(',');
+            const dataBase64 = commaIdx >= 0 ? outcome.image.dataUrl.slice(commaIdx + 1) : outcome.image.dataUrl;
+            if (dataBase64) {
+              image = {
+                mediaType: outcome.image.mimeType || 'image/png',
+                dataBase64,
+                label: outcome.image.label,
+              };
+            }
+          }
           return {
             ok: outcome.ok,
             content: `[${outcome.interactionMode}] ${outcome.content}`,
+            ...(image ? { image } : {}),
             ...(outcome.detail ? { detail: outcome.detail } : {}),
             ...(!outcome.ok ? { errorCode: 'FAILED' } : {}),
           };
@@ -767,9 +876,23 @@ export class ToolExecutors {
           if (!res.ok) {
             return { ok: false, content: res.error ?? 'Image generation failed.', errorCode: 'FAILED' };
           }
+          let previewImage: ToolResult['image'] | undefined;
+          if (res.filePath) {
+            try {
+              const bytes = readFileSync(res.filePath);
+              previewImage = {
+                mediaType: res.mimeType || 'image/png',
+                dataBase64: bytes.toString('base64'),
+                label: `Generated (${provider}): ${prompt.slice(0, 60)}`,
+              };
+            } catch {
+              // Artifact path is still returned in detail even if preview read fails.
+            }
+          }
           return {
             ok: true,
             content: `Generated image saved to ${res.filePath} (${res.bytes} bytes).`,
+            ...(previewImage ? { image: previewImage } : {}),
             detail: { ...res },
           };
         }

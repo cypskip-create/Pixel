@@ -15,8 +15,9 @@
 
 import type { BrowserAutomationSettings, ImageAttachment } from '../../shared/types';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { NetworkGuard, isPrivateHost, type HostResolver } from './netGuard';
 import { validateCdpEndpoint } from './browserProfiles';
 
@@ -163,6 +164,7 @@ interface PlaywrightResponse {
 
 interface PlaywrightContext {
   newPage(): Promise<PlaywrightPage>;
+  pages?(): PlaywrightPage[];
   route(url: string, handler: (route: PlaywrightRoute) => Promise<void> | void): Promise<void>;
   close(): Promise<void>;
 }
@@ -172,6 +174,7 @@ interface PlaywrightBrowser {
     viewport?: { width: number; height: number };
     userAgent?: string;
   }): Promise<PlaywrightContext>;
+  contexts?(): PlaywrightContext[];
   close(): Promise<void>;
 }
 
@@ -195,14 +198,27 @@ export interface BrowserOptions {
   getSettings?: () => BrowserAutomationSettings;
   /** Optional named session identifier for multi-conversation isolation. */
   sessionId?: string;
-  /** Optional injectable Playwright loader for deterministic CDP/lifecycle tests. */
+  /** Optional trusted owner identifier (conversation/project/task). */
+  ownerId?: string;
+  /** Root directory for Pixel-owned persistent browser profiles. */
+  persistentProfilesRoot?: string;
+  /** When attaching via CDP, set true to force a new isolated context instead of reusing an existing authorized context. */
+  cdpIsolatedContext?: boolean;
+  /** Optional injectable Playwright loader for deterministic CDP/persistent-profile/lifecycle tests. */
   playwrightLoader?: () => Promise<{
     chromium: {
       launch(options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
+      launchPersistentContext?(userDataDir: string, options?: Record<string, unknown>): Promise<PlaywrightContext>;
       connectOverCDP?(endpointURL: string, options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
     };
   }>;
 }
+
+export type BrowserOwnershipMode =
+  | 'pixel_isolated'
+  | 'pixel_persistent'
+  | 'cdp_attached_existing'
+  | 'cdp_attached_isolated';
 
 export class BrowserSession {
   private browser: PlaywrightBrowser | null = null;
@@ -214,6 +230,8 @@ export class BrowserSession {
   private launchError: string | null = null;
   private launching: Promise<void> | null = null;
   private attachedViaCdp = false;
+  private ownershipMode: BrowserOwnershipMode = 'pixel_isolated';
+  private persistentProfileDir: string | null = null;
   private readonly options: BrowserOptions;
   private readonly guard: NetworkGuard;
   /** Why the guard last blocked a request, so navigate() can explain itself. */
@@ -232,6 +250,9 @@ export class BrowserSession {
       viewport: options.viewport ?? { width: 1280, height: 800 },
       getSettings: options.getSettings,
       sessionId: options.sessionId,
+      ownerId: options.ownerId,
+      persistentProfilesRoot: options.persistentProfilesRoot,
+      cdpIsolatedContext: options.cdpIsolatedContext,
       playwrightLoader: options.playwrightLoader,
     };
   }
@@ -251,8 +272,20 @@ export class BrowserSession {
     return this.attachedViaCdp;
   }
 
+  get mode(): BrowserOwnershipMode {
+    return this.ownershipMode;
+  }
+
+  get activeProfileDir(): string | null {
+    return this.persistentProfileDir;
+  }
+
   get sessionId(): string {
     return this.options.sessionId ?? 'default';
+  }
+
+  get ownerId(): string {
+    return this.options.ownerId ?? 'default';
   }
 
   /** Can a real browser be driven right now? */
@@ -295,14 +328,16 @@ export class BrowserSession {
     const allowedLocalFile = this.isAllowedLocalFile(url);
 
     // Resolve the name now so a private destination is refused before any request.
-    const upfront = allowedLocalFile ? null : await this.guard.check(url);
+    const guard = this.getEffectiveGuard();
+    const upfront = allowedLocalFile ? null : await guard.check(url);
     if (upfront) throw new Error(upfront);
 
     const page = await this.ensurePage();
     this.lastBlocked = null;
     let response: unknown;
     try {
-      response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT_MS });
+      const cmdTimeout = Math.max(5_000, Math.min((this.options.getSettings?.().commandTimeoutSec ?? 15) * 1000, 120_000));
+      response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: cmdTimeout });
     } catch (error) {
       // A blocked redirect or subresource surfaces as a generic network error.
       if (this.lastBlocked) throw new Error(this.lastBlocked);
@@ -312,8 +347,8 @@ export class BrowserSession {
     // The request was allowed on paper; verify where it actually went. A redirect
     // may have landed somewhere private, or DNS may have answered differently to
     // Chromium than it did to us. Either way the model must not see that page.
-    const landed = this.isAllowedLocalFile(page.url()) ? null : await this.guard.check(page.url());
-    const connected = this.guard.checkConnectedAddress(
+    const landed = this.isAllowedLocalFile(page.url()) ? null : await guard.check(page.url());
+    const connected = guard.checkConnectedAddress(
       (await (response as PlaywrightResponse | null)?.serverAddr?.().catch(() => null))?.ipAddress,
     );
     const problemAfter = landed ?? connected;
@@ -621,16 +656,20 @@ export class BrowserSession {
     const context = this.context;
     const browser = this.browser;
     const wasCdp = this.attachedViaCdp;
+    const wasExistingCdpContext = this.ownershipMode === 'cdp_attached_existing';
     this.page = null;
     this.context = null;
     this.browser = null;
     this.attachedViaCdp = false;
+    this.ownershipMode = 'pixel_isolated';
     this.tabs.clear();
     this.activeTabId = null;
-    try {
-      if (context) await context.close();
-    } catch {
-      /* already gone */
+    if (!wasExistingCdpContext) {
+      try {
+        if (context) await context.close();
+      } catch {
+        /* already gone */
+      }
     }
     if (!wasCdp) {
       try {
@@ -669,12 +708,20 @@ export class BrowserSession {
         : ((await import('playwright')) as unknown as {
             chromium: {
               launch(options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
+              launchPersistentContext?(userDataDir: string, options?: Record<string, unknown>): Promise<PlaywrightContext>;
               connectOverCDP?(endpointURL: string, options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
             };
           });
 
       const liveSettings = this.options.getSettings?.();
       const cdpRaw = liveSettings?.cdpEndpoint?.trim() ?? '';
+      const viewport = this.options.viewport ?? { width: 1280, height: 800 };
+      const headless = liveSettings?.headless ?? this.options.headless ?? true;
+      const launchArgs = [
+        ...(process.platform === 'win32' ? [] : ['--no-sandbox']),
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+      ];
 
       if (cdpRaw) {
         const validated = validateCdpEndpoint(cdpRaw);
@@ -688,21 +735,44 @@ export class BrowserSession {
           timeout: (liveSettings?.commandTimeoutSec ?? 30) * 1000,
         });
         this.attachedViaCdp = true;
+        this.persistentProfileDir = null;
+
+        const existingContexts = this.browser.contexts?.() ?? [];
+        if (!this.options.cdpIsolatedContext && existingContexts.length > 0) {
+          this.context = existingContexts[0];
+          this.ownershipMode = 'cdp_attached_existing';
+        } else {
+          this.context = await this.browser.newContext({ viewport });
+          this.ownershipMode = 'cdp_attached_isolated';
+        }
+      } else if (liveSettings?.profileMode === 'pixel_persistent_profile') {
+        if (typeof playwright.chromium.launchPersistentContext !== 'function') {
+          throw new Error('Playwright launchPersistentContext is unavailable in this runtime.');
+        }
+        const safeSessionName = (this.options.sessionId || 'default').replace(/[^a-zA-Z0-9._-]+/g, '_');
+        const profileRoot = this.options.persistentProfilesRoot ?? join(tmpdir(), 'pixel-browser-profiles');
+        const userDataDir = resolve(profileRoot, safeSessionName);
+        mkdirSync(userDataDir, { recursive: true });
+        this.context = await playwright.chromium.launchPersistentContext(userDataDir, {
+          headless,
+          viewport,
+          args: launchArgs,
+        });
+        this.browser = null;
+        this.attachedViaCdp = false;
+        this.persistentProfileDir = userDataDir;
+        this.ownershipMode = 'pixel_persistent';
       } else {
         this.browser = await playwright.chromium.launch({
-          headless: liveSettings?.headless ?? this.options.headless ?? true,
-          args: [
-            ...(process.platform === 'win32' ? [] : ['--no-sandbox']),
-            '--disable-gpu',
-            '--disable-dev-shm-usage',
-          ],
+          headless,
+          args: launchArgs,
         });
         this.attachedViaCdp = false;
+        this.persistentProfileDir = null;
+        this.ownershipMode = 'pixel_isolated';
+        this.context = await this.browser.newContext({ viewport });
       }
 
-      this.context = await this.browser.newContext({
-        viewport: this.options.viewport ?? { width: 1280, height: 800 },
-      });
       await this.context.route('**/*', async (route) => {
         const target = route.request().url();
         if (target.startsWith('file:') && this.options.allowFileUrls) {
@@ -717,10 +787,23 @@ export class BrowserSession {
         }
         await route.continue();
       });
-      this.page = await this.context.newPage();
-      const id = `tab_${this.nextTabId++}`;
-      this.tabs.set(id, this.page);
-      this.activeTabId = id;
+
+      const existingPages = (this.context.pages?.() ?? []).filter((p) => !p.isClosed?.());
+      if (existingPages.length > 0) {
+        for (const p of existingPages) {
+          const id = `tab_${this.nextTabId++}`;
+          this.tabs.set(id, p);
+          if (!this.page) {
+            this.page = p;
+            this.activeTabId = id;
+          }
+        }
+      } else {
+        this.page = await this.context.newPage();
+        const id = `tab_${this.nextTabId++}`;
+        this.tabs.set(id, this.page);
+        this.activeTabId = id;
+      }
       this.launchError = null;
     } catch (error) {
       this.launchError = message(error);
@@ -780,4 +863,103 @@ export function truncate(text: string, max: number): string {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export interface ManagedBrowserSessionInfo {
+  sessionId: string;
+  ownerId: string;
+  mode: BrowserOwnershipMode;
+  attachedViaCdp: boolean;
+  persistentProfileDir: string | null;
+  lastUsedAt: number;
+}
+
+/**
+ * Managed multi-session browser registry (Hermes `browser_session_lifecycle.py` parity).
+ *
+ * Isolates browser contexts per conversation / project / delegated agent so two
+ * unrelated tasks never control the same active tab, enforces inactivity cleanup,
+ * and ensures Emergency Stop disconnects CDP sessions without killing user browsers.
+ */
+export class BrowserSessionManager {
+  private readonly sessions = new Map<string, { session: BrowserSession; ownerId: string; lastUsedAt: number }>();
+
+  constructor(
+    private readonly baseOptions: Omit<BrowserOptions, 'sessionId' | 'ownerId'> = {},
+    private readonly maxSessions = 8,
+  ) {}
+
+  getOrCreate(ownerId: string, sessionName?: string): BrowserSession {
+    const cleanOwner = (ownerId || 'default').trim();
+    const key = sessionName ? `${cleanOwner}:${sessionName.trim()}` : cleanOwner;
+    const existing = this.sessions.get(key);
+    if (existing) {
+      existing.lastUsedAt = Date.now();
+      return existing.session;
+    }
+    if (this.sessions.size >= this.maxSessions) {
+      const oldest = [...this.sessions.entries()].sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)[0];
+      if (oldest) {
+        void oldest[1].session.close();
+        this.sessions.delete(oldest[0]);
+      }
+    }
+    const session = new BrowserSession({
+      ...this.baseOptions,
+      sessionId: key,
+      ownerId: cleanOwner,
+    });
+    this.sessions.set(key, { session, ownerId: cleanOwner, lastUsedAt: Date.now() });
+    return session;
+  }
+
+  list(ownerId?: string): ManagedBrowserSessionInfo[] {
+    const out: ManagedBrowserSessionInfo[] = [];
+    for (const [sessionId, entry] of this.sessions) {
+      if (ownerId && entry.ownerId !== ownerId) continue;
+      out.push({
+        sessionId,
+        ownerId: entry.ownerId,
+        mode: entry.session.mode,
+        attachedViaCdp: entry.session.isAttachedViaCdp,
+        persistentProfileDir: entry.session.activeProfileDir,
+        lastUsedAt: entry.lastUsedAt,
+      });
+    }
+    return out;
+  }
+
+  async pruneInactive(maxIdleMs?: number): Promise<number> {
+    const configuredSec = this.baseOptions.getSettings?.().inactivityTimeoutSec ?? 600;
+    const threshold = maxIdleMs ?? Math.max(30_000, configuredSec * 1000);
+    const now = Date.now();
+    let closed = 0;
+    for (const [id, entry] of [...this.sessions.entries()]) {
+      if (now - entry.lastUsedAt > threshold) {
+        await entry.session.close();
+        this.sessions.delete(id);
+        closed += 1;
+      }
+    }
+    return closed;
+  }
+
+  async closeSession(sessionId: string, ownerId?: string): Promise<boolean> {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return false;
+    if (ownerId && entry.ownerId !== ownerId) return false;
+    await entry.session.close();
+    this.sessions.delete(sessionId);
+    return true;
+  }
+
+  async closeAll(): Promise<number> {
+    let closed = 0;
+    for (const [id, entry] of [...this.sessions.entries()]) {
+      await entry.session.close();
+      this.sessions.delete(id);
+      closed += 1;
+    }
+    return closed;
+  }
 }

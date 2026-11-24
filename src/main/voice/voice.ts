@@ -18,8 +18,27 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { terminateProcessTree } from '../services/process';
 import type { PythonWorker } from '../services/python-worker';
+import type { PythonAgentBridge } from '../services/pythonAgentBridge';
 import type { VoiceSettings } from '../../shared/types';
 import type { VoiceModelManager } from './models';
+import {
+  splitIntoSpeechSegments,
+  synthesizeWithCloudProvider,
+  transcribeWithCloudProvider,
+  type SttProviderId,
+  type TtsProviderId,
+} from './providers';
+
+export interface VoiceRoutingDeps {
+  getSettings?: () => VoiceSettings;
+  isLocalOnly?: () => boolean;
+  getProviderApiKey?: (provider: string) => string | null;
+  pythonBridge?: PythonAgentBridge;
+  getPythonBridge?: () => PythonAgentBridge;
+}
+
+const CLOUD_STT_SET = new Set<string>(['openai', 'mistral', 'deepgram', 'custom']);
+const CLOUD_TTS_SET = new Set<string>(['openai', 'elevenlabs', 'xai', 'gemini', 'minimax', 'mistral', 'edge']);
 
 /** Longest live push-to-talk window. Renderer dictation uses a WAV stream. */
 export const MAX_LISTEN_MS = 20_000;
@@ -65,7 +84,11 @@ export class VoiceService {
   private capabilityCache: VoiceCapability | null = null;
   private capabilityPending: Promise<VoiceCapability> | null = null;
 
-  constructor(private readonly pythonWorker?: PythonWorker, private readonly voiceModels?: VoiceModelManager) {
+  constructor(
+    private readonly pythonWorker?: PythonWorker,
+    private readonly voiceModels?: VoiceModelManager,
+    private readonly routing?: VoiceRoutingDeps,
+  ) {
     // A forced process exit can bypass finally; delete only Pixel's generated
     // short-lived voice buffers from an earlier run when the service restarts.
     try {
@@ -199,7 +222,12 @@ export class VoiceService {
   }
 
   /** Transcribe an in-memory mono 16 kHz PCM WAV captured by the renderer. */
-  async transcribeWav(input: Uint8Array, signal?: AbortSignal, model = 'base.en'): Promise<RecognitionResult> {
+  async transcribeWav(
+    input: Uint8Array,
+    signal?: AbortSignal,
+    model = 'base.en',
+    settingsOverride?: Partial<VoiceSettings>,
+  ): Promise<RecognitionResult> {
     if (process.platform !== 'win32') {
       return { ok: false, text: '', error: 'Voice input is only supported on Windows.' };
     }
@@ -208,6 +236,64 @@ export class VoiceService {
     if (signal?.aborted) return { ok: false, text: '', error: 'Transcription was cancelled.' };
 
     const startedAt = performance.now();
+    const activeSettings = { ...this.routing?.getSettings?.(), ...settingsOverride };
+    const sttProvider = activeSettings.sttProvider ?? 'local';
+
+    // Cloud STT provider routing (Python-first via PythonAgentBridge, TS fallback).
+    if (CLOUD_STT_SET.has(sttProvider)) {
+      const localOnly = this.routing?.isLocalOnly?.() === true;
+      if (localOnly) {
+        return {
+          ok: false,
+          text: '',
+          backend: sttProvider,
+          error: `Blocked by local-only privacy mode: cloud STT provider '${sttProvider}' is disabled.`,
+        };
+      }
+      const apiKey = this.routing?.getProviderApiKey?.(sttProvider) ?? null;
+      const language = activeSettings.sttLanguage ?? 'auto';
+      const bridge = this.routing?.pythonBridge ?? this.routing?.getPythonBridge?.();
+      if (bridge) {
+        try {
+          const pyRes = await bridge.voiceTranscribe({
+            provider: sttProvider,
+            wavBase64: Buffer.from(input).toString('base64'),
+            apiKey: apiKey ?? '',
+            model,
+            language,
+            localOnly,
+          });
+          return {
+            ok: pyRes.ok,
+            text: pyRes.text ?? '',
+            language: pyRes.language,
+            model: pyRes.model ?? model,
+            backend: `python/${sttProvider}`,
+            processingMs: Math.round(performance.now() - startedAt),
+            ...(pyRes.noSpeech ? { noSpeech: true } : {}),
+            ...(pyRes.error ? { error: pyRes.error } : {}),
+          };
+        } catch {
+          // Fall through to direct TypeScript cloud adapter if Python bridge is unavailable.
+        }
+      }
+      const cloudRes = await transcribeWithCloudProvider({
+        provider: sttProvider as SttProviderId,
+        audioBuffer: Buffer.from(input),
+        mimeType: 'audio/wav',
+        apiKey,
+        language,
+        signal,
+      });
+      return {
+        ok: cloudRes.ok,
+        text: cloudRes.text ?? '',
+        backend: `cloud/${cloudRes.provider}`,
+        processingMs: Math.round(performance.now() - startedAt),
+        ...(cloudRes.error ? { error: cloudRes.error } : {}),
+      };
+    }
+
     const file = join(tmpdir(), `pixel-voice-${process.pid}-${randomUUID()}.wav`);
     const controller = new AbortController();
     const onParentAbort = (): void => controller.abort();
@@ -299,7 +385,90 @@ export class VoiceService {
     const controller = new AbortController();
     this.activeControllers.add(controller);
     try {
-      if (settings?.ttsEngine === 'kokoro') {
+      const effectiveSettings = settings ?? this.routing?.getSettings?.();
+      const ttsProvider = effectiveSettings?.ttsProvider ?? (effectiveSettings?.ttsEngine === 'kokoro' ? 'kokoro' : 'system');
+
+      // Cloud TTS provider routing (Python-first via PythonAgentBridge, TS fallback).
+      if (CLOUD_TTS_SET.has(ttsProvider)) {
+        const localOnly = this.routing?.isLocalOnly?.() === true;
+        if (localOnly) {
+          return {
+            ok: false,
+            backend: ttsProvider,
+            error: `Blocked by local-only privacy mode: cloud TTS provider '${ttsProvider}' is disabled.`,
+          };
+        }
+        const apiKey = this.routing?.getProviderApiKey?.(ttsProvider) ?? null;
+        let generationMs = 0;
+        let playbackMs = 0;
+        let usedBackend: string = `cloud/${ttsProvider}`;
+        for (const chunk of splitIntoSpeechSegments(clean)) {
+          if (controller.signal.aborted) return { ok: false, error: 'Speech was cancelled.' };
+          const genStart = performance.now();
+          let audioBuffer: Buffer | null = null;
+
+          const bridge = this.routing?.pythonBridge ?? this.routing?.getPythonBridge?.();
+          if (bridge && ttsProvider !== 'edge') {
+            try {
+              const pyTts = await bridge.voiceSynthesize({
+                provider: ttsProvider,
+                text: chunk,
+                apiKey: apiKey ?? '',
+                voice: effectiveSettings?.ttsVoice ?? '',
+                speed: effectiveSettings?.ttsRate ?? 1.0,
+                localOnly,
+              });
+              if (!pyTts.ok) return { ok: false, error: pyTts.error ?? `Cloud TTS (${ttsProvider}) failed.` };
+              if (pyTts.audioBase64) {
+                audioBuffer = Buffer.from(pyTts.audioBase64, 'base64');
+                usedBackend = `python/${ttsProvider}`;
+              }
+            } catch {
+              // Fall back to direct TS adapter if Python bridge is unavailable.
+            }
+          }
+
+          if (!audioBuffer) {
+            const cloudTts = await synthesizeWithCloudProvider({
+              provider: ttsProvider as TtsProviderId,
+              text: chunk,
+              apiKey,
+              voice: effectiveSettings?.ttsVoice ?? undefined,
+              rate: effectiveSettings?.ttsRate,
+              signal: controller.signal,
+            });
+            if (!cloudTts.ok || !cloudTts.audioBase64) {
+              return { ok: false, error: cloudTts.error ?? `Cloud TTS (${ttsProvider}) failed.` };
+            }
+            audioBuffer = Buffer.from(cloudTts.audioBase64, 'base64');
+            usedBackend = `cloud/${cloudTts.provider}`;
+          }
+          generationMs += Math.round(performance.now() - genStart);
+
+          const outputPath = join(tmpdir(), `pixel-voice-tts-${process.pid}-${randomUUID()}.wav`);
+          try {
+            writeFileSync(outputPath, audioBuffer, { flag: 'wx', mode: 0o600 });
+            const playbackStarted = performance.now();
+            try {
+              await runPowerShell(PLAY_WAV_SCRIPT, 120_000, controller.signal, { CYPS_AUDIO_FILE: outputPath }, () => setPlaybackActive(true));
+            } finally {
+              setPlaybackActive(false);
+            }
+            playbackMs += performance.now() - playbackStarted;
+          } finally {
+            try { unlinkSync(outputPath); } catch { /* best-effort temp cleanup */ }
+          }
+        }
+        return {
+          ok: true,
+          backend: usedBackend,
+          generationMs,
+          playbackMs: Math.round(playbackMs),
+          elapsedMs: Math.round(performance.now() - speakStartedAt),
+        };
+      }
+
+      if (effectiveSettings?.ttsEngine === 'kokoro' || ttsProvider === 'kokoro') {
         if (!this.pythonWorker || !this.voiceModels) return { ok: false, error: 'Pixel’s neural speech runtime is unavailable.' };
         const assets = await this.voiceModels.getTtsAssets();
         if (!assets) return { ok: false, error: 'Download the Kokoro voice model in Settings before selecting it.' };
@@ -314,8 +483,8 @@ export class VoiceService {
           try {
             const generated = await this.pythonWorker.synthesizeKokoro(
               chunk,
-              settings.ttsVoice ?? 'af_heart',
-              settings.ttsRate,
+              effectiveSettings?.ttsVoice ?? 'af_heart',
+              effectiveSettings?.ttsRate ?? 1.0,
               assets.modelPath,
               assets.voicesPath,
               outputPath,
@@ -366,9 +535,18 @@ export class VoiceService {
 }
 
 function resolveWhisperModel(model: string): string {
-  if (model === 'tiny' || model === 'tiny.en') return 'tiny.en';
-  if (model === 'small' || model === 'small.en') return 'small.en';
-  return 'base.en';
+  switch (model) {
+    case 'tiny.en':
+    case 'base.en':
+    case 'small.en':
+    case 'tiny':
+    case 'base':
+    case 'small':
+    case 'large-v3-turbo':
+      return model;
+    default:
+      return 'base.en';
+  }
 }
 
 /* -------------------------------------------------------------------- *

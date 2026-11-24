@@ -14,7 +14,9 @@ from .budgets import IterationBudget
 from .crash_log import install_panic_hook, record_crash
 from .errors import AgentError
 from .loop import run_agent_turn
+from .multimodal import annotate_som_png_base64, assert_vision_capable_model, generate_image_artifact
 from .providers import ProviderConfig
+from .voice import exchange_gpt_live_sdp_offer, synthesize_cloud, transcribe_cloud
 
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # 4 MiB guard against unbounded frame memory
 
@@ -210,11 +212,14 @@ class PixelAgentProtocolServer:
             with self._state_lock:
                 waiter = self._pending_tools.pop(call_id, None)
             if waiter is not None:
-                waiter.response = {
+                resp_payload: dict[str, Any] = {
                     "ok": bool(params.get("ok", False)),
                     "content": str(params.get("content", "")),
                     "denied": bool(params.get("denied", False)),
                 }
+                if isinstance(params.get("image"), dict):
+                    resp_payload["image"] = params["image"]
+                waiter.response = resp_payload
                 waiter.event.set()
             return True
 
@@ -267,6 +272,102 @@ class PixelAgentProtocolServer:
                 score = 0.88 if durable else 0.35
                 res = {"keep": score >= 0.65, "score": score, "reason": "durable-signal" if durable else "low-relevance"}
             self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "voice.transcribe":
+            res = transcribe_cloud(
+                provider=str(params.get("provider") or "openai"),
+                wav_base64=str(params.get("wavBase64") or ""),
+                api_key=str(params.get("apiKey") or ""),
+                model=str(params.get("model") or ""),
+                language=str(params.get("language") or "auto"),
+                base_url=str(params.get("baseUrl") or ""),
+                local_only=bool(params.get("localOnly", False)),
+                timeout_s=float(params.get("timeoutSec", 30.0)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "voice.synthesize":
+            res = synthesize_cloud(
+                provider=str(params.get("provider") or "openai"),
+                text=str(params.get("text") or ""),
+                api_key=str(params.get("apiKey") or ""),
+                voice=str(params.get("voice") or ""),
+                model=str(params.get("model") or ""),
+                speed=float(params.get("speed", 1.0)),
+                base_url=str(params.get("baseUrl") or ""),
+                local_only=bool(params.get("localOnly", False)),
+                timeout_s=float(params.get("timeoutSec", 30.0)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "voice.gpt_live_sdp":
+            res = exchange_gpt_live_sdp_offer(
+                sdp_offer=str(params.get("sdpOffer") or ""),
+                api_key=str(params.get("apiKey") or ""),
+                model=str(params.get("model") or "gpt-realtime"),
+                voice=str(params.get("voice") or "marin"),
+                instructions=str(params.get("instructions") or ""),
+                base_url=str(params.get("baseUrl") or "https://api.openai.com/v1"),
+                local_only=bool(params.get("localOnly", False)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "multimodal.annotate_som":
+            try:
+                res = annotate_som_png_base64(
+                    str(params.get("pngBase64") or ""),
+                    params.get("elements") if isinstance(params.get("elements"), list) else [],
+                    params.get("windowBounds") if isinstance(params.get("windowBounds"), dict) else None,
+                )
+                self.send({"id": req_id, "ok": True, "result": res})
+            except Exception as exc:
+                self.send({"id": req_id, "ok": True, "result": {"ok": False, "error": str(exc)}})
+            return True
+
+        if msg_type == "multimodal.generate_image":
+            res = generate_image_artifact(
+                prompt=str(params.get("prompt") or ""),
+                provider=str(params.get("provider") or "openai"),
+                api_key=str(params.get("apiKey") or ""),
+                output_dir=str(params.get("outputDir") or ""),
+                model=str(params.get("model") or ""),
+                size=str(params.get("size") or "1024x1024"),
+                base_url=str(params.get("baseUrl") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "multimodal.check_vision":
+            res = assert_vision_capable_model(str(params.get("model") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "runtime.diagnostics":
+            with self._state_lock:
+                active_ids = list(self._active_turns.keys())
+            self.send({
+                "id": req_id,
+                "ok": True,
+                "result": {
+                    "runtime": "python",
+                    "protocol": PROTOCOL_VERSION,
+                    "pid": os.getpid(),
+                    "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                    "activeTurnIds": active_ids,
+                    "capabilities": {
+                        "concurrentTurns": True,
+                        "multimodalToolAttachments": True,
+                        "somPngAnnotation": True,
+                        "cloudVoiceRouting": True,
+                        "gptLiveSdpBroker": True,
+                        "imageGeneration": True,
+                    },
+                },
+            })
             return True
 
         if msg_type == "shutdown":

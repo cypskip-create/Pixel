@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 from .budgets import IterationBudget, RUN_BUDGET_WRAPUP_NOTICE, RepetitionGuard
 from .compressor import compress_messages, context_limit_for_model
 from .errors import AgentError, bound_error_text
+from .multimodal import enforce_image_history_budget, is_vision_capable_model
 from .providers import ProviderConfig, ProviderTurnResult, stream_provider, stream_with_fallback
 
 ProviderCallFn = Callable[
@@ -260,6 +261,31 @@ def run_agent_turn(
                     **({"denied": True} if tool_resp.get("denied") else {}),
                 }, ensure_ascii=False),
             })
+            img = tool_resp.get("image")
+            if isinstance(img, dict) and isinstance(img.get("dataBase64"), str) and img["dataBase64"]:
+                media_type = str(img.get("mediaType") or "image/png")
+                label = str(img.get("label") or f"Screenshot from {tc.name}")
+                if is_vision_capable_model(provider_config.model):
+                    working_messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"[Multimodal tool attachment: {label}]"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{media_type};base64,{img['dataBase64']}"},
+                            },
+                        ],
+                    })
+                    working_messages, _dropped = enforce_image_history_budget(working_messages, max_images=4)
+                else:
+                    working_messages.append({
+                        "role": "user",
+                        "content": (
+                            f"[Image attachment '{label}' omitted because active model "
+                            f"'{provider_config.model}' does not advertise vision input support. "
+                            "Use the structured text/accessibility output above.]"
+                        ),
+                    })
 
         if finish_reason == "cancelled":
             break

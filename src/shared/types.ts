@@ -99,6 +99,7 @@ export const PROVIDER_IDS = [
   'anthropic',
   'gemini',
   'xai',
+  'fal',
   'ollama',
   'custom',
 ] as const;
@@ -161,6 +162,14 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     requiresApiKey: true,
     defaultModel: 'grok-3',
     reasoningModel: 'grok-3-mini',
+  },
+  {
+    id: 'fal',
+    label: 'FAL.ai (Image Generation)',
+    defaultBaseUrl: 'https://fal.run',
+    requiresApiKey: true,
+    defaultModel: 'fal-ai/flux/schnell',
+    reasoningModel: 'fal-ai/flux/schnell',
   },
   {
     id: 'ollama',
@@ -505,7 +514,7 @@ export interface PrivacySettings {
 export type AgentRuntimeEngine = 'typescript' | 'python';
 
 export interface AgentRuntimeSettings {
-  /** Selects the active conversation runtime; defaults to 'typescript' until Python parity is promoted. */
+  /** Selects the active conversation runtime; Python is Pixel's primary default runtime. */
   runtimeEngine: AgentRuntimeEngine;
   /** Upper bound for tool-calling turns per request (4–40, default 12). Matches Hermes `agent.max_turns`. */
   maxTurns: number;
@@ -571,6 +580,8 @@ export interface BrowserAutomationSettings {
   blockedDomains: string[];
   /** Optional website allowlist. */
   allowedDomains: string[];
+  /** Browser profile persistence mode (ephemeral, pixel_persistent_profile, profile_preferences_copy, or cdp_attach). */
+  profileMode?: 'ephemeral' | 'pixel_persistent_profile' | 'profile_preferences_copy' | 'cdp_attach';
 }
 
 export interface ComputerUseSettings {
@@ -580,6 +591,8 @@ export interface ComputerUseSettings {
   interactionPolicy: 'background_first' | 'ask_before_foreground';
   /** Require read-back/state verification after UI interactions. */
   requireVerification: boolean;
+  /** Explicitly allow Win32 foreground mouse/keyboard actions against verified target windows. */
+  allowForegroundFallback?: boolean;
 }
 
 export interface AppSettings {
@@ -627,7 +640,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     requestTimeoutMs: 60_000,
   },
   agent: {
-    runtimeEngine: 'typescript',
+    runtimeEngine: 'python',
     maxTurns: 12,
     maxConcurrentSpecialists: 3,
     delegationMaxIterations: 12,

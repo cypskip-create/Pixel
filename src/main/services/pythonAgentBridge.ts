@@ -59,6 +59,11 @@ export interface PythonToolResponse {
   ok: boolean;
   content: string;
   denied?: boolean;
+  image?: {
+    mediaType: string;
+    dataBase64: string;
+    label?: string;
+  };
 }
 
 export interface PythonTurnStartOptions {
@@ -355,6 +360,7 @@ export class PythonAgentBridge {
                 ok: resp.ok,
                 content: resp.content,
                 denied: resp.denied === true,
+                ...(resp.image ? { image: resp.image } : {}),
               });
             }
           })
@@ -454,6 +460,76 @@ export class PythonAgentBridge {
 
   scoreMemory(input: { text: string; existing?: string[] }): Promise<PythonAgentMemoryScoreResult> {
     return this.request<PythonAgentMemoryScoreResult>('score_memory', input);
+  }
+
+  voiceTranscribe(input: {
+    provider: string;
+    wavBase64: string;
+    apiKey?: string;
+    model?: string;
+    language?: string;
+    baseUrl?: string;
+    localOnly?: boolean;
+    timeoutSec?: number;
+  }): Promise<{ ok: boolean; provider: string; model?: string; text: string; language?: string; noSpeech?: boolean; error?: string }> {
+    return this.request('voice.transcribe', input);
+  }
+
+  voiceSynthesize(input: {
+    provider: string;
+    text: string;
+    apiKey?: string;
+    voice?: string;
+    model?: string;
+    speed?: number;
+    baseUrl?: string;
+    localOnly?: boolean;
+    timeoutSec?: number;
+  }): Promise<{ ok: boolean; provider: string; mediaType?: string; audioBase64?: string; bytes?: number; error?: string }> {
+    return this.request('voice.synthesize', input);
+  }
+
+  voiceGptLiveSdp(input: {
+    sdpOffer: string;
+    apiKey: string;
+    model?: string;
+    voice?: string;
+    instructions?: string;
+    baseUrl?: string;
+    localOnly?: boolean;
+  }): Promise<{ ok: boolean; sdpAnswer?: string; model?: string; voice?: string; instructions?: string; error?: string }> {
+    return this.request('voice.gpt_live_sdp', input);
+  }
+
+  annotateSomPng(input: {
+    pngBase64: string;
+    elements: Array<{ index: number; bounds?: { x: number; y: number; width: number; height: number } }>;
+    windowBounds?: { x: number; y: number; width: number; height: number };
+  }): Promise<{ ok: boolean; annotatedBase64?: string; width?: number; height?: number; annotatedCount?: number; error?: string }> {
+    return this.request('multimodal.annotate_som', input);
+  }
+
+  generateImage(input: {
+    prompt: string;
+    provider?: string;
+    apiKey?: string;
+    outputDir?: string;
+    model?: string;
+    size?: string;
+    baseUrl?: string;
+  }): Promise<{ ok: boolean; path?: string; provider?: string; model?: string; mediaType?: string; bytes?: number; dataBase64?: string; error?: string }> {
+    return this.request('multimodal.generate_image', input);
+  }
+
+  diagnostics(): Promise<{
+    runtime: string;
+    protocol: string;
+    pid: number;
+    python: string;
+    activeTurnIds: string[];
+    capabilities: Record<string, boolean>;
+  }> {
+    return this.request('runtime.diagnostics');
   }
 
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {

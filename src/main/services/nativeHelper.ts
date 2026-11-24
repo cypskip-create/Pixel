@@ -137,6 +137,34 @@ export interface NativeCommands {
       providerErrorRecovered?: boolean;
     };
   };
+  focus_window: {
+    args: { targetWindowId: string; expectedWindowTitle: string; expectedProcessId: number; expectedProcessName: string };
+    result: { window: WindowInfo; focused: boolean };
+  };
+  mouse_action: {
+    args: {
+      targetWindowId: string;
+      expectedWindowTitle: string;
+      expectedProcessId: number;
+      expectedProcessName: string;
+      action: 'click' | 'double_click' | 'right_click' | 'middle_click' | 'drag';
+      x: number;
+      y: number;
+      toX?: number;
+      toY?: number;
+    };
+    result: { window: WindowInfo; action: string; x: number; y: number; executed: true };
+  };
+  send_keys: {
+    args: {
+      targetWindowId: string;
+      expectedWindowTitle: string;
+      expectedProcessId: number;
+      expectedProcessName: string;
+      key: string;
+    };
+    result: { window: WindowInfo; key: string; executed: true };
+  };
 }
 
 export class NativeHelperError extends Error {

@@ -86,21 +86,31 @@ function deriveTitle(text: string): string {
 }
 
 export class PythonAgentRunner {
-  private activeRequestId: string | null = null;
-  private controller: AbortController | null = null;
-  private running = false;
+  private readonly activeRuns = new Map<string, { controller: AbortController; ownerId: string }>();
 
   constructor(private readonly deps: PythonAgentRunnerDeps) {}
 
   get isRunning(): boolean {
-    return this.running;
+    return this.activeRuns.size > 0;
   }
 
-  cancel(_reason: 'user' | 'stop' | 'timeout' = 'user'): void {
-    this.controller?.abort();
+  get activeRequestIds(): string[] {
+    return [...this.activeRuns.keys()];
+  }
+
+  cancel(_reason: 'user' | 'stop' | 'timeout' = 'user', targetRequestId?: string): void {
+    if (targetRequestId) {
+      const entry = this.activeRuns.get(targetRequestId);
+      if (entry) {
+        entry.controller.abort();
+        this.deps.bridge.cancelTurn(targetRequestId);
+      }
+      return;
+    }
     this.deps.permissions.rejectPending();
-    if (this.activeRequestId) {
-      this.deps.bridge.cancelTurn(this.activeRequestId);
+    for (const [reqId, entry] of this.activeRuns) {
+      entry.controller.abort();
+      this.deps.bridge.cancelTurn(reqId);
     }
   }
 
@@ -134,8 +144,8 @@ export class PythonAgentRunner {
     const { requestId, request, model } = options;
     const { bridge, registry, permissions, tasks, audit, executors, emit, isStopped } = this.deps;
 
-    if (this.running) {
-      emit(errorEvent(requestId, 'BAD_REQUEST', 'Pixel is already working on something. Wait, or press stop.'));
+    if (this.activeRuns.has(requestId)) {
+      emit(errorEvent(requestId, 'BAD_REQUEST', 'This request is already running. Wait, or press stop.'));
       return this.emptyResult('BAD_REQUEST');
     }
 
@@ -191,15 +201,15 @@ export class PythonAgentRunner {
       pendingVerifications: [],
     };
     tasks.upsert(task);
-    tasks.registerControl(task.id, { cancel: () => this.cancel('user') });
+    tasks.registerControl(task.id, { cancel: () => this.cancel('user', requestId) });
 
-    this.running = true;
-    this.activeRequestId = requestId;
+    const projectId = this.deps.getProjectId?.();
+    const trustedOwnerId = (request as { conversationId?: string }).conversationId || projectId || task.id;
     const controller = new AbortController();
-    this.controller = controller;
+    this.activeRuns.set(requestId, { controller, ownerId: trustedOwnerId });
     const deadlineTimer = setTimeout(() => {
-      if (this.controller !== controller || controller.signal.aborted) return;
-      this.cancel('timeout');
+      if (controller.signal.aborted) return;
+      this.cancel('timeout', requestId);
     }, TURN_TIMEOUT_MS);
 
     const executed: AgentRunResult['executed'] = [];
@@ -341,9 +351,14 @@ export class PythonAgentRunner {
           }
         }
 
-        // Execute through Pixel's canonical ToolExecutors.
+        // Execute through Pixel's canonical ToolExecutors with trusted runtime ownership.
         try {
-          const result = await executors.run(callName, callArgs, controller.signal, { taskId: task.id });
+          const result = await executors.run(callName, callArgs, controller.signal, {
+            taskId: task.id,
+            ownerId: trustedOwnerId,
+            conversationId: (request as { conversationId?: string }).conversationId,
+            projectId,
+          });
           if (result.ok) {
             step.status = 'done';
             step.detail = redactTaskText(result.content).slice(0, 300);
@@ -351,9 +366,17 @@ export class PythonAgentRunner {
             tasks.update(task.id, { steps: [...task.steps] });
             audit.record('tool', `Executed: ${callName}`, 'ok', step.detail.slice(0, 120));
             executed.push({ name: callName, ok: true, summary: step.detail.slice(0, 120) || 'ok' });
+            const image = result.image
+              ? {
+                  mediaType: result.image.mediaType || 'image/png',
+                  dataBase64: result.image.dataBase64,
+                  label: result.image.label,
+                }
+              : undefined;
             return {
               ok: true,
               content: clipToolResult(result.content),
+              ...(image ? { image } : {}),
             };
           }
           const errText = result.content || 'Tool execution failed';
@@ -463,9 +486,7 @@ export class PythonAgentRunner {
       return { task, finalContent, executed, aborted: false, failure: 'UNKNOWN' };
     } finally {
       clearTimeout(deadlineTimer);
-      this.running = false;
-      this.activeRequestId = null;
-      this.controller = null;
+      this.activeRuns.delete(requestId);
     }
   }
 }

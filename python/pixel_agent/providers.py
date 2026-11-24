@@ -339,6 +339,24 @@ def stream_anthropic(
                     "input": parsed_input if isinstance(parsed_input, dict) else {},
                 })
             wire_messages.append({"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]})
+        elif isinstance(content, list):
+            user_blocks: list[dict[str, Any]] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = part.get("type")
+                if ptype == "text" and part.get("text"):
+                    user_blocks.append({"type": "text", "text": str(part["text"])})
+                elif ptype == "image_url":
+                    img_url = str((part.get("image_url") or {}).get("url") or "")
+                    if img_url.startswith("data:") and ";base64," in img_url:
+                        header, b64 = img_url.split(";base64,", 1)
+                        media_type = header[5:] or "image/png"
+                        user_blocks.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": media_type, "data": b64},
+                        })
+            wire_messages.append({"role": "user", "content": user_blocks or [{"type": "text", "text": ""}]})
         else:
             wire_messages.append({"role": "user", "content": str(content)})
 

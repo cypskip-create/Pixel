@@ -66,7 +66,12 @@ export interface TurnRunner {
 
 /** The one thing the agent needs from the tool executors. */
 export interface ToolRunner {
-  run(name: string, args: Record<string, unknown>, signal?: AbortSignal, context?: { taskId: string }): Promise<ToolResult>;
+  run(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    context?: { taskId: string; ownerId?: string; conversationId?: string; projectId?: string },
+  ): Promise<ToolResult>;
   killAll(): number;
 }
 
