@@ -25,6 +25,7 @@ describe('Hermes Stage 2: Multi-Provider Architecture, Custom Endpoints & Fallba
       'anthropic',
       'gemini',
       'xai',
+      'fal',
       'ollama',
       'custom',
     ]);
