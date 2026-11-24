@@ -1800,6 +1800,22 @@ export interface CypsBridge {
     skillsHubInstall(skillId: string): Promise<{ ok: boolean; skill?: Record<string, unknown>; error?: string }>;
     skillsHubRemove(skillId: string): Promise<{ ok: boolean; removed?: string; error?: string }>;
   };
+  gateway?: {
+    status(): Promise<Record<string, unknown>>;
+    start(host?: string, port?: number): Promise<{ ok: boolean; running: boolean; http?: { ok: boolean; host: string; port: number } }>;
+    stop(): Promise<{ ok: boolean; running: boolean }>;
+    platformConfigure(platform: string, config: Record<string, unknown>, connect?: boolean): Promise<Record<string, unknown>>;
+    platformDisconnect(platform: string): Promise<Record<string, unknown>>;
+    pairingApprove(code: string, projectId?: string, scopes?: string[], allowGroups?: boolean): Promise<Record<string, unknown>>;
+    pairingReject(code: string): Promise<Record<string, unknown>>;
+    userRevoke(platform: string, accountId: string): Promise<Record<string, unknown>>;
+    devicePair(deviceName: string, projectId?: string, scopes?: string[]): Promise<{ ok: boolean; device?: Record<string, unknown>; token?: string }>;
+    deviceRevoke(deviceId: string): Promise<Record<string, unknown>>;
+    webhookCreate(name: string, projectId?: string, eventFilters?: string[]): Promise<{ ok: boolean; route?: Record<string, unknown>; signingSecret?: string }>;
+    webhookSetEnabled(routeId: string, enabled: boolean): Promise<Record<string, unknown>>;
+    webhookDelete(routeId: string): Promise<Record<string, unknown>>;
+    webhookHistory(limit?: number): Promise<Array<Record<string, unknown>>>;
+  };
   proceduralSkills?: {
     list(): Promise<ProceduralSkillView[]>;
     createDraft(markdown: string): Promise<ProceduralSkillView>;

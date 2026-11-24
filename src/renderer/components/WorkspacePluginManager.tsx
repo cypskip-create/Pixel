@@ -177,6 +177,7 @@ export function WorkspacePluginManager({ plugins, onChange }: WorkspacePluginMan
     </section>
     <ConnectionsAndMcpSection />
     <CapabilitiesHubSection />
+    <GatewayAndWebhooksSection />
   </section>;
 }
 
@@ -582,6 +583,212 @@ function CapabilitiesHubSection(): React.JSX.Element {
               </div>
             </div>
           ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function GatewayAndWebhooksSection(): React.JSX.Element {
+  const gwApi = typeof window !== 'undefined' ? window.cyps?.gateway : undefined;
+  const [gwTab, setGwTab] = useState<'messaging' | 'webhooks' | 'devices'>('messaging');
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [tgToken, setTgToken] = useState('');
+  const [webhookName, setWebhookName] = useState('');
+  const [deviceName, setDeviceName] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reload = async (): Promise<void> => {
+    if (!gwApi) return;
+    try {
+      setStatus(await gwApi.status());
+    } catch {
+      // Non-fatal if Python bridge is not yet running.
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  if (!gwApi) return <></>;
+
+  const running = Boolean(status?.running);
+  const httpInfo = (status?.http as { running?: boolean; host?: string; port?: number } | undefined) ?? {};
+  const platforms = Array.isArray(status?.platforms) ? (status.platforms as Array<Record<string, unknown>>) : [];
+  const pendingPairings = Array.isArray(status?.pendingPairings) ? (status.pendingPairings as Array<Record<string, unknown>>) : [];
+  const authorizedUsers = Array.isArray(status?.authorizedUsers) ? (status.authorizedUsers as Array<Record<string, unknown>>) : [];
+  const pairedDevices = Array.isArray(status?.pairedDevices) ? (status.pairedDevices as Array<Record<string, unknown>>) : [];
+  const webhooks = Array.isArray(status?.webhooks) ? (status.webhooks as Array<Record<string, unknown>>) : [];
+
+  return (
+    <section aria-label="Messaging Gateway and Webhooks" className="mt-6">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="workspace-section-title">Messaging Gateway, Webhooks &amp; Cross-Device Access</h2>
+          <p className="text-[11px] text-[var(--color-ink-dim)]">
+            Status: {running ? `Running on ${httpInfo.host ?? '127.0.0.1'}:${httpInfo.port ?? 0}` : 'Stopped'} · Default-deny pairing enforced
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void (running ? gwApi.stop() : gwApi.start('127.0.0.1', 0)).then(reload)}
+            className="rounded-lg border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-ink)]"
+          >
+            {running ? 'Stop Gateway' : 'Start Gateway'}
+          </button>
+          {(['messaging', 'webhooks', 'devices'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setGwTab(t)}
+              className={`rounded-lg border px-2 py-1 text-[11px] ${
+                gwTab === t ? 'border-[var(--color-accent)] text-[var(--color-ink)]' : 'border-[var(--color-border)] text-[var(--color-ink-dim)]'
+              }`}
+            >
+              {t === 'messaging' ? 'Messaging' : t === 'webhooks' ? 'Webhooks' : 'Devices'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {notice ? <p className="mb-2 text-[11px] text-[var(--color-ink-dim)]" role="status">{notice}</p> : null}
+
+      {gwTab === 'messaging' ? (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-[11.5px]">
+            <div className="mb-1.5 font-medium text-[var(--color-ink)]">Telegram Bot Setup</div>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                aria-label="Telegram bot token"
+                placeholder="123456:ABC-DEF..."
+                value={tgToken}
+                onChange={(e) => setTgToken(e.target.value)}
+                className="flex-1 rounded border border-[var(--color-border)] bg-black/20 px-2 py-1 text-[11.5px] text-[var(--color-ink)]"
+              />
+              <button
+                type="button"
+                disabled={!tgToken.trim()}
+                onClick={() =>
+                  void gwApi.platformConfigure('telegram', { botToken: tgToken.trim() }, true).then((res) => {
+                    setTgToken('');
+                    setNotice(res.ok ? 'Telegram connected.' : String(res.error ?? 'Telegram connection failed.'));
+                    return reload();
+                  })
+                }
+                className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-ink)]"
+              >
+                Connect Telegram
+              </button>
+            </div>
+          </div>
+
+          {pendingPairings.length > 0 ? (
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-medium text-[var(--color-ink)]">Pending Pairing Requests</div>
+              {pendingPairings.map((p) => {
+                const code = String(p.code ?? '');
+                return (
+                  <div key={code} className="flex items-center justify-between rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11px]">
+                    <span>{String(p.platform)} · {String(p.accountId)} ({code})</span>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => void gwApi.pairingApprove(code).then(reload)} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]">Approve</button>
+                      <button type="button" onClick={() => void gwApi.pairingReject(code).then(reload)} className="text-[var(--color-danger)]">Reject</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="text-[11px] text-[var(--color-ink-dim)]">
+            {platforms.length} messaging platform adapters registered · {authorizedUsers.length} authorized remote user(s)
+          </div>
+        </div>
+      ) : null}
+
+      {gwTab === 'webhooks' ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              aria-label="New webhook name"
+              placeholder="GitHub PR Review Webhook"
+              value={webhookName}
+              onChange={(e) => setWebhookName(e.target.value)}
+              className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)]"
+            />
+            <button
+              type="button"
+              disabled={!webhookName.trim()}
+              onClick={() =>
+                void gwApi.webhookCreate(webhookName.trim()).then((res) => {
+                  setWebhookName('');
+                  setNotice(res.ok ? `Created webhook ${(res.route as { path?: string })?.path ?? ''}. Save signing secret securely.` : 'Failed to create webhook.');
+                  return reload();
+                })
+              }
+              className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-ink)]"
+            >
+              Create Webhook
+            </button>
+          </div>
+          {webhooks.map((w) => {
+            const id = String(w.id ?? '');
+            const enabled = Boolean(w.enabled);
+            return (
+              <div key={id} className="flex items-center justify-between rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11.5px]">
+                <div>
+                  <strong className="text-[var(--color-ink)]">{String(w.name ?? id)}</strong>{' '}
+                  <span className="text-[10.5px] text-[var(--color-ink-dim)]">{String(w.path ?? '')}</span>
+                </div>
+                <div className="flex gap-2 text-[11px]">
+                  <button type="button" onClick={() => void gwApi.webhookSetEnabled(id, !enabled).then(reload)} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]">{enabled ? 'Disable' : 'Enable'}</button>
+                  <button type="button" onClick={() => void gwApi.webhookDelete(id).then(reload)} className="text-[var(--color-danger)]">Delete</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {gwTab === 'devices' ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              aria-label="New device name"
+              placeholder="My Laptop / Tablet"
+              value={deviceName}
+              onChange={(e) => setDeviceName(e.target.value)}
+              className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11.5px] text-[var(--color-ink)]"
+            />
+            <button
+              type="button"
+              disabled={!deviceName.trim()}
+              onClick={() =>
+                void gwApi.devicePair(deviceName.trim()).then((res) => {
+                  setDeviceName('');
+                  setNotice(res.ok ? `Paired device ${(res.device as { id?: string })?.id ?? ''}. Copy bearer token once.` : 'Failed to pair device.');
+                  return reload();
+                })
+              }
+              className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-ink)]"
+            >
+              Pair Device
+            </button>
+          </div>
+          {pairedDevices.map((d) => {
+            const id = String(d.id ?? '');
+            return (
+              <div key={id} className="flex items-center justify-between rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[11.5px]">
+                <span>{String(d.name ?? id)} ({String(d.projectId ?? 'default')})</span>
+                <button type="button" onClick={() => void gwApi.deviceRevoke(id).then(reload)} className="text-[var(--color-danger)] text-[11px]">Revoke</button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </section>

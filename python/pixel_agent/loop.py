@@ -57,9 +57,21 @@ def run_agent_turn(
     tool_timeout_s: float = 35.0,
     provider_call: Optional[ProviderCallFn] = None,
     fallback_configs: Optional[list[ProviderConfig]] = None,
+    hook_dispatcher: Optional[Callable[[str, dict[str, Any]], Any]] = None,
+    tool_policy_check: Optional[Callable[[str], tuple[bool, Optional[str]]]] = None,
 ) -> dict[str, Any]:
     """Execute one complete multi-step model/tool turn and emit pixel-agent-v2 events."""
     call_model = provider_call or _default_provider_call
+
+    def _safe_hook(event: str, payload: dict[str, Any]) -> None:
+        if hook_dispatcher is None:
+            return
+        try:
+            hook_dispatcher(event, payload)
+        except Exception:
+            pass
+
+    _safe_hook("before_agent_run", {"requestId": request_id, "model": provider_config.model})
     repetition = RepetitionGuard(max_identical_tool_calls=3)
     working_messages: list[dict[str, Any]] = [dict(m) for m in messages]
     model_limit = min(budget.max_context_tokens, context_limit_for_model(provider_config.model))
@@ -229,8 +241,21 @@ def run_agent_turn(
                 executed_steps.append({"tool": tc.name, "status": "blocked", "detail": err_msg})
                 continue
 
+            if tool_policy_check is not None:
+                policy_ok, policy_reason = tool_policy_check(tc.name)
+                if not policy_ok:
+                    deny_msg = policy_reason or f"Tool '{tc.name}' is disabled by active toolset policy."
+                    working_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps({"ok": False, "denied": True, "error": deny_msg}),
+                    })
+                    executed_steps.append({"tool": tc.name, "status": "denied", "detail": deny_msg})
+                    continue
+
             budget.record_tool_call()
             call_id = tc.id or f"call_{uuid.uuid4().hex[:10]}"
+            _safe_hook("before_tool_call", {"requestId": request_id, "callId": call_id, "tool": tc.name})
             emit({
                 "type": "task.step",
                 "requestId": request_id,
@@ -238,6 +263,7 @@ def run_agent_turn(
             })
 
             tool_resp = request_tool_execution(call_id, tc.name, parsed_args, tool_timeout_s)
+            _safe_hook("after_tool_call", {"requestId": request_id, "callId": call_id, "tool": tc.name, "ok": bool(tool_resp.get("ok", False))})
             if cancel_event.is_set():
                 finish_reason = "cancelled"
                 break
@@ -290,6 +316,7 @@ def run_agent_turn(
         if finish_reason == "cancelled":
             break
 
+    _safe_hook("after_agent_run", {"requestId": request_id, "finishReason": finish_reason, "steps": len(executed_steps)})
     emit({
         "type": "turn.complete",
         "requestId": request_id,

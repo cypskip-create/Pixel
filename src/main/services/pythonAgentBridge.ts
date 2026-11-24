@@ -151,6 +151,7 @@ export class PythonAgentBridge {
   private readonly ownershipPath: string | null;
   private readonly crashLogPath: string | null;
   private readonly pluginDataDir: string | null;
+  private readonly gatewayDataDir: string | null;
   private readonly parentStartMarker = `${process.pid}:${Date.now()}`;
   private proc: ChildProcessWithoutNullStreams | null = null;
   private currentOwnership: PythonAgentOwnershipEntry | null = null;
@@ -166,6 +167,7 @@ export class PythonAgentBridge {
     ownershipPath?: string;
     crashLogPath?: string;
     pluginDataDir?: string;
+    gatewayDataDir?: string;
   } = {}) {
     this.pythonExecutable = options.pythonExecutable ?? process.env.PIXEL_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
     this.scriptPath = options.scriptPath ?? join(process.cwd(), 'python', 'agent_service.py');
@@ -173,6 +175,7 @@ export class PythonAgentBridge {
     this.ownershipPath = options.ownershipPath ?? null;
     this.crashLogPath = options.crashLogPath ?? null;
     this.pluginDataDir = options.pluginDataDir ?? null;
+    this.gatewayDataDir = options.gatewayDataDir ?? null;
   }
 
   getHealth(): { running: boolean; pid: number | null; instanceId: string | null; recentStderr: string[] } {
@@ -237,6 +240,7 @@ export class PythonAgentBridge {
     const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUTF8: '1' };
     if (this.crashLogPath) env.PIXEL_AGENT_CRASH_LOG = this.crashLogPath;
     if (this.pluginDataDir) env.PIXEL_PLUGIN_DATA_DIR = this.pluginDataDir;
+    if (this.gatewayDataDir) env.PIXEL_GATEWAY_DATA_DIR = this.gatewayDataDir;
 
     const child = spawn(this.pythonExecutable, ['-u', this.scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -618,6 +622,70 @@ export class PythonAgentBridge {
 
   skillsHubRemove(skillId: string): Promise<{ ok: boolean; removed?: string; error?: string }> {
     return this.request('skills.hub_remove', { skillId });
+  }
+
+  gatewayStatus(): Promise<Record<string, unknown>> {
+    return this.request('gateway.status');
+  }
+
+  gatewayStart(input: { host?: string; port?: number } = {}): Promise<{ ok: boolean; running: boolean; http?: { ok: boolean; host: string; port: number } }> {
+    return this.request('gateway.start', input);
+  }
+
+  gatewayStop(): Promise<{ ok: boolean; running: boolean }> {
+    return this.request('gateway.stop');
+  }
+
+  gatewayEmergencyStop(): Promise<{ ok: boolean; emergencyStopped: boolean }> {
+    return this.request('gateway.emergency_stop');
+  }
+
+  gatewayPlatformConfigure(platform: string, config: Record<string, unknown>, connect = false): Promise<Record<string, unknown>> {
+    return this.request('gateway.platform_configure', { platform, config, connect });
+  }
+
+  gatewayPlatformDisconnect(platform: string): Promise<Record<string, unknown>> {
+    return this.request('gateway.platform_disconnect', { platform });
+  }
+
+  gatewayInbound(platform: string, payload: Record<string, unknown>, availableTools: string[] = []): Promise<Record<string, unknown>> {
+    return this.request('gateway.inbound', { platform, payload, availableTools });
+  }
+
+  gatewayPairingApprove(input: { code: string; projectId?: string; scopes?: string[]; allowGroups?: boolean }): Promise<Record<string, unknown>> {
+    return this.request('gateway.pairing_approve', input);
+  }
+
+  gatewayPairingReject(code: string): Promise<Record<string, unknown>> {
+    return this.request('gateway.pairing_reject', { code });
+  }
+
+  gatewayUserRevoke(platform: string, accountId: string): Promise<Record<string, unknown>> {
+    return this.request('gateway.user_revoke', { platform, accountId });
+  }
+
+  gatewayDevicePair(input: { deviceName: string; projectId?: string; scopes?: string[] }): Promise<{ ok: boolean; device?: Record<string, unknown>; token?: string }> {
+    return this.request('gateway.device_pair', input);
+  }
+
+  gatewayDeviceRevoke(deviceId: string): Promise<Record<string, unknown>> {
+    return this.request('gateway.device_revoke', { deviceId });
+  }
+
+  gatewayWebhookCreate(input: { name: string; projectId?: string; eventFilters?: string[]; rateLimitPerMin?: number }): Promise<{ ok: boolean; route?: Record<string, unknown>; signingSecret?: string }> {
+    return this.request('gateway.webhook_create', input);
+  }
+
+  gatewayWebhookSetEnabled(routeId: string, enabled: boolean): Promise<Record<string, unknown>> {
+    return this.request('gateway.webhook_set_enabled', { routeId, enabled });
+  }
+
+  gatewayWebhookDelete(routeId: string): Promise<Record<string, unknown>> {
+    return this.request('gateway.webhook_delete', { routeId });
+  }
+
+  gatewayWebhookHistory(limit = 50): Promise<Array<Record<string, unknown>>> {
+    return this.request('gateway.webhook_history', { limit });
   }
 
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {

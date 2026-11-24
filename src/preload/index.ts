@@ -359,6 +359,28 @@ const bridge: CypsBridge = {
     skillsHubRemove: (skillId: string) => ipcRenderer.invoke(CH.capabilitiesSkillsHubRemove, skillId),
   },
 
+  gateway: {
+    status: () => ipcRenderer.invoke(CH.gatewayStatus),
+    start: (host?: string, port?: number) => ipcRenderer.invoke(CH.gatewayStart, host, port),
+    stop: () => ipcRenderer.invoke(CH.gatewayStop),
+    platformConfigure: (platform: string, config: Record<string, unknown>, connect = false) =>
+      ipcRenderer.invoke(CH.gatewayPlatformConfigure, platform, config, connect),
+    platformDisconnect: (platform: string) => ipcRenderer.invoke(CH.gatewayPlatformDisconnect, platform),
+    pairingApprove: (code: string, projectId?: string, scopes?: string[], allowGroups = false) =>
+      ipcRenderer.invoke(CH.gatewayPairingApprove, code, projectId, scopes, allowGroups),
+    pairingReject: (code: string) => ipcRenderer.invoke(CH.gatewayPairingReject, code),
+    userRevoke: (platform: string, accountId: string) => ipcRenderer.invoke(CH.gatewayUserRevoke, platform, accountId),
+    devicePair: (deviceName: string, projectId?: string, scopes?: string[]) =>
+      ipcRenderer.invoke(CH.gatewayDevicePair, deviceName, projectId, scopes),
+    deviceRevoke: (deviceId: string) => ipcRenderer.invoke(CH.gatewayDeviceRevoke, deviceId),
+    webhookCreate: (name: string, projectId?: string, eventFilters?: string[]) =>
+      ipcRenderer.invoke(CH.gatewayWebhookCreate, name, projectId, eventFilters),
+    webhookSetEnabled: (routeId: string, enabled: boolean) =>
+      ipcRenderer.invoke(CH.gatewayWebhookSetEnabled, routeId, enabled),
+    webhookDelete: (routeId: string) => ipcRenderer.invoke(CH.gatewayWebhookDelete, routeId),
+    webhookHistory: (limit = 50) => ipcRenderer.invoke(CH.gatewayWebhookHistory, limit),
+  },
+
   proceduralSkills: {
     list: () => ipcRenderer.invoke(CH.proceduralSkillsList) as Promise<import('../shared/types').ProceduralSkillView[]>,
     createDraft: (markdown: string) =>

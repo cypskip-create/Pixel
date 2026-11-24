@@ -163,6 +163,33 @@ def _run_child_server() -> int:
     return 0
 
 
+_ALLOWLISTED_PLUGIN_ENV_KEYS = (
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "PATH",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "LANG",
+    "LC_ALL",
+)
+
+
+def _build_minimal_plugin_env(py_root: str) -> dict[str, str]:
+    """Build a minimal allowlisted environment excluding provider keys & unrelated secrets."""
+    env: dict[str, str] = {}
+    for key in _ALLOWLISTED_PLUGIN_ENV_KEYS:
+        val = os.environ.get(key)
+        if val is not None:
+            env[key] = val
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = py_root
+    return env
+
+
 class PluginHostClient:
     """Supervisor managing one isolated Python plugin host subprocess."""
 
@@ -183,10 +210,7 @@ class PluginHostClient:
             return
         self.crashed = False
         py_root = str(Path(__file__).resolve().parent.parent)
-        env = dict(os.environ)
-        env["PYTHONUTF8"] = "1"
-        existing_pp = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = f"{py_root}{os.pathsep}{existing_pp}" if existing_pp else py_root
+        env = _build_minimal_plugin_env(py_root)
 
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         self._proc = subprocess.Popen(

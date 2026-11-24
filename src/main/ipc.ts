@@ -653,6 +653,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       continuousVoice.stop();
       terminalService.adminKillAll();
       void browserManager.closeAll();
+      void pythonAgentBridge.pluginEmergencyStop().catch(() => undefined);
+      void pythonAgentBridge.gatewayEmergencyStop().catch(() => undefined);
       computerUse.invalidateSnapshots();
       context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report);
     },
@@ -808,6 +810,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     ownershipPath: join(app.getPath('userData'), 'runtime', 'python-agent-owner.json'),
     crashLogPath: join(app.getPath('userData'), 'logs', 'python-agent-crash.log'),
     pluginDataDir: join(app.getPath('userData'), 'python-plugins'),
+    gatewayDataDir: join(app.getPath('userData'), 'gateway'),
   });
 
   const pythonRunner = new PythonAgentRunner({
@@ -2191,6 +2194,85 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.capabilitiesSkillsHubRemove, async (_event, skillId: string) =>
     pythonAgentBridge.skillsHubRemove(typeof skillId === 'string' ? skillId : ''),
+  );
+
+  registerHandler(CHANNELS.gatewayStatus, async () => {
+    try {
+      return await pythonAgentBridge.gatewayStatus();
+    } catch {
+      return { running: false, platforms: [], authorizedUsers: [], pendingPairings: [], pairedDevices: [], webhooks: [] };
+    }
+  });
+
+  registerHandler(CHANNELS.gatewayStart, async (_event, host?: string, port?: number) => {
+    if (emergency.isStopped()) return { ok: false, running: false, error: 'Emergency Stop is active.' };
+    return pythonAgentBridge.gatewayStart({
+      host: typeof host === 'string' && host.trim() ? host.trim() : '127.0.0.1',
+      port: typeof port === 'number' ? port : 0,
+    });
+  });
+
+  registerHandler(CHANNELS.gatewayStop, async () => pythonAgentBridge.gatewayStop());
+
+  registerHandler(CHANNELS.gatewayPlatformConfigure, async (_event, platform: string, config: Record<string, unknown>, connect = false) =>
+    pythonAgentBridge.gatewayPlatformConfigure(
+      typeof platform === 'string' ? platform : '',
+      config && typeof config === 'object' ? config : {},
+      Boolean(connect),
+    ),
+  );
+
+  registerHandler(CHANNELS.gatewayPlatformDisconnect, async (_event, platform: string) =>
+    pythonAgentBridge.gatewayPlatformDisconnect(typeof platform === 'string' ? platform : ''),
+  );
+
+  registerHandler(CHANNELS.gatewayPairingApprove, async (_event, code: string, projectId?: string, scopes?: string[], allowGroups = false) =>
+    pythonAgentBridge.gatewayPairingApprove({
+      code: typeof code === 'string' ? code : '',
+      projectId: typeof projectId === 'string' ? projectId : memoryStore.getActiveProject(),
+      scopes: Array.isArray(scopes) ? scopes.map(String) : undefined,
+      allowGroups: Boolean(allowGroups),
+    }),
+  );
+
+  registerHandler(CHANNELS.gatewayPairingReject, async (_event, code: string) =>
+    pythonAgentBridge.gatewayPairingReject(typeof code === 'string' ? code : ''),
+  );
+
+  registerHandler(CHANNELS.gatewayUserRevoke, async (_event, platform: string, accountId: string) =>
+    pythonAgentBridge.gatewayUserRevoke(typeof platform === 'string' ? platform : '', typeof accountId === 'string' ? accountId : ''),
+  );
+
+  registerHandler(CHANNELS.gatewayDevicePair, async (_event, deviceName: string, projectId?: string, scopes?: string[]) =>
+    pythonAgentBridge.gatewayDevicePair({
+      deviceName: typeof deviceName === 'string' ? deviceName : 'Paired Device',
+      projectId: typeof projectId === 'string' ? projectId : memoryStore.getActiveProject(),
+      scopes: Array.isArray(scopes) ? scopes.map(String) : undefined,
+    }),
+  );
+
+  registerHandler(CHANNELS.gatewayDeviceRevoke, async (_event, deviceId: string) =>
+    pythonAgentBridge.gatewayDeviceRevoke(typeof deviceId === 'string' ? deviceId : ''),
+  );
+
+  registerHandler(CHANNELS.gatewayWebhookCreate, async (_event, name: string, projectId?: string, eventFilters?: string[]) =>
+    pythonAgentBridge.gatewayWebhookCreate({
+      name: typeof name === 'string' ? name : 'Webhook',
+      projectId: typeof projectId === 'string' ? projectId : memoryStore.getActiveProject(),
+      eventFilters: Array.isArray(eventFilters) ? eventFilters.map(String) : undefined,
+    }),
+  );
+
+  registerHandler(CHANNELS.gatewayWebhookSetEnabled, async (_event, routeId: string, enabled: boolean) =>
+    pythonAgentBridge.gatewayWebhookSetEnabled(typeof routeId === 'string' ? routeId : '', Boolean(enabled)),
+  );
+
+  registerHandler(CHANNELS.gatewayWebhookDelete, async (_event, routeId: string) =>
+    pythonAgentBridge.gatewayWebhookDelete(typeof routeId === 'string' ? routeId : ''),
+  );
+
+  registerHandler(CHANNELS.gatewayWebhookHistory, async (_event, limit = 50) =>
+    pythonAgentBridge.gatewayWebhookHistory(typeof limit === 'number' ? limit : 50),
   );
 
   registerHandler(CHANNELS.browserSessions, () => browserManager.list());

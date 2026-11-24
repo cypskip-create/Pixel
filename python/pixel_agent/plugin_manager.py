@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+SKILL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 from .plugin_host import PluginHostClient
 from .plugin_manifest import (
@@ -83,6 +86,7 @@ class PluginManager:
         self._state: dict[str, Any] = self._load_state()
         self._hosts: dict[str, PluginHostClient] = {}
         self._manifests: dict[str, PluginManifest] = {}
+        self._secret_settings: dict[str, dict[str, str]] = {}
         self._tools: dict[str, dict[str, Any]] = {}  # tool_name -> schema dict (includes pluginId)
         self._hooks: dict[str, list[dict[str, Any]]] = {}  # plugin_id -> list of {event, priority}
         self._providers: dict[str, list[dict[str, Any]]] = {}
@@ -325,19 +329,53 @@ class PluginManager:
         manifest = self._manifests.get(plugin_id)
         if not entry or not manifest:
             return {"ok": False, "error": f"Plugin '{plugin_id}' is not installed."}
-        merged = {**(entry.get("settings") or {}), **(patch or {})}
+        merged = {**(entry.get("settings") or {}), **(self._secret_settings.get(plugin_id) or {}), **(patch or {})}
         validated, errors = validate_settings_against_schema(manifest.config_schema, merged)
         if errors:
             return {"ok": False, "error": "; ".join(errors)}
-        # Preserve extra keys if schema is empty
         final_settings = validated if manifest.config_schema else merged
-        entry["settings"] = final_settings
+        # Never persist secret-typed settings in plaintext in plugins-state.json
+        non_secret: dict[str, Any] = {}
+        secrets: dict[str, str] = dict(self._secret_settings.get(plugin_id) or {})
+        for k, v in final_settings.items():
+            spec = manifest.config_schema.get(k) or {}
+            if str(spec.get("type") or "").strip().lower() == "secret":
+                secrets[k] = str(v)
+            else:
+                non_secret[k] = v
+        self._secret_settings[plugin_id] = secrets
+        entry["settings"] = non_secret
+        entry["configuredSecrets"] = sorted(k for k, v in secrets.items() if v)
         entry["updatedAt"] = int(time.time() * 1000)
         self._save_state()
         host = self._hosts.get(plugin_id)
         if host and host.is_running():
-            host.request("update_config", {"config": final_settings})
+            host.request("update_config", {"config": {**non_secret, **secrets}})
         return {"ok": True, "plugin": self._plugin_view(plugin_id)}
+
+    def is_tool_allowed(self, tool_name: str, explicit_allowlist: Optional[list[str]] = None) -> tuple[bool, Optional[str]]:
+        """Enforce enabled toolsets and explicit allowlists (empty list [] denies all tools)."""
+        if explicit_allowlist is not None:
+            if tool_name not in explicit_allowlist:
+                return False, f"Tool '{tool_name}' is not in the active session allowlist."
+        overrides = self._state.get("toolsets", {})
+        for ts in DEFAULT_TOOLSETS:
+            prefixes = tuple(ts["toolPrefixes"])
+            if any(tool_name.startswith(p) or tool_name == p for p in prefixes):
+                if overrides.get(ts["id"], True) is False:
+                    return False, f"Tool '{tool_name}' is disabled because toolset '{ts['id']}' is disabled."
+        return True, None
+
+    def filter_tools(self, tools: list[dict[str, Any]], explicit_allowlist: Optional[list[str]] = None) -> list[dict[str, Any]]:
+        """Filter model tool schemas according to active toolsets and explicit allowlists."""
+        out: list[dict[str, Any]] = []
+        for t in tools:
+            if not isinstance(t, dict) or not t.get("name"):
+                continue
+            allowed, _reason = self.is_tool_allowed(str(t["name"]), explicit_allowlist=explicit_allowlist)
+            if allowed:
+                out.append(t)
+        return out
 
     # ------------------------------------------------------------------
     # Tool Execution, Hooks, Toolsets & Skills Hub
@@ -447,12 +485,24 @@ class PluginManager:
                 items.append({**custom, "installed": True})
         return items
 
+    def _safe_skill_path(self, skill_id: str) -> Optional[Path]:
+        if not SKILL_ID_RE.match(skill_id or ""):
+            return None
+        candidate = (self.skills_dir / f"{skill_id}.md").resolve()
+        try:
+            candidate.relative_to(self.skills_dir.resolve())
+        except ValueError:
+            return None
+        return candidate
+
     def skills_hub_install(self, skill_id: str, *, markdown: Optional[str] = None, name: Optional[str] = None, description: Optional[str] = None) -> dict[str, Any]:
+        skill_path = self._safe_skill_path(skill_id)
+        if skill_path is None:
+            return {"ok": False, "error": f"Invalid skill identifier '{skill_id}'."}
         catalog_item = next((c for c in CATALOG_SKILLS_HUB if c["id"] == skill_id), None)
         body = markdown if markdown is not None else (catalog_item["markdown"] if catalog_item else "")
         if not body.strip():
             return {"ok": False, "error": f"Skill '{skill_id}' not found in catalog and no markdown supplied."}
-        skill_path = self.skills_dir / f"{skill_id}.md"
         skill_path.write_text(body, encoding="utf-8")
         record = {
             "id": skill_id,
@@ -471,10 +521,12 @@ class PluginManager:
         return {"ok": True, "skill": record}
 
     def skills_hub_remove(self, skill_id: str) -> dict[str, Any]:
+        skill_path = self._safe_skill_path(skill_id)
+        if skill_path is None:
+            return {"ok": False, "error": f"Invalid skill identifier '{skill_id}'."}
         installed = self._state.get("skillsHub", {})
         if skill_id not in installed:
             return {"ok": False, "error": f"Skill '{skill_id}' is not installed."}
-        skill_path = self.skills_dir / f"{skill_id}.md"
         if skill_path.is_file():
             skill_path.unlink(missing_ok=True)
         installed.pop(skill_id, None)

@@ -13,6 +13,7 @@ from . import PROTOCOL_VERSION, SUPPORTED_PROTOCOLS
 from .budgets import IterationBudget
 from .crash_log import install_panic_hook, record_crash
 from .errors import AgentError
+from .gateway import GatewayService
 from .loop import run_agent_turn
 from .multimodal import annotate_som_png_base64, assert_vision_capable_model, generate_image_artifact
 from .plugin_manager import PluginManager
@@ -41,11 +42,17 @@ class PixelAgentProtocolServer:
         self._pending_tools: dict[str, _PendingToolWait] = {}
         self._shutting_down = False
         self._plugins: Optional[PluginManager] = None
+        self._gateway: Optional[GatewayService] = None
 
     def _plugin_manager(self) -> PluginManager:
         if self._plugins is None:
             self._plugins = PluginManager()
         return self._plugins
+
+    def _gateway_service(self) -> GatewayService:
+        if self._gateway is None:
+            self._gateway = GatewayService()
+        return self._gateway
 
     def send(self, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, ensure_ascii=False) + "\n"
@@ -150,10 +157,14 @@ class PixelAgentProtocolServer:
 
         def _worker() -> None:
             try:
+                pm = self._plugin_manager()
+                raw_allowlist = params.get("allowedTools")
+                explicit_allowlist = [str(x) for x in raw_allowlist] if isinstance(raw_allowlist, list) else None
+                effective_tools = pm.filter_tools(tools, explicit_allowlist=explicit_allowlist)
                 run_agent_turn(
                     request_id=request_id,
                     messages=messages,
-                    tools=tools,
+                    tools=effective_tools,
                     provider_config=provider_config,
                     fallback_configs=fallback_configs,
                     budget=budget,
@@ -161,6 +172,8 @@ class PixelAgentProtocolServer:
                     emit=self.send,
                     request_tool_execution=lambda cid, nm, ag, ts: self._request_tool(request_id, cid, nm, ag, ts),
                     tool_timeout_s=tool_timeout_s,
+                    hook_dispatcher=lambda ev, pl: pm.dispatch_hook(ev, pl),
+                    tool_policy_check=lambda nm: pm.is_tool_allowed(nm, explicit_allowlist=explicit_allowlist),
                 )
             except Exception as exc:
                 record_crash("turn worker exception", type(exc), exc, exc.__traceback__)
@@ -483,8 +496,119 @@ class PixelAgentProtocolServer:
             self.send({"id": req_id, "ok": True, "result": res})
             return True
 
+        if msg_type == "gateway.status":
+            self.send({"id": req_id, "ok": True, "result": self._gateway_service().status()})
+            return True
+
+        if msg_type == "gateway.start":
+            res = self._gateway_service().start(
+                host=str(params.get("host") or "127.0.0.1"),
+                port=int(params.get("port", 0)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.stop":
+            res = self._gateway_service().stop()
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.emergency_stop":
+            res = self._gateway_service().emergency_stop() if self._gateway else {"ok": True, "emergencyStopped": True}
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.platform_configure":
+            res = self._gateway_service().configure_platform(
+                str(params.get("platform") or ""),
+                params.get("config") if isinstance(params.get("config"), dict) else {},
+                connect=bool(params.get("connect", False)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.platform_disconnect":
+            res = self._gateway_service().disconnect_platform(str(params.get("platform") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.inbound":
+            res = self._gateway_service().ingest_inbound(
+                str(params.get("platform") or ""),
+                params.get("payload") if isinstance(params.get("payload"), dict) else {},
+                available_tools=[str(x) for x in params.get("availableTools", [])] if isinstance(params.get("availableTools"), list) else None,
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.pairing_approve":
+            res = self._gateway_service().approve_pairing(
+                str(params.get("code") or ""),
+                project_id=str(params.get("projectId") or "default"),
+                scopes=[str(x) for x in params.get("scopes", [])] if isinstance(params.get("scopes"), list) else None,
+                allow_groups=bool(params.get("allowGroups", False)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.pairing_reject":
+            res = self._gateway_service().pairing.reject_pairing(str(params.get("code") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.user_revoke":
+            res = self._gateway_service().revoke_user(
+                str(params.get("platform") or ""),
+                str(params.get("accountId") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.device_pair":
+            res = self._gateway_service().pair_device(
+                str(params.get("deviceName") or "Paired Device"),
+                project_id=str(params.get("projectId") or "default"),
+                scopes=[str(x) for x in params.get("scopes", [])] if isinstance(params.get("scopes"), list) else None,
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.device_revoke":
+            res = self._gateway_service().revoke_device(str(params.get("deviceId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.webhook_create":
+            res = self._gateway_service().webhooks.create_route(
+                name=str(params.get("name") or "Webhook"),
+                project_id=str(params.get("projectId") or "default"),
+                event_filters=[str(x) for x in params.get("eventFilters", [])] if isinstance(params.get("eventFilters"), list) else None,
+                rate_limit_per_min=int(params.get("rateLimitPerMin", 30)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.webhook_set_enabled":
+            res = self._gateway_service().webhooks.set_enabled(
+                str(params.get("routeId") or ""),
+                bool(params.get("enabled", True)),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.webhook_delete":
+            res = self._gateway_service().webhooks.delete_route(str(params.get("routeId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "gateway.webhook_history":
+            self.send({"id": req_id, "ok": True, "result": self._gateway_service().webhooks.list_history(int(params.get("limit", 50)))})
+            return True
+
         if msg_type == "shutdown":
             self._shutting_down = True
+            if self._gateway is not None:
+                self._gateway.stop()
             if self._plugins is not None:
                 self._plugins.emergency_stop()
             with self._state_lock:
