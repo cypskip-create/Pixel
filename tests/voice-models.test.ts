@@ -30,14 +30,23 @@ afterEach(() => {
 });
 
 describe('VoiceModelManager', () => {
-  it('exposes only pinned MIT English models and the checksum-pinned Kokoro asset pair', () => {
-    expect(VOICE_MODEL_CATALOG.map((model) => model.id)).toEqual(['tiny.en', 'base.en', 'small.en', 'kokoro-v1.0-int8']);
+  it('exposes pinned MIT English/multilingual Whisper models and the checksum-pinned Kokoro asset pair', () => {
+    expect(VOICE_MODEL_CATALOG.map((model) => model.id)).toEqual([
+      'tiny.en',
+      'base.en',
+      'small.en',
+      'tiny',
+      'base',
+      'small',
+      'large-v3-turbo',
+      'kokoro-v1.0-int8',
+    ]);
     for (const model of VOICE_MODEL_CATALOG.slice(0, 3)) {
       expect(model.license).toBe('MIT');
       expect(model.files.some((file) => file.name === 'model.bin' && /^[a-f0-9]{64}$/.test(file.sha256 ?? ''))).toBe(true);
       expect(model.files.every((file) => file.url.includes('/resolve/'))).toBe(true);
     }
-    const kokoro = VOICE_MODEL_CATALOG[3];
+    const kokoro = VOICE_MODEL_CATALOG.find((m) => m.id === 'kokoro-v1.0-int8');
     expect(kokoro?.files.map((file) => file.sha256)).toEqual([
       'ae315a79b623f244700e4afb9246c46a26066782e049ba174bf3ba433970ee9c',
       'bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d',

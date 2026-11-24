@@ -965,7 +965,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     description: 'Resize an owned persistent terminal session viewport (columns and rows).',
     category: 'system',
     risk: 'low',
-    requiresApproval: false,
+    requiresApproval: true,
     changesState: true,
     parameters: {
       type: 'object',
@@ -983,7 +983,7 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     description: 'Terminate (if running) and close an owned persistent terminal session.',
     category: 'system',
     risk: 'medium',
-    requiresApproval: false,
+    requiresApproval: true,
     changesState: true,
     parameters: {
       type: 'object',
