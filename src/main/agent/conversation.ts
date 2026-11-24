@@ -69,7 +69,7 @@ export const REQUEST_TIMEOUT_MS = 120_000;
 export interface ConversationDeps {
   provider: ModelProvider;
   /** Returns the decrypted API key, or null when unset. Never cached here. */
-  getApiKey: () => string | null;
+  getApiKey: (providerOverride?: import('../../shared/types').ProviderId) => string | null;
   /** True once the user has pressed emergency stop. */
   isStopped: () => boolean;
   /** Forwards events to the UI. */
@@ -85,6 +85,8 @@ export interface RunTurnOptions {
   request: ChatRequest;
   /** Overrides for model/thinking chosen by settings. */
   model: string;
+  /** Optional per-run provider override (e.g. from active Profile). */
+  providerOverride?: import('../../shared/types').ProviderId;
   thinking?: ThinkingConfig;
   temperature?: number;
   maxTokens?: number;
@@ -155,13 +157,14 @@ export class ConversationEngine {
       return failedTurn();
     }
 
-    const apiKey = getApiKey();
-    if (!apiKey) {
+    const apiKey = getApiKey(options.providerOverride);
+    if (!apiKey && options.providerOverride !== 'ollama') {
+      const missingLabel = options.providerOverride ? options.providerOverride.toUpperCase() : 'DeepSeek';
       if (!options.suppressEvents) emit(
         errorEvent(
           requestId,
           'NO_API_KEY',
-          'Pixel needs a DeepSeek API key before it can answer. Add one in Settings - it is stored encrypted on this computer.',
+          `Pixel needs a ${missingLabel} API key before it can answer. Add one in Settings - it is stored encrypted on this computer.`,
         ),
       );
       return failedTurn();
@@ -186,6 +189,7 @@ export class ConversationEngine {
       const result = await provider.generate({
         requestId,
         model,
+        ...(options.providerOverride ? { providerOverride: options.providerOverride } : {}),
         messages,
         thinking: options.thinking ?? DEFAULT_THINKING,
         temperature: options.temperature ?? 0.7,

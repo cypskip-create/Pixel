@@ -103,7 +103,14 @@ export class RuntimeProvider implements ModelProvider {
   }
 
   async generate(options: GenerateOptions): Promise<GenerateResult> {
-    const providerSettings = this.getSettings().provider;
+    const baseProviderSettings = this.getSettings().provider;
+    const providerSettings = options.providerOverride && options.providerOverride !== baseProviderSettings.provider
+      ? {
+          ...baseProviderSettings,
+          provider: options.providerOverride,
+          baseUrl: getProviderDescriptor(options.providerOverride).defaultBaseUrl,
+        }
+      : baseProviderSettings;
     const chain = resolveProviderChain(providerSettings, options.model);
     const primary = chain[0]!;
     let lastError: unknown = null;

@@ -643,8 +643,12 @@ export function CronPage(): React.JSX.Element {
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editScheduleKind, setEditScheduleKind] = useState<RoutineScheduleKind>('daily');
   const [editLocalTime, setEditLocalTime] = useState('09:00');
+  const [editCronExpression, setEditCronExpression] = useState('0 9 * * 1-5');
+  const [editIntervalMinutes, setEditIntervalMinutes] = useState('60');
   const [editTimezone, setEditTimezone] = useState('UTC');
+  const [editMissedRunPolicy, setEditMissedRunPolicy] = useState<MissedRunPolicy>('skip');
   const [notice, setNotice] = useState<string | null>(null);
 
   const reload = async (): Promise<void> => {
@@ -696,14 +700,22 @@ export function CronPage(): React.JSX.Element {
   };
 
   const saveEdit = async (routineId: string): Promise<void> => {
-    const updated = await window.cyps?.routines.update?.(routineId, {
-      name: editName.trim(),
-      localTime: editLocalTime,
-      timezone: editTimezone,
-    });
-    setEditingId(null);
-    setNotice(updated ? 'Routine updated.' : 'Could not update routine.');
-    await reload();
+    try {
+      const updated = await window.cyps?.routines.update?.(routineId, {
+        name: editName.trim(),
+        scheduleKind: editScheduleKind,
+        localTime: editLocalTime,
+        ...(editScheduleKind === 'cron' || editScheduleKind === 'weekly' ? { cronExpression: editCronExpression.trim() } : {}),
+        ...(editScheduleKind === 'interval' ? { intervalMs: Math.max(1, Number(editIntervalMinutes) || 60) * 60_000 } : {}),
+        timezone: editTimezone.trim(),
+        missedRunPolicy: editMissedRunPolicy,
+      });
+      setEditingId(null);
+      setNotice(updated ? 'Routine updated.' : 'Could not update routine.');
+      await reload();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not update routine.');
+    }
   };
 
   return (
@@ -778,26 +790,58 @@ export function CronPage(): React.JSX.Element {
             return (
               <div key={r.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px]">
                 {isEditing ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input type="text" aria-label="Edit routine name" value={editName} onChange={(e) => setEditName(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[12px] text-[var(--color-ink)]" />
-                    <input type="time" aria-label="Edit routine time" value={editLocalTime} onChange={(e) => setEditLocalTime(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[12px] text-[var(--color-ink)]" />
-                    <input type="text" aria-label="Edit routine timezone" value={editTimezone} onChange={(e) => setEditTimezone(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[12px] text-[var(--color-ink)]" />
-                    <button type="button" onClick={() => void saveEdit(r.id)} className="rounded border border-[var(--color-accent)] px-2 py-0.5 text-[11px] text-[var(--color-ink)]">Save</button>
-                    <button type="button" onClick={() => setEditingId(null)} className="text-[11px] text-[var(--color-ink-dim)]">Cancel</button>
+                  <div className="space-y-2">
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <input type="text" aria-label="Edit routine name" value={editName} onChange={(e) => setEditName(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[12px] text-[var(--color-ink)]" />
+                      <select aria-label="Edit schedule kind" value={editScheduleKind} onChange={(e) => setEditScheduleKind(e.target.value as RoutineScheduleKind)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[11.5px] text-[var(--color-ink)]">
+                        <option value="daily">Daily</option>
+                        <option value="cron">Cron Expression</option>
+                        <option value="interval">Interval (min)</option>
+                      </select>
+                      {editScheduleKind === 'cron' || editScheduleKind === 'weekly' ? (
+                        <input type="text" aria-label="Edit cron expression" value={editCronExpression} onChange={(e) => setEditCronExpression(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[11.5px] text-[var(--color-ink)]" />
+                      ) : editScheduleKind === 'interval' ? (
+                        <input type="number" min={1} aria-label="Edit interval minutes" value={editIntervalMinutes} onChange={(e) => setEditIntervalMinutes(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[11.5px] text-[var(--color-ink)]" />
+                      ) : (
+                        <input type="time" aria-label="Edit routine time" value={editLocalTime} onChange={(e) => setEditLocalTime(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[11.5px] text-[var(--color-ink)]" />
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input type="text" aria-label="Edit routine timezone" value={editTimezone} onChange={(e) => setEditTimezone(e.target.value)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[11.5px] text-[var(--color-ink)]" />
+                      <select aria-label="Edit missed run policy" value={editMissedRunPolicy} onChange={(e) => setEditMissedRunPolicy(e.target.value as MissedRunPolicy)} className="rounded border border-[var(--color-border)] bg-black/20 px-2 py-0.5 text-[11.5px] text-[var(--color-ink)]">
+                        <option value="skip">Skip missed</option>
+                        <option value="notify_only">Notify only</option>
+                        <option value="run_once">Catch up once</option>
+                        <option value="catch_up_window">Bounded catch-up</option>
+                      </select>
+                      <button type="button" onClick={() => void saveEdit(r.id)} className="rounded border border-[var(--color-accent)] px-2.5 py-0.5 text-[11px] text-[var(--color-ink)]">Save</button>
+                      <button type="button" onClick={() => setEditingId(null)} className="text-[11px] text-[var(--color-ink-dim)]">Cancel</button>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <strong className="text-[var(--color-ink)]">{r.name}</strong>
                       <span className="ml-2 text-[11px] text-[var(--color-ink-dim)]">
-                        {r.cronExpression ? r.cronExpression : r.localTime} ({r.timezone}) · {r.enabled ? 'Enabled' : 'Paused'}
+                        {r.scheduleKind === 'interval' && r.intervalMs
+                          ? `every ${Math.round(r.intervalMs / 60_000)}m`
+                          : (r.cronExpression ? r.cronExpression : r.localTime)} ({r.timezone}) · {r.enabled ? 'Enabled' : 'Paused'}
                         {r.lastStatus ? ` · last=${r.lastStatus}` : ''}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1.5 text-[11px]">
                       <button type="button" onClick={() => void window.cyps?.routines.runNow?.(r.id).then((ok) => { setNotice(ok ? `Triggered "${r.name}".` : 'Could not run routine right now.'); return reload(); })} className="rounded border border-[var(--color-accent)] px-2 py-0.5 text-[var(--color-ink)]">Run Now</button>
                       <button type="button" onClick={() => void window.cyps?.routines.setEnabled(r.id, !r.enabled).then(reload)} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]">{r.enabled ? 'Pause' : 'Resume'}</button>
-                      <button type="button" onClick={() => { setEditingId(r.id); setEditName(r.name); setEditLocalTime(r.localTime); setEditTimezone(r.timezone); }} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]">Edit</button>
+                      <button type="button" onClick={() => {
+                        setEditingId(r.id);
+                        setEditName(r.name);
+                        setEditScheduleKind(r.scheduleKind ?? 'daily');
+                        setEditLocalTime(r.localTime);
+                        setEditCronExpression(r.cronExpression ?? '0 9 * * 1-5');
+                        setEditIntervalMinutes(r.intervalMs ? String(Math.max(1, Math.round(r.intervalMs / 60_000))) : '60');
+                        setEditTimezone(r.timezone);
+                        setEditMissedRunPolicy(r.missedRunPolicy ?? 'skip');
+                      }} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]">Edit</button>
                       <button type="button" onClick={() => void toggleHistory(r.id)} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink)]">History</button>
                       <button type="button" onClick={() => void window.cyps?.routines.cancel(r.id).then(reload)} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink-dim)]">Cancel Run</button>
                       <button type="button" onClick={() => void window.cyps?.routines.retry(r.id).then(reload)} className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-ink-dim)]">Retry</button>
@@ -1139,7 +1183,8 @@ export function DedicatedMessagingPage(): React.JSX.Element {
         <div className="flex items-center justify-between text-[11px] text-[var(--color-ink-dim)]">
           <span>
             Status: {activePlatformRow?.connected ? 'Connected' : activePlatformRow?.configured ? 'Configured' : 'Disconnected'}
-            {selectedAdapter === 'email' ? ' · Support level: outbound_only (SMTP sending; inbound IMAP polling not enabled)' : ' · Support level: full_adapter'}
+            {' · Support level: '}
+            <code>{String(activePlatformRow?.supportLevel ?? (selectedAdapter === 'email' ? 'outbound_only' : selectedAdapter === 'telegram' || selectedAdapter === 'slack' ? 'full_adapter' : 'partial'))}</code>
           </span>
           {activePlatformRow?.connected ? (
             <button type="button" onClick={() => void gwApi?.platformDisconnect(selectedAdapter).then(reload)} className="text-[var(--color-danger)]">Disconnect</button>

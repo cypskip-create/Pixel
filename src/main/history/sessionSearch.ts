@@ -160,6 +160,11 @@ export class SessionSearchIndex {
     return this.db.execute('DELETE FROM session_messages');
   }
 
+  /** Clears indexed session messages belonging only to the given project. */
+  clearProject(projectId: string): number {
+    return this.db.execute('DELETE FROM session_messages WHERE project_id = ?', [projectId]);
+  }
+
   /** Counts indexed messages (useful for diagnostics and migration tests). */
   count(projectId?: string): number {
     const row = projectId

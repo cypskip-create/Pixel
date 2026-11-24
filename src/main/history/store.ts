@@ -42,6 +42,8 @@ export interface HistoryQuery {
   offset?: number;
   search?: string;
   projectId?: string;
+  /** When false, legacy conversations lacking a projectId are excluded (used for non-default profiles). */
+  includeUnscoped?: boolean;
 }
 
 /** Keep at most this many conversations on disk. */
@@ -142,10 +144,17 @@ export class HistoryStore {
     const search = query.search?.trim().toLocaleLowerCase() ?? '';
     const limit = clampInteger(query.limit, 1, MAX_CONVERSATIONS, 30);
     const offset = clampInteger(query.offset, 0, MAX_CONVERSATIONS, 0);
+    const includeUnscoped = query.includeUnscoped !== false;
     const summaries = this.listIds().flatMap((id): ConversationSummary[] => {
       const record = this.load(id);
       if (!record) return [];
-      if (record.projectId && query.projectId && record.projectId !== query.projectId) return [];
+      if (query.projectId) {
+        if (record.projectId) {
+          if (record.projectId !== query.projectId) return [];
+        } else if (!includeUnscoped) {
+          return [];
+        }
+      }
       const last = record.messages[record.messages.length - 1];
       const preview = last ? redactTaskText(last.content).replace(/\s+/g, ' ').slice(0, 160) : '';
       const searchableText = `${record.title} ${record.messages.map((message) => message.content).join(' ')}`;
@@ -167,6 +176,31 @@ export class HistoryStore {
   clear(): void {
     for (const id of this.listIds()) this.storage.write(`history.${id}`, JSON.stringify(null));
     this.storage.write(INDEX_KEY, JSON.stringify([]));
+  }
+
+  /**
+   * Project-scoped clear: removes only conversations belonging to `projectId`
+   * (plus unscoped legacy records only when `includeUnscoped` is true).
+   * Returns the deleted conversation ids so callers can clean search/snapshots.
+   */
+  clearProject(projectId: string, includeUnscoped = false): string[] {
+    const deleted: string[] = [];
+    const remaining: string[] = [];
+    for (const id of this.listIds()) {
+      const record = this.load(id);
+      if (!record) continue;
+      const belongs = record.projectId
+        ? record.projectId === projectId
+        : includeUnscoped;
+      if (belongs) {
+        this.storage.write(`history.${id}`, JSON.stringify(null));
+        deleted.push(id);
+      } else {
+        remaining.push(id);
+      }
+    }
+    this.storage.write(INDEX_KEY, JSON.stringify(remaining));
+    return deleted;
   }
 
   /** Start a fresh conversation, replacing the anchor id. */

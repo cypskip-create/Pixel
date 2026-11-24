@@ -165,6 +165,7 @@ describe('Stage 9 Functional Backend Integration', () => {
       save: () => {
         throw new Error('Disk full');
       },
+      delete: () => undefined,
     };
     await expect(
       commitSessionImportSafely({

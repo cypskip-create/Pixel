@@ -48,8 +48,8 @@ export interface PythonAgentRunnerDeps {
   executors: ToolRunner;
   emit: (event: StreamEvent) => void;
   isStopped: () => boolean;
-  getApiKey: () => string | null;
-  getProviderConfig: (model: string) => PythonProviderMeta;
+  getApiKey: (providerOverride?: import('../../shared/types').ProviderId) => string | null;
+  getProviderConfig: (model: string, providerOverride?: import('../../shared/types').ProviderId) => PythonProviderMeta;
   memoryContextFor?: (request: AgentRunOptions['request']) => string;
   getProjectId?: () => string;
   fallbackToTypescript?: (options: AgentRunOptions) => Promise<AgentRunResult>;
@@ -154,8 +154,8 @@ export class PythonAgentRunner {
       return this.emptyResult('ABORTED');
     }
 
-    const providerMeta = this.deps.getProviderConfig(model);
-    const apiKey = this.deps.getApiKey() ?? '';
+    const providerMeta = this.deps.getProviderConfig(model, options.providerOverride);
+    const apiKey = this.deps.getApiKey(options.providerOverride) ?? '';
     if (!apiKey && providerMeta.provider !== 'ollama') {
       emit(
         errorEvent(

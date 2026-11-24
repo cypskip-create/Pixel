@@ -97,6 +97,8 @@ export interface AgentRunOptions {
   requestId: string;
   request: ChatRequest;
   model: string;
+  /** Optional per-run provider override (e.g. from active Profile). */
+  providerOverride?: import('../../shared/types').ProviderId;
   thinking?: ThinkingConfig;
   temperature?: number;
   maxTokens?: number;
@@ -300,6 +302,7 @@ export class AgentExecutor {
               requestId,
               request,
               model: options.model,
+              ...(options.providerOverride ? { providerOverride: options.providerOverride } : {}),
               ...(options.thinking ? { thinking: options.thinking } : {}),
               ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
               ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),

@@ -14,11 +14,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
 from pixel_agent.gateway.platforms import (
+    DiscordAdapter,
     EmailAdapter,
     InboundMessage,
+    MatrixAdapter,
     OutboundMessage,
     PLATFORM_INVENTORY,
+    SlackAdapter,
     TelegramAdapter,
+    WhatsAppCloudAdapter,
 )
 from pixel_agent.gateway.runtime import GatewayService
 from pixel_agent.gateway.webhooks_and_api import WebhookRegistry
@@ -69,15 +73,67 @@ class Stage8ClosureTests(unittest.TestCase):
     def test_platform_inventory_honest_support_levels(self) -> None:
         self.assertEqual(len(PLATFORM_INVENTORY), 26)
         full = [p["id"] for p in PLATFORM_INVENTORY if p.get("supportLevel") == "full_adapter"]
-        self.assertCountEqual(full, ["telegram", "discord", "slack", "whatsapp_cloud", "matrix"])
+        partial = [p["id"] for p in PLATFORM_INVENTORY if p.get("supportLevel") == "partial"]
+        self.assertCountEqual(full, ["telegram", "slack"])
+        self.assertCountEqual(partial, ["discord", "whatsapp_cloud", "matrix"])
         email_entry = next(p for p in PLATFORM_INVENTORY if p["id"] == "email")
         self.assertEqual(email_entry.get("supportLevel"), "outbound_only")
         self.assertFalse(email_entry.get("supportsPolling"))
         for entry in PLATFORM_INVENTORY:
             self.assertIn(
                 entry.get("supportLevel"),
-                {"full_adapter", "outbound_only", "outbound_webhook", "external_dep_required"},
+                {"full_adapter", "partial", "outbound_only", "outbound_webhook", "external_dep_required"},
             )
+
+    def test_platform_native_inbound_parsing_and_slack_signature(self) -> None:
+        dc = DiscordAdapter({"botToken": "dc-tok"})
+        dc_msg = dc.parse_inbound({
+            "d": {
+                "id": "999",
+                "channel_id": "chan-1",
+                "guild_id": "guild-1",
+                "content": "hello discord",
+                "author": {"id": "user-42", "username": "alice"},
+            }
+        })
+        self.assertIsNotNone(dc_msg)
+        self.assertEqual(dc_msg.account_id, "user-42")
+        self.assertEqual(dc_msg.chat_id, "chan-1")
+        self.assertTrue(dc_msg.is_group)
+
+        sl = SlackAdapter({"botToken": "xoxb-test", "signingSecret": "sec-123"})
+        sl_msg = sl.parse_inbound({
+            "event_id": "Ev1",
+            "event": {"user": "U100", "channel": "C200", "text": "hello slack", "ts": "1700000.1", "channel_type": "channel"},
+        })
+        self.assertIsNotNone(sl_msg)
+        self.assertEqual(sl_msg.account_id, "U100")
+        self.assertEqual(sl_msg.chat_id, "C200")
+        body = b'{"event":{"text":"hello slack"}}'
+        ts = "1700000000"
+        sig = "v0=" + hmac.new(b"sec-123", f"v0:{ts}:".encode() + body, hashlib.sha256).hexdigest()
+        self.assertTrue(sl.verify_signature(body, ts, sig))
+        self.assertFalse(sl.verify_signature(body, ts, "v0=bad"))
+
+        wa = WhatsAppCloudAdapter({"accessToken": "wa-tok", "phoneNumberId": "12345"})
+        wa_msg = wa.parse_inbound({
+            "entry": [{"changes": [{"value": {"messages": [{"id": "wamid.1", "from": "15550001111", "text": {"body": "hello wa"}}]}}]}]
+        })
+        self.assertIsNotNone(wa_msg)
+        self.assertEqual(wa_msg.account_id, "15550001111")
+        self.assertEqual(wa_msg.text, "hello wa")
+
+        mx = MatrixAdapter({"homeserverUrl": "https://matrix.example.org", "accessToken": "mx-tok"})
+        mx_msg = mx.parse_inbound({
+            "type": "m.room.message",
+            "event_id": "$ev1",
+            "room_id": "!room1:example.org",
+            "sender": "@bob:example.org",
+            "content": {"msgtype": "m.text", "body": "hello matrix"},
+        })
+        self.assertIsNotNone(mx_msg)
+        self.assertEqual(mx_msg.account_id, "@bob:example.org")
+        self.assertEqual(mx_msg.chat_id, "!room1:example.org")
 
     def test_email_adapter_validation(self) -> None:
         bad_adapter = EmailAdapter({"smtpHost": ""})

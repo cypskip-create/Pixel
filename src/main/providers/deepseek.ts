@@ -46,6 +46,8 @@ export interface GenerateOptions {
   /** Emits incremental events to the UI. */
   onEvent: (event: StreamEvent) => void;
   requestId: string;
+  /** Optional per-run provider override (e.g. from active Profile) without mutating global Settings. */
+  providerOverride?: import('../../shared/types').ProviderId;
 }
 
 export interface GenerateResult {

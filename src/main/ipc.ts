@@ -80,7 +80,10 @@ import { PythonWorker } from './services/python-worker';
 import { PythonAgentBridge } from './services/pythonAgentBridge';
 import {
   DEFAULT_ACTIVE_PROFILE,
+  applyProfileProviderOverride,
   commitSessionImportSafely,
+  isConversationOwnedByProfile,
+  isTaskOwnedByProfile,
   normalizeProfileState,
   resolveProfileContext,
   validateArtifactPath,
@@ -247,6 +250,8 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     activeProfileState.id !== 'default'
       ? memoryStore.ensureProject(`profile:${activeProfileState.id}`)
       : memoryStore.getActiveProject();
+  const nonDefaultProfileProjectIds = (): Set<string> =>
+    new Set(memoryStore.listProjects().filter((p) => p.name.startsWith('profile:')).map((p) => p.id));
   const history = new HistoryStore(new FileStorage(join(app.getPath('userData'), 'history')));
   const sessionConversations = new Map<string, ConversationRecord>();
   const streamConversations = new Map<string, PendingConversationStream>();
@@ -636,7 +641,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   const conversation: ConversationEngine = new ConversationEngine({
     provider,
-    getApiKey: () => settings.getApiKey(),
+    getApiKey: (providerOverride) => settings.getProviderApiKey(providerOverride ?? settings.get().provider.provider),
     isStopped: (): boolean => emergency.isStopped(),
     emit: emitChatEvent,
     toolsFor: (mode) => toolRegistry.schemasFor(mode),
@@ -827,7 +832,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     executors,
     emit: emitChatEvent,
     isStopped: () => emergency.isStopped(),
-    getProjectId: () => memoryStore.getActiveProject(),
+    getProjectId: () => projectId(),
   });
 
   const pythonAgentBridge = new PythonAgentBridge({
@@ -847,13 +852,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     executors,
     emit: emitChatEvent,
     isStopped: () => emergency.isStopped(),
-    getApiKey: () => {
-      const activeProvider = settings.get().provider.provider;
+    getApiKey: (providerOverride) => {
+      const activeProvider = providerOverride ?? settings.get().provider.provider;
       return settings.getProviderApiKey(activeProvider);
     },
-    getProviderConfig: (model) => {
-      const providerSettings = settings.get().provider;
-      const chain = resolveProviderChain(providerSettings, model);
+    getProviderConfig: (model, providerOverride) => {
+      const effectiveSettings = applyProfileProviderOverride(settings.get().provider, providerOverride, model);
+      const chain = resolveProviderChain(effectiveSettings, effectiveSettings.primaryModel);
       const primary = chain[0]!;
       const fallbacks = chain.slice(1).map((fb) => ({
         provider: fb.provider,
@@ -869,7 +874,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       };
     },
     memoryContextFor: (request) => buildTurnMemoryAndSkills(request),
-    getProjectId: () => memoryStore.getActiveProject(),
+    getProjectId: () => projectId(),
     fallbackToTypescript: (opts) => agent.run(opts),
   });
 
@@ -1577,6 +1582,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       requestId,
       request: trustedRequest,
       model: profileCtx.model,
+      ...(profileCtx.providerOverride ? { providerOverride: profileCtx.providerOverride } : {}),
       thinking: current.provider.thinking ?? DEFAULT_THINKING,
       temperature: current.provider.temperature,
       maxTokens: current.provider.maxTokens,
@@ -1618,14 +1624,18 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ----------------------------- history ----------------------------- */
 
+  const ownsConversation = (record: ConversationRecord | null): record is ConversationRecord =>
+    record !== null && isConversationOwnedByProfile(record, activeProfileState.id, projectId(), nonDefaultProfileProjectIds());
+
   registerHandler(CHANNELS.historyList, (_event, query?: HistoryQuery): ConversationSummary[] => {
     const safeQuery = query && typeof query === 'object' ? query : {};
     const limit = typeof safeQuery.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(safeQuery.limit))) : 30;
     const offset = typeof safeQuery.offset === 'number' ? Math.max(0, Math.min(50, Math.floor(safeQuery.offset))) : 0;
     const search = typeof safeQuery.search === 'string' ? safeQuery.search.slice(0, 120) : '';
-    const persisted = history.list({ limit: 50, search, projectId: projectId() });
+    const isDefault = activeProfileState.id === 'default';
+    const persisted = history.list({ limit: 50, search, projectId: projectId(), includeUnscoped: isDefault });
     const session = [...sessionConversations.values()]
-      .filter((record) => !record.projectId || record.projectId === projectId())
+      .filter((record) => ownsConversation(record))
       .map(toSessionSummary)
       .filter((summary) => !search || `${summary.title} ${summary.preview}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
     const merged = new Map<string, ConversationSummary>();
@@ -1640,7 +1650,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (isAgentBusy()) throw new Error('Cancel or finish the active task before switching conversations.');
     if (typeof id !== 'string') return null;
     const record = getConversation(id);
-    if (!record || (record.projectId && record.projectId !== projectId())) return null;
+    if (!ownsConversation(record)) return null;
     activeConversationId = record.id;
     broadcastActiveConversation();
     return toRecordView(record);
@@ -1654,13 +1664,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.historyGetActive, (): ConversationRecordView | null => {
     if (!activeConversationId) return toRecordView(newConversation());
     const record = getConversation(activeConversationId);
-    return record ? toRecordView(record) : toRecordView(newConversation());
+    return ownsConversation(record) ? toRecordView(record) : toRecordView(newConversation());
   });
 
   registerHandler(CHANNELS.historyRename, (_event, id: string, title: string): ConversationSummary | null => {
     if (typeof id !== 'string' || typeof title !== 'string') return null;
     const record = getConversation(id);
-    if (!record || (record.projectId && record.projectId !== projectId())) return null;
+    if (!ownsConversation(record)) return null;
     const safeTitle = redactTaskText(title.replace(/\s+/g, ' ').trim()).slice(0, 80);
     if (!safeTitle) return null;
     record.title = safeTitle;
@@ -1673,7 +1683,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     if (isAgentBusy()) throw new Error('Cancel or finish the active task before deleting a conversation.');
     if (typeof id !== 'string') return false;
     const record = getConversation(id);
-    if (!record || (record.projectId && record.projectId !== projectId())) return false;
+    if (!ownsConversation(record)) return false;
     sessionConversations.delete(id);
     history.delete(id);
     try { sessionSearchIndex.deleteConversation(id); } catch { /* ignore */ }
@@ -1687,13 +1697,22 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.historyClear, (): void => {
     if (isAgentBusy()) throw new Error('Cancel or finish the active task before clearing chat history.');
-    history.clear();
-    try { sessionSearchIndex.clearAll(); } catch { /* ignore */ }
-    memorySnapshots.clearAll();
-    sessionConversations.clear();
+    const activeProj = projectId();
+    const isDefault = activeProfileState.id === 'default';
+    const deletedIds = history.clearProject(activeProj, isDefault);
+    try { sessionSearchIndex.clearProject(activeProj); } catch { /* ignore */ }
+    for (const id of deletedIds) {
+      memorySnapshots.invalidateConversation(id);
+    }
+    for (const [id, rec] of [...sessionConversations.entries()]) {
+      if (ownsConversation(rec)) {
+        sessionConversations.delete(id);
+        memorySnapshots.invalidateConversation(id);
+      }
+    }
     activeConversationId = null;
     broadcastActiveConversation();
-    audit.record('system', 'History cleared', 'ok');
+    audit.record('system', 'History cleared', 'ok', `project=${activeProj}`);
   });
 
   registerHandler(CHANNELS.browserOpenSearch, async (_event, queryValue: unknown, requestTextValue: unknown, conversationIdValue: unknown) => {
@@ -1861,17 +1880,27 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   /* ------------------------------- tasks ----------------------------- */
 
+  const ownsTask = (taskId: string): boolean => {
+    const found = tasks.list().find((t) => t.id === taskId);
+    return found !== undefined && isTaskOwnedByProfile(found, activeProfileState.id, projectId(), nonDefaultProfileProjectIds());
+  };
+
   registerHandler(CHANNELS.tasksList, (): ReturnType<TaskManager['list']> => {
-    const all = tasks.list();
-    if (activeProfileState.id === 'default') return all;
+    const profileProjIds = nonDefaultProfileProjectIds();
     const activeProj = projectId();
-    return all.filter((t) => t.projectId === activeProj);
+    return tasks.list().filter((t) => isTaskOwnedByProfile(t, activeProfileState.id, activeProj, profileProjIds));
   });
-  registerHandler(CHANNELS.tasksPause, (_event, taskId: string): void => tasks.pause(taskId));
-  registerHandler(CHANNELS.tasksResume, (_event, taskId: string): void => tasks.resume(taskId));
-  registerHandler(CHANNELS.tasksCancel, (_event, taskId: string): void => tasks.cancel(taskId));
+  registerHandler(CHANNELS.tasksPause, (_event, taskId: string): void => {
+    if (ownsTask(taskId)) tasks.pause(taskId);
+  });
+  registerHandler(CHANNELS.tasksResume, (_event, taskId: string): void => {
+    if (ownsTask(taskId)) tasks.resume(taskId);
+  });
+  registerHandler(CHANNELS.tasksCancel, (_event, taskId: string): void => {
+    if (ownsTask(taskId)) tasks.cancel(taskId);
+  });
   registerHandler(CHANNELS.tasksContinueAfterHandoff, (_event, taskId: string): boolean =>
-    tasks.continueAfterHandoff(taskId),
+    ownsTask(taskId) ? tasks.continueAfterHandoff(taskId) : false,
   );
 
   /* ------------------------------- voice ----------------------------- */
@@ -2240,15 +2269,19 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.gatewayStart, async (_event, host?: string, port?: number) => {
     if (emergency.isStopped()) return { ok: false, running: false, error: 'Emergency Stop is active.' };
-    // Push active provider & tool schemas into Python Gateway so remote turns use the real Python agent.
+    // Push active provider (with profile override) & tool schemas into Python Gateway.
     const cfg = settings.get();
-    const prov = cfg.provider;
+    const profileCtx = resolveProfileContext(activeProfileState, {
+      provider: cfg.provider.provider,
+      model: cfg.provider.primaryModel,
+    });
+    const prov = applyProfileProviderOverride(cfg.provider, profileCtx.providerOverride, profileCtx.model);
     await pythonAgentBridge.gatewayConfigureAgent({
       provider: {
         provider: prov.provider,
         model: prov.primaryModel,
         baseUrl: prov.baseUrl,
-        apiKey: settings.getApiKey() ?? '',
+        apiKey: settings.getProviderApiKey(prov.provider) ?? '',
         temperature: prov.temperature,
         maxTokens: prov.maxTokens,
         timeoutMs: prov.requestTimeoutMs,
@@ -2346,10 +2379,13 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   );
 
   registerHandler(CHANNELS.profilesSwitch, async (_event, profileId: string) => {
+    if (isAgentBusy()) {
+      return { ok: false, error: 'Finish or cancel the active agent run before switching profiles.' };
+    }
     const res = await pythonAgentBridge.profilesSwitch(typeof profileId === 'string' ? profileId : 'default');
     if (res.ok) {
       activeProfileState = normalizeProfileState(res.profile as Record<string, unknown> | undefined);
-      activeConversationId = history.list({ limit: 1, projectId: projectId() })[0]?.id ?? null;
+      activeConversationId = history.list({ limit: 1, projectId: projectId(), includeUnscoped: activeProfileState.id === 'default' })[0]?.id ?? null;
       context.sendToRenderer(CHANNELS.profilesChanged, {
         activeProfileId: activeProfileState.id,
         profile: res.profile,
@@ -2371,11 +2407,14 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   });
 
   registerHandler(CHANNELS.profilesDelete, async (_event, profileId: string) => {
+    if (isAgentBusy()) {
+      return { ok: false, error: 'Finish or cancel the active agent run before deleting a profile.' };
+    }
     const res = await pythonAgentBridge.profilesDelete(typeof profileId === 'string' ? profileId : '');
     if (res.ok) {
       const listed = await pythonAgentBridge.profilesList().catch(() => ({ ok: true, activeProfileId: 'default', profiles: [] }));
       syncActiveProfileFromList(listed);
-      activeConversationId = history.list({ limit: 1, projectId: projectId() })[0]?.id ?? null;
+      activeConversationId = history.list({ limit: 1, projectId: projectId(), includeUnscoped: activeProfileState.id === 'default' })[0]?.id ?? null;
       context.sendToRenderer(CHANNELS.profilesChanged, { activeProfileId: activeProfileState.id });
     }
     return res;

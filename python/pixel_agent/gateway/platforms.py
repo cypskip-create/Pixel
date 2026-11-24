@@ -82,10 +82,10 @@ def segment_text(text: str, max_chars: int) -> list[str]:
 
 PLATFORM_INVENTORY: tuple[dict[str, Any], ...] = (
     {"id": "telegram", "name": "Telegram", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4096, "auth": "bot_token", "supportsPolling": True, "supportsAttachments": True},
-    {"id": "discord", "name": "Discord", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 2000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
     {"id": "slack", "name": "Slack", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "whatsapp_cloud", "name": "WhatsApp Cloud", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4096, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "matrix", "name": "Matrix", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 8000, "auth": "access_token", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "discord", "name": "Discord", "tier": "primary", "supportLevel": "partial", "maxChars": 2000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "whatsapp_cloud", "name": "WhatsApp Cloud", "tier": "primary", "supportLevel": "partial", "maxChars": 4096, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "matrix", "name": "Matrix", "tier": "primary", "supportLevel": "partial", "maxChars": 8000, "auth": "access_token", "supportsPolling": False, "supportsAttachments": True},
     {"id": "email", "name": "Email (SMTP Outbound)", "tier": "primary", "supportLevel": "outbound_only", "maxChars": 32000, "auth": "credentials", "supportsPolling": False, "supportsAttachments": False},
     {"id": "teams", "name": "Microsoft Teams", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "webhook_or_bot", "supportsPolling": False, "supportsAttachments": True},
     {"id": "google_chat", "name": "Google Chat", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "webhook_or_oauth", "supportsPolling": False, "supportsAttachments": False},
@@ -293,6 +293,53 @@ class DiscordAdapter(BasePlatformAdapter):
             return False, "Discord requires a configured botToken."
         return True, None
 
+    def connect(self) -> dict[str, Any]:
+        ok, err = self.validate_config()
+        if not ok:
+            self.connected = False
+            self.last_error = err
+            return {"ok": False, "connected": False, "error": err}
+        base = str(self.config.get("apiBaseUrl") or "https://discord.com/api/v10").rstrip("/")
+        url = f"{base}/users/@me"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bot {str(self.config['botToken']).strip()}"},
+            method="GET",
+        )
+        ssl_ctx = ssl.create_default_context() if url.startswith("https://") else None
+        try:
+            with urllib.request.urlopen(req, timeout=10.0, context=ssl_ctx) as resp:
+                data = json.loads(resp.read(500_000).decode("utf-8", errors="replace"))
+            self.identity = {"id": data.get("id"), "username": data.get("username")}
+            self.connected = True
+            self.last_error = None
+            return {"ok": True, "connected": True, "identity": self.identity}
+        except Exception as exc:
+            self.connected = False
+            self.last_error = f"Discord auth failed: {exc}"
+            return {"ok": False, "connected": False, "error": self.last_error}
+
+    def parse_inbound(self, raw_payload: dict[str, Any]) -> Optional[InboundMessage]:
+        # Platform-native Discord message event (`d` envelope or direct message object)
+        msg = raw_payload.get("d") if isinstance(raw_payload.get("d"), dict) else raw_payload
+        author = msg.get("author") if isinstance(msg.get("author"), dict) else {}
+        if author.get("bot"):
+            return None
+        account_id = str(author.get("id") or msg.get("accountId") or "").strip()
+        chat_id = str(msg.get("channel_id") or msg.get("chatId") or "").strip()
+        text = str(msg.get("content") or msg.get("text") or "").strip()
+        if not account_id or not chat_id or not text:
+            return None
+        return InboundMessage(
+            message_id=f"dc_{chat_id}_{msg.get('id') or int(time.time() * 1000)}",
+            platform="discord",
+            account_id=account_id,
+            chat_id=chat_id,
+            text=text,
+            display_name=str(author.get("username") or msg.get("displayName") or ""),
+            is_group=bool(msg.get("guild_id")),
+        )
+
     def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
         ok, err = self.validate_config()
         if not ok:
@@ -324,6 +371,69 @@ class SlackAdapter(BasePlatformAdapter):
         if not str(self.config.get("botToken") or "").strip():
             return False, "Slack requires a configured botToken (xoxb-...)."
         return True, None
+
+    def connect(self) -> dict[str, Any]:
+        ok, err = self.validate_config()
+        if not ok:
+            self.connected = False
+            self.last_error = err
+            return {"ok": False, "connected": False, "error": err}
+        base = str(self.config.get("apiBaseUrl") or "https://slack.com/api").rstrip("/")
+        url = f"{base}/auth.test"
+        req = urllib.request.Request(
+            url,
+            data=b"{}",
+            headers={"Authorization": f"Bearer {str(self.config['botToken']).strip()}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        ssl_ctx = ssl.create_default_context() if url.startswith("https://") else None
+        try:
+            with urllib.request.urlopen(req, timeout=10.0, context=ssl_ctx) as resp:
+                data = json.loads(resp.read(500_000).decode("utf-8", errors="replace"))
+            if not data.get("ok"):
+                self.connected = False
+                self.last_error = str(data.get("error") or "Slack auth.test failed.")
+                return {"ok": False, "connected": False, "error": self.last_error}
+            self.identity = {"userId": data.get("user_id"), "team": data.get("team"), "botId": data.get("bot_id")}
+            self.connected = True
+            self.last_error = None
+            return {"ok": True, "connected": True, "identity": self.identity}
+        except Exception as exc:
+            self.connected = False
+            self.last_error = f"Slack auth failed: {exc}"
+            return {"ok": False, "connected": False, "error": self.last_error}
+
+    def verify_signature(self, body: bytes, timestamp: str, signature: str) -> bool:
+        import hashlib
+        import hmac
+
+        secret = str(self.config.get("signingSecret") or "").strip()
+        if not secret or not timestamp or not signature:
+            return False
+        basestring = f"v0:{timestamp}:".encode("utf-8") + body
+        expected = "v0=" + hmac.new(secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature.strip())
+
+    def parse_inbound(self, raw_payload: dict[str, Any]) -> Optional[InboundMessage]:
+        # Platform-native Slack Events API envelope (`event`)
+        ev = raw_payload.get("event") if isinstance(raw_payload.get("event"), dict) else raw_payload
+        if ev.get("bot_id") or ev.get("subtype") == "bot_message":
+            return None
+        account_id = str(ev.get("user") or ev.get("accountId") or "").strip()
+        chat_id = str(ev.get("channel") or ev.get("chatId") or "").strip()
+        text = str(ev.get("text") or "").strip()
+        if not account_id or not chat_id or not text:
+            return None
+        channel_type = str(ev.get("channel_type") or "")
+        return InboundMessage(
+            message_id=f"sl_{chat_id}_{ev.get('ts') or raw_payload.get('event_id') or int(time.time() * 1000)}",
+            platform="slack",
+            account_id=account_id,
+            chat_id=chat_id,
+            text=text,
+            thread_id=str(ev.get("thread_ts") or ""),
+            is_group=channel_type in ("channel", "group") or chat_id.startswith("C"),
+        )
 
     def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
         ok, err = self.validate_config()
@@ -358,6 +468,54 @@ class WhatsAppCloudAdapter(BasePlatformAdapter):
             return False, "WhatsApp Cloud requires accessToken and phoneNumberId."
         return True, None
 
+    def connect(self) -> dict[str, Any]:
+        ok, err = self.validate_config()
+        if not ok:
+            self.connected = False
+            self.last_error = err
+            return {"ok": False, "connected": False, "error": err}
+        base = str(self.config.get("apiBaseUrl") or "https://graph.facebook.com/v21.0").rstrip("/")
+        url = f"{base}/{urllib.parse.quote(str(self.config['phoneNumberId']).strip())}"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {str(self.config['accessToken']).strip()}"},
+            method="GET",
+        )
+        ssl_ctx = ssl.create_default_context() if url.startswith("https://") else None
+        try:
+            with urllib.request.urlopen(req, timeout=10.0, context=ssl_ctx) as resp:
+                data = json.loads(resp.read(500_000).decode("utf-8", errors="replace"))
+            self.identity = {"id": data.get("id"), "displayPhoneNumber": data.get("display_phone_number")}
+            self.connected = True
+            self.last_error = None
+            return {"ok": True, "connected": True, "identity": self.identity}
+        except Exception as exc:
+            self.connected = False
+            self.last_error = f"WhatsApp Cloud auth failed: {exc}"
+            return {"ok": False, "connected": False, "error": self.last_error}
+
+    def parse_inbound(self, raw_payload: dict[str, Any]) -> Optional[InboundMessage]:
+        # Platform-native Meta WhatsApp Cloud webhook payload
+        entries = raw_payload.get("entry")
+        if isinstance(entries, list) and entries:
+            changes = (entries[0] or {}).get("changes") if isinstance(entries[0], dict) else None
+            val = (changes[0] or {}).get("value") if isinstance(changes, list) and changes and isinstance(changes[0], dict) else {}
+            msgs = val.get("messages") if isinstance(val, dict) else None
+            if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
+                m = msgs[0]
+                account_id = str(m.get("from") or "").strip()
+                text_obj = m.get("text") if isinstance(m.get("text"), dict) else {}
+                text = str(text_obj.get("body") or "").strip()
+                if account_id and text:
+                    return InboundMessage(
+                        message_id=f"wa_{m.get('id') or int(time.time() * 1000)}",
+                        platform="whatsapp_cloud",
+                        account_id=account_id,
+                        chat_id=account_id,
+                        text=text,
+                    )
+        return super().parse_inbound(raw_payload)
+
     def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
         ok, err = self.validate_config()
         if not ok:
@@ -390,6 +548,49 @@ class MatrixAdapter(BasePlatformAdapter):
         if not str(self.config.get("homeserverUrl") or "").strip() or not str(self.config.get("accessToken") or "").strip():
             return False, "Matrix requires homeserverUrl and accessToken."
         return True, None
+
+    def connect(self) -> dict[str, Any]:
+        ok, err = self.validate_config()
+        if not ok:
+            self.connected = False
+            self.last_error = err
+            return {"ok": False, "connected": False, "error": err}
+        hs = str(self.config["homeserverUrl"]).rstrip("/")
+        url = f"{hs}/_matrix/client/v3/account/whoami"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {str(self.config['accessToken']).strip()}"},
+            method="GET",
+        )
+        ssl_ctx = ssl.create_default_context() if url.startswith("https://") else None
+        try:
+            with urllib.request.urlopen(req, timeout=10.0, context=ssl_ctx) as resp:
+                data = json.loads(resp.read(500_000).decode("utf-8", errors="replace"))
+            self.identity = {"userId": data.get("user_id"), "deviceId": data.get("device_id")}
+            self.connected = True
+            self.last_error = None
+            return {"ok": True, "connected": True, "identity": self.identity}
+        except Exception as exc:
+            self.connected = False
+            self.last_error = f"Matrix whoami failed: {exc}"
+            return {"ok": False, "connected": False, "error": self.last_error}
+
+    def parse_inbound(self, raw_payload: dict[str, Any]) -> Optional[InboundMessage]:
+        # Platform-native Matrix room event (`type == "m.room.message"`)
+        if raw_payload.get("type") == "m.room.message" and isinstance(raw_payload.get("content"), dict):
+            sender = str(raw_payload.get("sender") or "").strip()
+            room_id = str(raw_payload.get("room_id") or "").strip()
+            body = str(raw_payload["content"].get("body") or "").strip()
+            if sender and room_id and body:
+                return InboundMessage(
+                    message_id=f"mx_{raw_payload.get('event_id') or int(time.time() * 1000)}",
+                    platform="matrix",
+                    account_id=sender,
+                    chat_id=room_id,
+                    text=body,
+                    is_group=True,
+                )
+        return super().parse_inbound(raw_payload)
 
     def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
         ok, err = self.validate_config()
