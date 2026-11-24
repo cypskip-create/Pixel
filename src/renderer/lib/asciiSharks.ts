@@ -53,19 +53,66 @@ export interface SharkEngineOptions {
  * Right-facing anatomical ASCII shark sprite (11 rows x 40 cols).
  * Left-facing sharks are mirrored horizontally with bracket/slash reflection.
  */
-const SHARK_ART_RIGHT: readonly string[] = [
-  '                    .                   ',
-  '                  ·   ·                 ',
-  '                    +                   ',
-  '               ·         ·              ',
-  '                    .                   ',
-  '             .             .            ',
-  '                    +                   ',
-  '               ·         ·              ',
-  '                    .                   ',
-  '                  ·   ·                 ',
-  '                    .                   ',
+export const SHARK_ART_RIGHT: readonly string[] = [
+  '                 .:+15#                 ',
+  '                :+28%@@1                ',
+  '   .:          :+59#@@@@2:              ',
+  '  :+10:.     .:+28%@@@@@@%61:.          ',
+  '  :+259%#1::+158#@@@@@@@@@@@@@85210+:.  ',
+  '   .:+59#@@@@@@@@@@@@@@@@@@@@@@@@@@@@%9 ',
+  '  :+258#@@@@@@@%965210++++1258%@@@@@@5: ',
+  '  :+10:.     .:+28#@@5:.     .:+1582:.  ',
+  '   .:          .:+59#2:         .:+:.   ',
+  '                 :+15:                  ',
+  '                  .:                    ',
 ];
+
+export type AsciiCreatureKind = 'sharks' | 'jellyfish' | 'dolphin' | 'horse';
+
+const JELLYFISH_ART: readonly string[] = [
+  '          0110110110          ',
+  '       011011101110110        ',
+  '     011101101101101110       ',
+  '    01101111011011110110      ',
+  '    10110110111101101101      ',
+  '     011010110110101101       ',
+  '       1 0  1 0 1  0 1        ',
+  '      0  1  0 1 0  1  0       ',
+  '       1 0   1 0   0 1        ',
+  '        0   0  1    1         ',
+  '       1     1 0     0        ',
+  '        0     0     1         ',
+];
+
+const DOLPHIN_ART_RIGHT: readonly string[] = [
+  '              .:+1582:.           ',
+  '           .:+28#@@@@@%61:.       ',
+  '         .:+59#@@@@@@@@@@@%82:.   ',
+  '   .:+10:+28%@@@@@@@@@@@@@@@@@%91 ',
+  '  :+59#@@@@@@@@@@@@@@@@@@@@%620:. ',
+  '   .:+158#@@@@@@%85210+::..       ',
+  '       .:+28#@@5:.                ',
+  '          .:+10:                  ',
+];
+
+const HORSE_ART_RIGHT: readonly string[] = [
+  '                      .:+5#2:     ',
+  '                     :+28#@@%1    ',
+  '   .:               :+59#@@@5:    ',
+  '  :+152::..     ..:+28%@@@@2:     ',
+  '   :+59#@@@@@@@@@@@@@@@@@@8:      ',
+  '    :+28%@@@@@@@@@@@@@@@@5:       ',
+  '      :+5#@@@@@@%628#@@@2:        ',
+  '      :+28:   :+10: :+28:         ',
+  '     :+15:     :+2:   :+15:       ',
+  '     :+.        :.     :+.        ',
+];
+
+const CREATURE_ORDER: readonly AsciiCreatureKind[] = ['sharks', 'jellyfish', 'dolphin', 'horse'];
+const SCENE_CYCLE_SEC = 18;
+const SCENE_FADE_SEC = 2.2;
+
+const DENSE_CELL_GLYPHS = '01235689%@#';
 
 const MIRROR_CHAR: Record<string, string> = {
   '/': '\\',
@@ -91,7 +138,7 @@ export const SHARK_ART_LEFT: readonly string[] = SHARK_ART_RIGHT.map(mirrorAscii
 
 const STEP = 1 / 60;
 const MAX_STEPS = 4;
-const TARGET_FPS_INTERVAL_MS = 1000 / 30; // Calm 30 fps cap for low CPU/GPU usage
+const TARGET_FPS_INTERVAL_MS = 1000 / 60; // Smooth 60 fps canvas loop
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -483,62 +530,134 @@ export class PixelSharkEngine {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Warm, low-contrast amber tones matching Pixel's matte canvas.
     const isLight = this.theme === 'light';
-    const baseRgb = isLight ? '125, 125, 125' : '145, 145, 145';
-    const accentRgb = isLight ? '170, 170, 170' : '205, 205, 205';
+    const gridColor = (a: number) => (isLight ? `hsla(222, 47%, 11%, ${a.toFixed(3)})` : `hsla(215, 20%, 65%, ${a.toFixed(3)})`);
+    const tileColor = (a: number) => (isLight ? `hsla(215, 19%, 35%, ${a.toFixed(3)})` : `hsla(215, 16%, 47%, ${a.toFixed(3)})`);
+    const glyphColor = (a: number) => (isLight ? `hsla(217, 33%, 17%, ${a.toFixed(3)})` : `hsla(215, 38%, 89%, ${a.toFixed(3)})`);
+    const accentColor = (a: number) => `hsla(211, 90%, 61%, ${a.toFixed(3)})`;
 
     // Overall prominence smoothly lowers in active-conversation mode
-    const sceneAlpha = (1 - this.modeBlend) * 0.24 + this.modeBlend * 0.10;
+    const sceneAlpha = (1 - this.modeBlend) * 0.58 + this.modeBlend * 0.16;
+
+    // 0. Subtle Inspora-style hairline grid
+    const gridStep = 14;
+    ctx.strokeStyle = gridColor(sceneAlpha * 0.065);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let gx = 0; gx < this.width; gx += gridStep) {
+      ctx.moveTo(gx + 0.5, 0);
+      ctx.lineTo(gx + 0.5, this.height);
+    }
+    for (let gy = 0; gy < this.height; gy += gridStep) {
+      ctx.moveTo(0, gy + 0.5);
+      ctx.lineTo(this.width, gy + 0.5);
+    }
+    ctx.stroke();
 
     // 1. Subtle drifting ASCII plankton dots
     ctx.font = '10px ui-monospace, "Cascadia Mono", Consolas, monospace';
     ctx.textBaseline = 'top';
     for (const dot of this.plankton) {
-      const a = dot.alpha * sceneAlpha * 0.9;
+      const a = dot.alpha * sceneAlpha * 0.65;
       if (a < 0.01) continue;
-      ctx.fillStyle = `rgba(${baseRgb}, ${a.toFixed(3)})`;
+      ctx.fillStyle = glyphColor(a);
       ctx.fillText(dot.char, dot.x, dot.y);
     }
 
-    // 2. Tiny drifting Pix-inspired constellation glyphs; no mascot replacement.
+    // Determine active creature + smooth crossfade cycle (sharks -> jellyfish -> dolphin -> horse)
+    const cyclePos = (this.time % (SCENE_CYCLE_SEC * CREATURE_ORDER.length)) / SCENE_CYCLE_SEC;
+    const idx = Math.floor(cyclePos) % CREATURE_ORDER.length;
+    const withinSec = (cyclePos - Math.floor(cyclePos)) * SCENE_CYCLE_SEC;
+    let cycleFade = 1;
+    if (withinSec < SCENE_FADE_SEC) {
+      cycleFade = withinSec / SCENE_FADE_SEC;
+    } else if (withinSec > SCENE_CYCLE_SEC - SCENE_FADE_SEC) {
+      cycleFade = (SCENE_CYCLE_SEC - withinSec) / SCENE_FADE_SEC;
+    }
+    const creature = CREATURE_ORDER[idx] ?? 'sharks';
+
+    // 2. Cell-shaded ASCII creatures with dynamic glyph shimmer & spine wave kinematics
+    const glyphTick = Math.floor(this.time * 5);
     for (const shark of this.sharks) {
-      const weight = shark.opacityWeight;
+      const weight = shark.opacityWeight * clamp(cycleFade, 0.08, 1);
       if (weight < 0.02) continue;
 
-      const fontSize = Math.max(8, Math.round(10.5 * shark.scale));
-      const charW = fontSize * 0.6;
-      const lineH = fontSize * 1.08;
-      ctx.font = `500 ${fontSize}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+      const cell = Math.max(8, Math.round(10 * shark.scale));
+      ctx.font = `600 ${Math.max(8, Math.round(cell * 0.88))}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
 
-      const sprite = shark.facing === 1 ? SHARK_ART_RIGHT : SHARK_ART_LEFT;
-      const spriteW = (sprite[0]?.length ?? 40) * charW;
-      const spriteH = sprite.length * lineH;
+      let sprite: readonly string[];
+      if (creature === 'jellyfish') {
+        sprite = JELLYFISH_ART;
+      } else if (creature === 'dolphin') {
+        sprite = shark.facing === 1 ? DOLPHIN_ART_RIGHT : DOLPHIN_ART_RIGHT.map(mirrorAsciiLine);
+      } else if (creature === 'horse') {
+        sprite = shark.facing === 1 ? HORSE_ART_RIGHT : HORSE_ART_RIGHT.map(mirrorAsciiLine);
+      } else {
+        sprite = shark.facing === 1 ? SHARK_ART_RIGHT : SHARK_ART_LEFT;
+      }
+
+      const cols = sprite[0]?.length ?? 30;
+      const spriteW = cols * cell;
+      const spriteH = sprite.length * cell;
       const originX = shark.x - spriteW * 0.5;
       const originY = shark.y - spriteH * 0.5;
-      const sharkAlpha = sceneAlpha * shark.depth * weight;
+      const baseAlpha = sceneAlpha * shark.depth * weight;
 
       for (let row = 0; row < sprite.length; row += 1) {
         const line = sprite[row] ?? '';
         for (let col = 0; col < line.length; col += 1) {
-          const ch = line[col];
-          if (!ch || ch === ' ') continue;
+          const rawCh = line[col];
+          if (!rawCh || rawCh === ' ') continue;
 
-          // Swimming spine wave: tail oscillates more than the head
-          const bodyT = shark.facing === 1
-            ? 1 - col / line.length
-            : col / line.length;
-          const waveY = Math.sin(shark.phase - bodyT * 4.4) * (2.6 * bodyT * shark.scale);
-          const px = originX + col * charW;
-          const py = originY + row * lineH + waveY;
+          const bodyT = shark.facing === 1 ? 1 - col / line.length : col / line.length;
+          let offsetX = 0;
+          let offsetY = 0;
+          if (creature === 'jellyfish') {
+            const tentacleFactor = row >= 6 ? (row - 5) / 6 : 0;
+            offsetX = Math.sin(shark.phase * 1.4 - row * 0.65 + col * 0.25) * (4.5 * tentacleFactor * shark.scale);
+            offsetY = Math.sin(shark.phase * 1.2) * (3.0 * (1 - tentacleFactor) * shark.scale);
+          } else if (creature === 'horse') {
+            const legFactor = row >= 7 ? 1 : 0.2;
+            offsetX = Math.sin(shark.phase * 2.8 + col * 0.4) * (3.2 * legFactor * shark.scale);
+            offsetY = Math.abs(Math.sin(shark.phase * 2.4)) * (-3.5 * shark.scale);
+          } else {
+            offsetY = Math.sin(shark.phase - bodyT * 4.6) * (3.8 * bodyT * shark.scale);
+          }
 
-          // Slightly highlight eye & fin edge characters
-          const isHighlight = ch === 'o' || ch === '/' || ch === '\\' || ch === '~';
-          const charAlpha = clamp(sharkAlpha * (isHighlight ? 1.18 : 0.92), 0.02, 0.72);
-          ctx.fillStyle = `rgba(${isHighlight ? accentRgb : baseRgb}, ${charAlpha.toFixed(3)})`;
-          ctx.fillText(ch, px, py);
+          const px = Math.round((originX + col * cell + offsetX) / cell) * cell;
+          const py = Math.round((originY + row * cell + offsetY) / cell) * cell;
+
+          const isCore = rawCh === '@' || rawCh === '#' || rawCh === '%' || rawCh === '1';
+          const isMid = rawCh === '8' || rawCh === '9' || rawCh === '5' || rawCh === '6' || rawCh === '0';
+          const tileAlpha = clamp(baseAlpha * (isCore ? 0.34 : isMid ? 0.2 : 0.09), 0.01, 0.42);
+          ctx.fillStyle = isCore && (row + col) % 7 === 0 ? accentColor(tileAlpha) : tileColor(tileAlpha);
+          ctx.fillRect(px, py, cell - 1, cell - 1);
+
+          let ch = rawCh;
+          if (creature === 'jellyfish' && (rawCh === '0' || rawCh === '1')) {
+            ch = ((row * 13 + col * 7 + glyphTick) % 2 === 0) ? '0' : '1';
+          } else if (isCore && (row + col + glyphTick) % 5 === 0) {
+            ch = DENSE_CELL_GLYPHS[(row * 5 + col * 3 + glyphTick) % DENSE_CELL_GLYPHS.length] ?? rawCh;
+          }
+
+          const charAlpha = clamp(baseAlpha * (isCore ? 0.95 : isMid ? 0.72 : 0.48), 0.02, 0.88);
+          ctx.fillStyle = isCore && creature === 'jellyfish' ? accentColor(charAlpha) : glyphColor(charAlpha);
+          ctx.fillText(ch, px + 1, py + 1);
         }
       }
+    }
+
+    // 3. Soft radial halo around the centered hero/composer in empty mode so typography stays crisp
+    if (this.modeBlend < 0.85) {
+      const cx = this.width * 0.5;
+      const cy = this.height * 0.48;
+      const radius = Math.min(this.width, this.height) * 0.44;
+      const halo = (a: number) => (isLight ? `hsla(210, 40%, 98%, ${a.toFixed(3)})` : `hsla(225, 17%, 5%, ${a.toFixed(3)})`);
+      const grad = ctx.createRadialGradient(cx, cy, radius * 0.15, cx, cy, radius);
+      grad.addColorStop(0, halo(0.82 * (1 - this.modeBlend)));
+      grad.addColorStop(1, halo(0));
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, this.width, this.height);
     }
 
     ctx.restore();

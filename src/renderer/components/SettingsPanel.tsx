@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, Brain, Cpu, Eye, EyeOff, Gauge, Globe2, Keyboard, LayoutDashboard,
-  ListChecks, Mic, Palette, Plug, ShieldCheck, Sparkles, Terminal, Wrench, X,
+  ArrowLeft, Brain, ChevronRight, Cpu, Eye, EyeOff, Gauge, Globe2, Keyboard, LayoutDashboard,
+  ListChecks, Mic, Palette, Plug, Search, ShieldCheck, Sparkles, Terminal, Wrench, X,
 } from 'lucide-react';
+import { applyThemePreset, loadSavedThemeId, PIXEL_THEME_PRESETS } from '@/lib/themeEngine';
 import type {
   AppSettings, AssistantState, ConnectionTestResult, CustomEndpointConfig, CypsErrorCode,
   DiagnosticsSnapshot, FallbackProviderEntry, Mode, PluginView, ProviderId, ReasoningEffort,
@@ -125,6 +126,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onPluginChange,
   } = props;
   const [advanced, setAdvanced] = useState(false);
+  const [settingsSearch, setSettingsSearch] = useState('');
+  const [activeThemeId, setActiveThemeId] = useState<string>(() => loadSavedThemeId());
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(() => initialSettingsPage(initialPage));
   useEffect(() => {
     if (initialPage && VALID_SETTINGS_PAGES.has(initialPage)) setSettingsPage(initialPage);
@@ -441,7 +444,20 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <ArrowLeft size={15} aria-hidden="true" /> <span>Back to Workspace</span>
             </button>
             <h3>Settings</h3>
-            {SETTINGS_CATEGORIES.map(({ id, label, icon: Icon }) => (
+            <label className="mb-2 flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-canvas)] px-2.5 py-1.5 text-xs text-[var(--color-ink-muted)]">
+              <Search size={12} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Search settings"
+                value={settingsSearch}
+                onChange={(e) => setSettingsSearch(e.target.value)}
+                placeholder="Search… (Ctrl K)"
+                className="w-full bg-transparent text-xs text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-dim)]"
+              />
+            </label>
+            {SETTINGS_CATEGORIES.filter(({ label }) =>
+              !settingsSearch.trim() || label.toLowerCase().includes(settingsSearch.trim().toLowerCase()),
+            ).map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
@@ -455,7 +471,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   setPermissionsOpen(false);
                 }}
               >
-                <Icon size={15} aria-hidden="true" /> <span>{label}</span>
+                <Icon size={15} aria-hidden="true" /> <span className="flex-1 text-left">{label}</span>
+                <ChevronRight size={13} aria-hidden="true" className="opacity-50" />
               </button>
             ))}
           </nav>
@@ -463,7 +480,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <div className={workspaceLayout ? 'workspace-settings-content' : ''}>
         {workspaceLayout ? (
           <div className="workspace-settings-page-heading">
-            <h1>{SETTINGS_CATEGORIES.find((item) => item.id === settingsPage)?.label ?? 'General'}</h1>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[11px] text-[var(--color-ink-dim)]">
+                Settings &gt; {SETTINGS_CATEGORIES.find((item) => item.id === settingsPage)?.label ?? 'General'}
+              </span>
+              <h1>{SETTINGS_CATEGORIES.find((item) => item.id === settingsPage)?.label ?? 'General'}</h1>
+            </div>
             {saving ? <span role="status" aria-live="polite">Saving…</span> : null}
           </div>
         ) : null}
@@ -1274,11 +1296,21 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </div>
 
             <Group icon={Palette} title="Theme & Motion" category="appearance">
-              <Row label="Theme">
+              <Row label="Color Mode">
                 <select
                   aria-label="Application theme"
                   value={settings.theme}
-                  onChange={(event) => onPatch({ theme: event.target.value as AppSettings['theme'] })}
+                  onChange={(event) => {
+                    const nextMode = event.target.value as AppSettings['theme'];
+                    onPatch({ theme: nextMode });
+                    if (nextMode === 'light') {
+                      applyThemePreset('paper-light');
+                      setActiveThemeId('paper-light');
+                    } else if (nextMode === 'dark') {
+                      applyThemePreset('obsidian-dark');
+                      setActiveThemeId('obsidian-dark');
+                    }
+                  }}
                   className="no-drag max-w-[190px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink-soft)]"
                 >
                   <option value="system">System default</option>
@@ -1286,6 +1318,43 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   <option value="light">Light</option>
                 </select>
               </Row>
+              <div className="px-1 py-2" data-testid="hermes-theme-picker">
+                <div className="mb-2 text-[11px] font-medium text-[var(--color-ink-muted)]">
+                  Theme Presets ({PIXEL_THEME_PRESETS.length} Dark &amp; Light Hermes Themes)
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {PIXEL_THEME_PRESETS.map((preset) => {
+                    const selected = activeThemeId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          applyThemePreset(preset.id);
+                          setActiveThemeId(preset.id);
+                          onPatch({ theme: preset.mode });
+                        }}
+                        className={
+                          selected
+                            ? 'flex flex-col items-start gap-1 rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface-raised)] p-2.5 text-left'
+                            : 'flex flex-col items-start gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5 text-left hover:bg-[var(--color-surface-hover)]'
+                        }
+                      >
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <span className="text-[11.5px] font-semibold text-[var(--color-ink)]">{preset.name}</span>
+                          <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9.5px] uppercase text-[var(--color-ink-dim)]">
+                            {preset.mode}
+                          </span>
+                        </div>
+                        <span className="line-clamp-2 text-[10px] leading-snug text-[var(--color-ink-dim)]">
+                          {preset.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <Toggle
                 label="Reduce motion"
                 hint="Disables companion animations and transitions ambient sharks to a calm static composition."

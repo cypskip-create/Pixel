@@ -18,7 +18,10 @@ import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
 import { AsciiSharkBackground } from '@/components/AsciiSharkBackground';
-import { WorkspacePixPlay } from '@/components/WorkspacePixPlay';
+import { DynamicIslandHorseCanvas } from '@/components/DynamicIslandHorseCanvas';
+import { ThinkingParticleCore } from '@/components/ThinkingParticleCore';
+import { InteractiveTerminalView } from '@/components/InteractiveTerminalView';
+import { BotCreatorPanel } from '@/components/BotCreatorPanel';
 import { SettingsPanel, type SettingsPage } from '@/components/SettingsPanel';
 import type { PluginLifecycleAction, PluginProjectAvailability, PluginSettingChange } from '@/components/WorkspacePluginManager';
 import { WorkspaceSidebar, type WorkspaceView } from '@/components/WorkspaceSidebar';
@@ -292,7 +295,7 @@ export function Workspace(): React.JSX.Element {
       : recentOutcome.status === 'failed' || recentOutcome.status === 'blocked' || recentTaskDisplay?.verificationPending ? 'error'
         : null
     : null;
-  const assistantState: AssistantState = deriveAssistantState({
+  const _assistantState: AssistantState = deriveAssistantState({
     stopped,
     permission: permission !== null,
     streaming: chat.streaming,
@@ -304,6 +307,7 @@ export function Workspace(): React.JSX.Element {
     executing: activeTask !== null,
     taskOutcome,
   });
+  void _assistantState;
 
   useEffect(() => () => {
     voiceCapture.current?.cancel();
@@ -896,6 +900,7 @@ export function Workspace(): React.JSX.Element {
 
   const viewTitle: Record<WorkspaceView, string> = {
     chat: 'Workspace',
+    terminal: 'Terminal',
     'command-center': 'Command Center',
     projects: 'Projects',
     library: 'Library',
@@ -1029,6 +1034,17 @@ export function Workspace(): React.JSX.Element {
               hasTaskDetails={activeTask !== null}
               onOpenTaskDetails={() => setContextOpen(true)}
             />
+            {activeTask !== null || chat.streaming ? (
+              <div className="flex justify-center pt-2" data-testid="workspace-dynamic-island">
+                <div className="flex w-[328px] flex-col items-center gap-1 overflow-hidden rounded-[26px] border border-[var(--color-border-strong)] bg-[#000000] px-3.5 py-2">
+                  <div className="flex w-full items-center justify-between font-mono text-[10px] text-[var(--color-ink-muted)]">
+                    <span className="truncate">{activeTask?.title || 'Running in background…'}</span>
+                    <span className="text-[var(--color-accent)]">LIVE</span>
+                  </div>
+                  <DynamicIslandHorseCanvas running reducedMotion={settings.companion.reducedMotion} width={296} height={64} />
+                </div>
+              </div>
+            ) : null}
             {pendingApproval}
             {activeTask ? <WorkspaceTaskActivity task={activeTask} onOpenDetails={() => setContextOpen(true)} /> : null}
             {recentOutcome ? (() => {
@@ -1039,46 +1055,89 @@ export function Workspace(): React.JSX.Element {
                 <button type="button" aria-label="Dismiss task result" onClick={() => setRecentOutcome(null)}><X size={14} /></button>
               </div>;
             })() : null}
-            <div
-              className="workspace-transcript selectable"
-              ref={scrollRef}
-              onScroll={(event) => {
-                const node = event.currentTarget;
-                chatScrollTop.current = node.scrollTop;
-                shouldStickToBottom.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 96;
-              }}
-              aria-label="Conversation"
-            >
-              {chat.messages.length === 0 && !chat.streaming ? <div className="workspace-empty"><h2>What can Pixel help with?</h2></div> : null}
-              {chat.messages.map((message) => <article key={message.id} className={`workspace-message ${message.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
-                <div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>{message.role === 'user' ? 'You' : 'Pixel'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{message.aborted ? <span>Stopped</span> : null}</div>{message.error && !message.content ? <p role="alert" className="text-neutral-200">{message.error}</p> : <MarkdownMessage text={message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')} />}{message.error && message.content ? <p role="alert" className="mt-2 text-neutral-200">{message.error}</p> : null}</div>
-              </article>)}
-              {chat.streaming ? <article className="workspace-message workspace-assistant-message"><div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>Pixel</span><span className="text-neutral-200">{chat.model ?? 'Thinking'}</span></div>{chat.reasoning ? <details className="workspace-reasoning" open={settings.display?.reasoningCollapsed === false}><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}<MarkdownMessage text={chat.content || 'Thinking…'} /></div></article> : null}
-              {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
-            </div>
-            <WorkspacePixPlay state={assistantState} reducedMotion={settings.companion.reducedMotion} />
-            <AgentActivityBar
-              activeTask={activeTask}
-              streaming={chat.streaming}
-              hasStreamingText={chat.content.length > 0}
-              hasPermissionRequest={permission !== null}
-              onOpenTaskDetails={() => setContextOpen(true)}
-            />
-            <WorkspaceComposer
-              draft={draft}
-              onDraftChange={setDraft}
-              onSubmit={() => void submit()}
-              onStop={chat.stop}
-              streaming={chat.streaming}
-              disabled={bridge.kind !== 'ready' || chat.historyLoading}
-              attachments={attachments}
-              onAttach={(attachment) => setAttachments((items) => [...items, attachment].slice(0, 4))}
-              onRemoveAttachment={(index) => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}
-              onAttachScreenshot={() => void attachScreenshot()}
-              onToggleListening={() => void toggleVoice()}
-              listening={listening}
-              onNotice={setNotice}
-            />
+            {chat.messages.length === 0 && !chat.streaming && draft.trim().length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-12" data-testid="workspace-centered-hero">
+                <h2 className="text-3xl font-light tracking-tight text-[var(--color-ink)]">what&apos;s on your mind?</h2>
+                <div className="w-full max-w-[660px]">
+                  <WorkspaceComposer
+                    draft={draft}
+                    onDraftChange={setDraft}
+                    onSubmit={() => void submit()}
+                    onStop={chat.stop}
+                    streaming={chat.streaming}
+                    disabled={bridge.kind !== 'ready' || chat.historyLoading}
+                    attachments={attachments}
+                    onAttach={(attachment) => setAttachments((items) => [...items, attachment].slice(0, 4))}
+                    onRemoveAttachment={(index) => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                    onAttachScreenshot={() => void attachScreenshot()}
+                    onToggleListening={() => void toggleVoice()}
+                    listening={listening}
+                    onNotice={setNotice}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <div
+                  className="workspace-transcript selectable"
+                  ref={scrollRef}
+                  onScroll={(event) => {
+                    const node = event.currentTarget;
+                    chatScrollTop.current = node.scrollTop;
+                    shouldStickToBottom.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 96;
+                  }}
+                  aria-label="Conversation"
+                >
+                  {chat.messages.map((message) => <article key={message.id} className={`workspace-message ${message.role === 'user' ? 'workspace-user-message' : 'workspace-assistant-message'}`}>
+                    <div className="min-w-0 flex-1"><div className="workspace-message-meta"><span>{message.role === 'user' ? 'You' : 'Pixel'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{message.aborted ? <span>Stopped</span> : null}</div>{message.error && !message.content ? <p role="alert" className="text-neutral-200">{message.error}</p> : <MarkdownMessage text={message.content || (message.aborted ? 'Response stopped before any text arrived.' : '')} />}{message.error && message.content ? <p role="alert" className="mt-2 text-neutral-200">{message.error}</p> : null}</div>
+                  </article>)}
+                  {chat.streaming ? (
+                    <article className="workspace-message workspace-assistant-message">
+                      <div className="min-w-0 flex-1">
+                        <div className="workspace-message-meta">
+                          <span>Pixel</span>
+                          <span className="text-neutral-200">{chat.model ?? 'Thinking'}</span>
+                        </div>
+                        {!chat.content ? (
+                          <div className="my-2">
+                            <ThinkingParticleCore
+                              size={52}
+                              reducedMotion={settings.companion.reducedMotion}
+                              label={chat.reasoning ? 'Thinking & reasoning…' : 'Thinking…'}
+                            />
+                          </div>
+                        ) : null}
+                        {chat.reasoning ? <details className="workspace-reasoning" open={settings.display?.reasoningCollapsed === false}><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}
+                        {chat.content ? <MarkdownMessage text={chat.content} /> : null}
+                      </div>
+                    </article>
+                  ) : null}
+                  {chat.error ? <p role="alert" className="workspace-error">{chat.error}</p> : null}
+                </div>
+                <AgentActivityBar
+                  activeTask={activeTask}
+                  streaming={chat.streaming}
+                  hasStreamingText={chat.content.length > 0}
+                  hasPermissionRequest={permission !== null}
+                  onOpenTaskDetails={() => setContextOpen(true)}
+                />
+                <WorkspaceComposer
+                  draft={draft}
+                  onDraftChange={setDraft}
+                  onSubmit={() => void submit()}
+                  onStop={chat.stop}
+                  streaming={chat.streaming}
+                  disabled={bridge.kind !== 'ready' || chat.historyLoading}
+                  attachments={attachments}
+                  onAttach={(attachment) => setAttachments((items) => [...items, attachment].slice(0, 4))}
+                  onRemoveAttachment={(index) => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                  onAttachScreenshot={() => void attachScreenshot()}
+                  onToggleListening={() => void toggleVoice()}
+                  listening={listening}
+                  onNotice={setNotice}
+                />
+              </>
+            )}
           </section>
           {paneLayout.splitEnabled ? (
             <>
@@ -1177,8 +1236,19 @@ export function Workspace(): React.JSX.Element {
           {view === 'capabilities' ? <Suspense fallback={<WorkspacePanelLoading />}><section className="workspace-page" aria-label="Capabilities"><div className="workspace-page-heading"><h1>Capabilities, Plugins &amp; Toolsets</h1><p>Manage Python plugins, MCP servers, Skills Hub, and active toolsets.</p></div><WorkspacePluginManager plugins={plugins} onChange={handlePluginChange} /></section></Suspense> : null}
           {view === 'messaging' ? <Suspense fallback={<WorkspacePanelLoading />}><DedicatedMessagingPage /></Suspense> : null}
           {view === 'webhooks' ? <Suspense fallback={<WorkspacePanelLoading />}><DedicatedWebhooksPage /></Suspense> : null}
+          {view === 'terminal' ? <InteractiveTerminalView /> : null}
           {view === 'profiles' ? <Suspense fallback={<WorkspacePanelLoading />}><ProfilesPage /></Suspense> : null}
-          {view === 'agents' ? <Suspense fallback={<WorkspacePanelLoading />}><AgentsPage /></Suspense> : null}
+          {view === 'agents' ? (
+            <div className="flex h-full flex-col overflow-y-auto">
+              <BotCreatorPanel
+                onLaunchBot={(bot) => {
+                  setDraft(`[Bot: ${bot.name}] ${bot.majorFunction}`);
+                  setView('chat');
+                }}
+              />
+              <Suspense fallback={<WorkspacePanelLoading />}><AgentsPage /></Suspense>
+            </div>
+          ) : null}
           {view === 'starmap' ? <Suspense fallback={<WorkspacePanelLoading />}><StarmapPage /></Suspense> : null}
           {view === 'session-import' ? <Suspense fallback={<WorkspacePanelLoading />}><SessionImportPage /></Suspense> : null}
           {view === 'notes' ? <Suspense fallback={<WorkspacePanelLoading />}><ProductivityPanel /></Suspense> : null}

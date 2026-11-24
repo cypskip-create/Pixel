@@ -99,7 +99,7 @@ export function WorkspaceComposer({
         value={draft}
         onChange={(event) => onDraftChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={disabled ? 'Restoring chat…' : 'Message Pixel…'}
+        placeholder={disabled ? 'Restoring chat…' : 'Ask Pixel anything…'}
         disabled={disabled}
         rows={1}
         className="workspace-composer-input selectable"

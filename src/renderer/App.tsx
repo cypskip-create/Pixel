@@ -20,12 +20,12 @@ import {
 import { mergeVoiceTranscriptIntoDraft } from '@shared/companion/pushToTalkSubmission';
 import { parseExplicitSearchCommand } from '@shared/browserSearch';
 import { getModeDescriptor } from '@shared/types';
-import { CursorBuddy } from '@/components/CursorBuddy';
 import { InputBar } from '@/components/InputBar';
 import { ConversationTranscript } from '@/components/ConversationTranscript';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
-import { PixMascot } from '@/components/PixMascot';
+import { DynamicIslandHorseCanvas } from '@/components/DynamicIslandHorseCanvas';
+import { applyThemePreset, loadSavedThemeId } from '@/lib/themeEngine';
 import { RecentChatsPanel } from '@/components/RecentChatsPanel';
 import { ResponseBubble } from '@/components/ResponseBubble';
 import { SettingsPanel } from '@/components/SettingsPanel';
@@ -68,6 +68,9 @@ interface PushToTalkCaptureRecord {
 
 export function App(): React.JSX.Element {
   const bridge = readBridge();
+  useEffect(() => {
+    applyThemePreset(loadSavedThemeId());
+  }, []);
   return (
     <BridgeContext.Provider value={bridge}>
       {isGuidanceWindow() ? <VisualGuidanceOverlay /> : isSettingsWindow() ? <SettingsWindow /> : isCursorWindow() ? <CursorCompanionWindow /> : isWorkspaceWindow() ? <Workspace /> : <Companion />}
@@ -131,34 +134,8 @@ function SettingsWindow(): React.JSX.Element {
 }
 
 function CursorCompanionWindow(): React.JSX.Element {
-  const bridge = readBridge();
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const [assistantState, setAssistantState] = useState<AssistantState>('idle');
-  const [orientation, setOrientation] = useState({ flipX: false, flipY: false });
-
-  useEffect(() => {
-    if (bridge.kind !== 'ready') return;
-    let mounted = true;
-    const unsubscribe = safeSubscribe<boolean>(bridge.bridge.window.onCursorMotion, setReducedMotion);
-    const unsubscribePlacement = safeSubscribe<{ flipX: boolean; flipY: boolean }>(bridge.bridge.window.onCursorPlacement, setOrientation);
-    const unsubscribeState = safeSubscribe<AssistantState>(bridge.bridge.window.onCursorAssistantState, setAssistantState);
-    void bridge.bridge.window.cursorRendererReady().catch(() => undefined);
-    void bridge.bridge.window.getCursorSettings().then((settings) => {
-      if (mounted) setReducedMotion(settings.reducedMotion);
-    }).catch(() => undefined);
-    return () => {
-      mounted = false;
-      unsubscribe();
-      unsubscribePlacement();
-      unsubscribeState();
-    };
-  }, [bridge]);
-
-  return (
-    <div aria-hidden="true" className={`${reducedMotion ? 'reduce-motion' : 'motion-ok'} pointer-events-none grid h-screen w-screen place-items-center bg-transparent`}>
-      <CursorBuddy reducedMotion={reducedMotion} state={assistantState} {...orientation} />
-    </div>
-  );
+  // Desktop pet removed per Phase 10 Dynamic Island redesign.
+  return <div aria-hidden="true" className="pointer-events-none h-screen w-screen bg-transparent" />;
 }
 
 /* ------------------------------------------------------------------ *
@@ -977,19 +954,37 @@ function Companion(): React.JSX.Element {
           aria-label={pushToTalkState !== 'idle' ? pushToTalkLabel
             : `Open Pixel. ${island.state === 'RESPONSE_AVAILABLE' ? 'A response is ready. ' : ''}Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
           aria-haspopup="dialog"
-          className="pixel-surface group relative grid h-[38px] w-[138px] place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-[1.025] focus-visible:ring-2 focus-visible:ring-neutral-400/70 cursor-pointer"
+          className={
+            hasActiveTask || chat.streaming
+              ? 'group relative flex h-[96px] w-[320px] flex-col items-center justify-between overflow-hidden rounded-[28px] border border-[var(--color-border-strong)] bg-[#000000] px-3 py-2 outline-none transition-all duration-300 hover:scale-[1.01] cursor-pointer'
+              : 'group relative flex h-[36px] w-[164px] items-center justify-between rounded-full border border-[var(--color-border-strong)] bg-[#000000] px-3.5 outline-none transition-all duration-300 hover:scale-[1.02] cursor-pointer'
+          }
         >
           {pushToTalkState === 'recording' ? (
-            <span className="island-ptt-indicator" aria-hidden="true">
-              <PixMascot size={20} state="listening" reducedMotion={reducedMotion} decorative />
+            <span className="island-ptt-indicator flex items-center gap-2" aria-hidden="true">
+              <span className="size-2 rounded-full bg-[var(--color-accent)]" />
               <span className="island-ptt-wave">{[3, 6, 4, 8, 5, 7, 3].map((height, index) => {
                 const amplitude = Math.max(0.12, microphoneLevel);
                 return <i key={index} style={{ height: `${Math.max(2, Math.round((height + 2) * amplitude))}px` }} />;
               })}</span>
             </span>
+          ) : hasActiveTask || chat.streaming ? (
+            <div className="flex w-full flex-col items-center gap-1">
+              <div className="flex w-full items-center justify-between text-[10px] font-mono text-[var(--color-ink-muted)]">
+                <span className="truncate">{chat.streaming ? 'Running response…' : 'Running background task…'}</span>
+                <span className="text-[var(--color-accent)]">LIVE</span>
+              </div>
+              <DynamicIslandHorseCanvas running reducedMotion={reducedMotion} width={292} height={64} />
+            </div>
           ) : (
             <>
-              <PixMascot size={21} state={compactAssistantState} reducedMotion={reducedMotion} decorative />
+              <span className="flex items-center gap-2 text-[11px] font-medium text-[var(--color-ink)]">
+                <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+                Pixel
+              </span>
+              <span className="font-mono text-[10px] text-[var(--color-ink-dim)]">
+                {compactAssistantState === 'idle' ? 'READY' : compactAssistantState.toUpperCase()}
+              </span>
             </>
           )}
         </button>

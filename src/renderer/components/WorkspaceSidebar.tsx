@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import {
-  Activity, Bot, Check, Clock, Compass, FileText, FolderKanban, FolderOpen, Layers, LayoutGrid, MessageSquare,
-  PanelLeftClose, PanelLeftOpen, Pencil, Plus, Puzzle, Radio, Search, Settings, Share2, Trash2, Upload, User, Webhook, X,
+  Activity, Bot, Check, ChevronDown, ChevronRight, Clock, Compass, FileText, FolderKanban, FolderOpen, Layers, LayoutGrid, MessageSquare,
+  PanelLeftClose, PanelLeftOpen, Pencil, Plus, Puzzle, Radio, Search, Settings, Share2, Terminal, Trash2, Upload, User, Webhook, X,
 } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
 
 export type WorkspaceView =
   | 'chat'
+  | 'terminal'
   | 'command-center'
   | 'projects'
   | 'library'
@@ -28,26 +29,34 @@ export type WorkspaceView =
   | 'board'
   | 'settings';
 
-const NAV_ITEMS: Array<{ id: 'projects' | 'library' | 'board' | 'tasks'; label: string; icon: typeof FolderKanban }> = [
-  { id: 'projects', label: 'Projects', icon: FolderKanban },
-  { id: 'library', label: 'Library', icon: FolderOpen },
-  { id: 'board', label: 'Pixel Board', icon: LayoutGrid },
-  { id: 'tasks', label: 'Running Tasks', icon: Activity },
+/** Minimal primary sidebar destinations (uncluttered Workspace design). */
+const PRIMARY_NAV_ITEMS: Array<{
+  id: 'chat' | 'agents' | 'cron' | 'terminal' | 'capabilities';
+  label: string;
+  icon: typeof FolderKanban;
+}> = [
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'agents', label: 'Bots & Agents', icon: Bot },
+  { id: 'cron', label: 'Schedules', icon: Clock },
+  { id: 'terminal', label: 'Terminal', icon: Terminal },
+  { id: 'capabilities', label: 'Capabilities', icon: Puzzle },
 ];
 
-const DESKTOP_DESTINATIONS: Array<{
-  id: 'command-center' | 'capabilities' | 'messaging' | 'webhooks' | 'artifacts' | 'cron' | 'profiles' | 'agents' | 'starmap' | 'session-import';
+/** Secondary power-user destinations tucked cleanly inside the collapsible "More" section. */
+const SECONDARY_DESTINATIONS: Array<{
+  id: 'command-center' | 'projects' | 'library' | 'board' | 'tasks' | 'messaging' | 'webhooks' | 'artifacts' | 'profiles' | 'starmap' | 'session-import';
   label: string;
   icon: typeof FolderKanban;
 }> = [
   { id: 'command-center', label: 'Command Center', icon: Compass },
-  { id: 'capabilities', label: 'Capabilities', icon: Puzzle },
+  { id: 'projects', label: 'Projects', icon: FolderKanban },
+  { id: 'tasks', label: 'Running Tasks', icon: Activity },
   { id: 'messaging', label: 'Messaging', icon: Radio },
   { id: 'webhooks', label: 'Webhooks', icon: Webhook },
   { id: 'artifacts', label: 'Artifacts', icon: Layers },
-  { id: 'cron', label: 'Schedules', icon: Clock },
+  { id: 'library', label: 'Library', icon: FolderOpen },
+  { id: 'board', label: 'Pixel Board', icon: LayoutGrid },
   { id: 'profiles', label: 'Profiles', icon: User },
-  { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'starmap', label: 'Starmap', icon: Share2 },
   { id: 'session-import', label: 'Import Session', icon: Upload },
 ];
@@ -76,6 +85,7 @@ export function WorkspaceSidebar({
   onRenameConversation, onDeleteConversation, currentProject, activeTaskCount, disabled,
 }: WorkspaceSidebarProps) {
   const [searchOpen, setSearchOpen] = useState(Boolean(historySearch));
+  const [moreOpen, setMoreOpen] = useState(false);
   const [renaming, setRenaming] = useState<ConversationSummary | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ConversationSummary | null>(null);
@@ -124,7 +134,7 @@ export function WorkspaceSidebar({
       </div>
 
       <nav className="workspace-sidebar-nav" aria-label="Workspace navigation">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+        {PRIMARY_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
@@ -135,15 +145,22 @@ export function WorkspaceSidebar({
             title={label}
           >
             <Icon size={15} aria-hidden="true" /><span>{label}</span>
-            {id === 'tasks' && activeTaskCount > 0 ? <span className="workspace-nav-count">{activeTaskCount}</span> : null}
+            {id === 'agents' && activeTaskCount > 0 ? <span className="workspace-nav-count">{activeTaskCount}</span> : null}
           </button>
         ))}
-      </nav>
 
-      <div className="workspace-sidebar-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="workspace-nav-item"
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((open) => !open)}
+          title="More workspace tools"
+        >
+          {moreOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+          <span>More</span>
+        </button>
 
-      <nav className="workspace-sidebar-nav" aria-label="Desktop destinations">
-        {DESKTOP_DESTINATIONS.map(({ id, label, icon: Icon }) => (
+        {moreOpen ? SECONDARY_DESTINATIONS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
@@ -153,9 +170,9 @@ export function WorkspaceSidebar({
             onClick={() => onViewChange(id)}
             title={label}
           >
-            <Icon size={15} aria-hidden="true" /><span>{label}</span>
+            <Icon size={14} aria-hidden="true" /><span>{label}</span>
           </button>
-        ))}
+        )) : null}
       </nav>
 
       <div className="workspace-sidebar-divider" aria-hidden="true" />
