@@ -13,11 +13,12 @@
  *  - A single browser context is reused and always closed on shutdown.
  */
 
-import type { ImageAttachment } from '../../shared/types';
+import type { BrowserAutomationSettings, ImageAttachment } from '../../shared/types';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { NetworkGuard, isPrivateHost, type HostResolver } from './netGuard';
+import { validateCdpEndpoint } from './browserProfiles';
 
 export { isPrivateHost };
 
@@ -190,6 +191,17 @@ export interface BrowserOptions {
   allowFileUrls?: boolean;
   /** Viewport for screenshots. */
   viewport?: { width: number; height: number };
+  /** Dynamic settings reader so persisted BrowserAutomationSettings affect live execution. */
+  getSettings?: () => BrowserAutomationSettings;
+  /** Optional named session identifier for multi-conversation isolation. */
+  sessionId?: string;
+  /** Optional injectable Playwright loader for deterministic CDP/lifecycle tests. */
+  playwrightLoader?: () => Promise<{
+    chromium: {
+      launch(options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
+      connectOverCDP?(endpointURL: string, options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
+    };
+  }>;
 }
 
 export class BrowserSession {
@@ -201,6 +213,7 @@ export class BrowserSession {
   private activeTabId: string | null = null;
   private launchError: string | null = null;
   private launching: Promise<void> | null = null;
+  private attachedViaCdp = false;
   private readonly options: BrowserOptions;
   private readonly guard: NetworkGuard;
   /** Why the guard last blocked a request, so navigate() can explain itself. */
@@ -213,10 +226,33 @@ export class BrowserSession {
     });
     this.options = {
       headless: options.headless ?? true,
-      allowFileUrls: options.allowFileUrls ?? false,
       allowPrivateNetwork: options.allowPrivateNetwork ?? false,
+      resolver: options.resolver,
+      allowFileUrls: options.allowFileUrls ?? false,
       viewport: options.viewport ?? { width: 1280, height: 800 },
+      getSettings: options.getSettings,
+      sessionId: options.sessionId,
+      playwrightLoader: options.playwrightLoader,
     };
+  }
+
+  private getEffectiveGuard(): NetworkGuard {
+    const live = this.options.getSettings?.();
+    if (!live) return this.guard;
+    return new NetworkGuard({
+      allowPrivateNetwork: this.options.allowPrivateNetwork || live.allowPrivateNetwork,
+      allowedDomains: live.allowedDomains,
+      blockedDomains: live.blockedDomains,
+      resolve: this.options.resolver,
+    });
+  }
+
+  get isAttachedViaCdp(): boolean {
+    return this.attachedViaCdp;
+  }
+
+  get sessionId(): string {
+    return this.options.sessionId ?? 'default';
   }
 
   /** Can a real browser be driven right now? */
@@ -580,13 +616,15 @@ export class BrowserSession {
     };
   }
 
-  /** Close the browser. Safe to call repeatedly. */
+  /** Close the browser. Safe to call repeatedly. Never terminates a user-owned CDP browser. */
   async close(): Promise<void> {
     const context = this.context;
     const browser = this.browser;
+    const wasCdp = this.attachedViaCdp;
     this.page = null;
     this.context = null;
     this.browser = null;
+    this.attachedViaCdp = false;
     this.tabs.clear();
     this.activeTabId = null;
     try {
@@ -594,10 +632,12 @@ export class BrowserSession {
     } catch {
       /* already gone */
     }
-    try {
-      if (browser) await browser.close();
-    } catch {
-      /* already gone */
+    if (!wasCdp) {
+      try {
+        if (browser) await browser.close();
+      } catch {
+        /* already gone */
+      }
     }
   }
 
@@ -624,32 +664,52 @@ export class BrowserSession {
 
   private async launch(): Promise<void> {
     try {
-      const playwright = (await import('playwright')) as unknown as {
-        chromium: { launch(options?: Record<string, unknown>): Promise<PlaywrightBrowser> };
-      };
+      const playwright = this.options.playwrightLoader
+        ? await this.options.playwrightLoader()
+        : ((await import('playwright')) as unknown as {
+            chromium: {
+              launch(options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
+              connectOverCDP?(endpointURL: string, options?: Record<string, unknown>): Promise<PlaywrightBrowser>;
+            };
+          });
 
-      this.browser = await playwright.chromium.launch({
-        headless: this.options.headless ?? true,
-        // Chromium's sandbox stays on for Windows. --no-sandbox exists for
-        // root-in-a-container Linux environments such as CI.
-        args: [
-          ...(process.platform === 'win32' ? [] : ['--no-sandbox']),
-          '--disable-gpu',
-          '--disable-dev-shm-usage',
-        ],
-      });
+      const liveSettings = this.options.getSettings?.();
+      const cdpRaw = liveSettings?.cdpEndpoint?.trim() ?? '';
+
+      if (cdpRaw) {
+        const validated = validateCdpEndpoint(cdpRaw);
+        if (!validated.ok || !validated.endpoint) {
+          throw new Error(validated.error ?? 'Invalid CDP endpoint.');
+        }
+        if (typeof playwright.chromium.connectOverCDP !== 'function') {
+          throw new Error('Playwright connectOverCDP is unavailable in this runtime.');
+        }
+        this.browser = await playwright.chromium.connectOverCDP(validated.endpoint, {
+          timeout: (liveSettings?.commandTimeoutSec ?? 30) * 1000,
+        });
+        this.attachedViaCdp = true;
+      } else {
+        this.browser = await playwright.chromium.launch({
+          headless: liveSettings?.headless ?? this.options.headless ?? true,
+          args: [
+            ...(process.platform === 'win32' ? [] : ['--no-sandbox']),
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+          ],
+        });
+        this.attachedViaCdp = false;
+      }
+
       this.context = await this.browser.newContext({
         viewport: this.options.viewport ?? { width: 1280, height: 800 },
       });
-      // Every request the page makes, including redirect hops and subresources,
-      // passes through the guard before it is sent.
       await this.context.route('**/*', async (route) => {
         const target = route.request().url();
         if (target.startsWith('file:') && this.options.allowFileUrls) {
           await route.continue();
           return;
         }
-        const reason = await this.guard.check(target);
+        const reason = await this.getEffectiveGuard().check(target);
         if (reason) {
           this.lastBlocked = reason;
           await route.abort('blockedbyclient');

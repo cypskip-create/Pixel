@@ -28,7 +28,14 @@ export interface DetectedBrowserProfile {
 }
 
 export interface BrowserProfileResolution {
-  mode: 'isolated_fresh_profile' | 'signed_in_profile_copy';
+  /**
+   * Honest profile state:
+   * - `isolated_fresh_profile`: ephemeral session, no persisted logins.
+   * - `pixel_persistent_profile`: Pixel-managed persistent profile where the user signs in directly.
+   * - `profile_preferences_copy`: copied non-cookie preferences/bookmarks only (`authenticated: false`).
+   */
+  mode: 'isolated_fresh_profile' | 'pixel_persistent_profile' | 'profile_preferences_copy';
+  authenticated: boolean;
   profilePath: string | null;
   browserId?: string;
   fallbackNote?: string;
@@ -150,30 +157,43 @@ export function prepareBrowserProfile(options: {
   selectedProfile?: DetectedBrowserProfile | null;
 }): BrowserProfileResolution {
   if (!options.consent) {
-    return { mode: 'isolated_fresh_profile', profilePath: null };
+    return { mode: 'isolated_fresh_profile', authenticated: false, profilePath: null };
   }
   const profile = options.selectedProfile;
   if (!profile || !existsSync(profile.profileDir)) {
-    return {
-      mode: 'isolated_fresh_profile',
-      profilePath: null,
-      fallbackNote:
-        'Real-profile browsing is enabled, but no supported stable Chromium profile was found. Using a fresh isolated browser instead.',
-    };
+    const managedDir = join(options.snapshotRoot, 'pixel-persistent-profile');
+    try {
+      mkdirSync(managedDir, { recursive: true });
+      return {
+        mode: 'pixel_persistent_profile',
+        authenticated: false,
+        profilePath: managedDir,
+        fallbackNote:
+          'No external Chromium profile was selected; using a Pixel-managed persistent profile where you can sign in directly.',
+      };
+    } catch {
+      return {
+        mode: 'isolated_fresh_profile',
+        authenticated: false,
+        profilePath: null,
+        fallbackNote:
+          'Real-profile browsing is enabled, but no supported stable Chromium profile was found. Using a fresh isolated browser instead.',
+      };
+    }
   }
   if (profile.locked) {
     return {
       mode: 'isolated_fresh_profile',
+      authenticated: false,
       profilePath: null,
       browserId: profile.id,
-      fallbackNote: `${profile.label} is currently open (profile locked). Using a fresh isolated browser instead.`,
+      fallbackNote: `${profile.label} is currently open (profile locked). Using a fresh isolated browser instead; attach via authorized CDP to share an open browser.`,
     };
   }
 
   const destDir = join(options.snapshotRoot, `pixel-profile-${profile.id}`);
   try {
     mkdirSync(destDir, { recursive: true });
-    // Copy only safe non-cache preferences/bookmarks/state metadata (bounded).
     for (const file of ['Preferences', 'Bookmarks']) {
       const src = join(profile.profileDir, file);
       if (existsSync(src)) {
@@ -181,13 +201,17 @@ export function prepareBrowserProfile(options: {
       }
     }
     return {
-      mode: 'signed_in_profile_copy',
+      mode: 'profile_preferences_copy',
+      authenticated: false,
       profilePath: destDir,
       browserId: profile.id,
+      fallbackNote:
+        'Copied browser Preferences/Bookmarks into a Pixel-owned directory (OS-encrypted cookies are not exported). Sign in inside this persistent profile or attach via authorized CDP for signed-in sessions.',
     };
   } catch {
     return {
       mode: 'isolated_fresh_profile',
+      authenticated: false,
       profilePath: null,
       browserId: profile.id,
       fallbackNote: `Could not snapshot ${profile.label} profile cleanly. Using a fresh isolated browser instead.`,

@@ -98,7 +98,7 @@ describe('Stage 5: Browser Security, Profiles, CDP, Computer Use, Settings & Ter
     expect(lockedRes.mode).toBe('isolated_fresh_profile');
     expect(lockedRes.fallbackNote).toContain('locked');
 
-    // Unlocked + consent ON -> copies into Pixel-owned snapshot dir, then revocation wipes it.
+    // Unlocked + consent ON -> honest profile_preferences_copy (authenticated: false), then revocation wipes it.
     const okRes = prepareBrowserProfile({
       consent: true,
       snapshotRoot: snapRoot,
@@ -111,12 +111,128 @@ describe('Stage 5: Browser Security, Profiles, CDP, Computer Use, Settings & Ter
         locked: false,
       },
     });
-    expect(okRes.mode).toBe('signed_in_profile_copy');
+    expect(okRes.mode).toBe('profile_preferences_copy');
+    expect(okRes.authenticated).toBe(false);
     expect(okRes.profilePath && existsSync(join(okRes.profilePath, 'Preferences'))).toBe(true);
 
     expect(revokeRealProfileSnapshots(snapRoot)).toBe(true);
     expect(existsSync(snapRoot)).toBe(false);
   });
+
+  it('connects via real connectOverCDP in BrowserSession without terminating user-owned browser on close', async () => {
+    const { BrowserSession } = await import('../src/main/agent/browser');
+    const browserClose = vi.fn(async () => undefined);
+    const contextClose = vi.fn(async () => undefined);
+    const connectOverCDP = vi.fn(async () => ({
+      newContext: async () => ({
+        route: async () => undefined,
+        newPage: async () => ({
+          goto: async () => null,
+          url: () => 'https://example.com',
+          title: async () => 'Example',
+          innerText: async () => 'Example body',
+          $$eval: async () => [],
+          evaluate: async () => ({ text: 'ok', links: [], inputs: [], buttons: [] }),
+          screenshot: async () => Buffer.from([]),
+          close: async () => undefined,
+          isClosed: () => false,
+        }),
+        close: contextClose,
+      }),
+      close: browserClose,
+    }) as never);
+
+    const session = new BrowserSession({
+      getSettings: () => ({
+        ...DEFAULT_SETTINGS.browser,
+        cdpEndpoint: 'http://127.0.0.1:9222',
+      }),
+      playwrightLoader: async () => ({
+        chromium: {
+          launch: vi.fn(async () => { throw new Error('Should not launch when CDP is set'); }),
+          connectOverCDP,
+        },
+      }),
+    });
+
+    await session.listTabs();
+    // Trigger launch via snapshot.
+    await session.snapshot();
+    expect(connectOverCDP).toHaveBeenCalledWith('http://127.0.0.1:9222', expect.any(Object));
+    expect(session.isAttachedViaCdp).toBe(true);
+
+    await session.close();
+    expect(contextClose).toHaveBeenCalledTimes(1);
+    expect(browserClose).not.toHaveBeenCalled();
+  });
+
+  it('persists ComputerUseController snapshots across separate ToolExecutors calls, returns real PNG in som/vision, and enforces distinct action semantics', async () => {
+    const { ToolExecutors } = await import('../src/main/agent/executors');
+    const callMock = vi.fn(async (cmd: string) => {
+      if (cmd === 'capture_window') {
+        return { base64: 'iVBORw0KGgo=', width: 800, height: 600 };
+      }
+      if (cmd === 'find_elements') {
+        return {
+          window: { windowId: 'win-1', title: 'TestApp', pid: 4242, processName: 'TestApp.exe' },
+          elements: [
+            { name: 'Submit', role: 'Button', automationId: 'btnSubmit', enabled: true, rect: { x: 10, y: 20, width: 80, height: 30 } },
+          ],
+          truncated: false,
+        };
+      }
+      return { ok: true, matches: true, matchedCount: 1 };
+    });
+
+    const fakeHelper = {
+      listExternalWindows: vi.fn(async () => ({ windows: [], truncated: false })),
+      lastExternalForegroundWindow: vi.fn(async () => ({
+        window: { windowId: 'win-1', title: 'TestApp', pid: 4242, processName: 'TestApp.exe' },
+      })),
+      call: callMock,
+    } as unknown as NativeHelper;
+
+    const persistentCu = new ComputerUseController({ nativeHelper: fakeHelper });
+    const executors = new ToolExecutors({ nativeHelper: fakeHelper, computerUse: persistentCu });
+
+    // Call 1: capture(mode='som') produces real PNG screenshot + element index map.
+    const capRes = await executors.run('computer_use', { action: 'capture', mode: 'som' });
+    expect(capRes.ok).toBe(true);
+    expect(capRes.content).toContain('800x600 PNG screenshot');
+    expect(persistentCu.getSnapshot()?.image?.dataUrl).toBe('data:image/png;base64,iVBORw0KGgo=');
+
+    // Call 2: separate tool call reuses persistent snapshot for click(element=1).
+    const clickRes = await executors.run('computer_use', { action: 'click', element: 1 });
+    expect(clickRes.ok).toBe(true);
+    expect(clickRes.content).toContain('[background_uia]');
+
+    // Call 3: right_click must NOT silently alias to UIA select!
+    const rcRes = await executors.run('computer_use', { action: 'right_click', element: 1 });
+    expect(rcRes.ok).toBe(false);
+    expect(rcRes.content).toContain('foreground_required');
+
+    // Call 4: scroll uses real UIA ScrollPattern.
+    const scrollRes = await executors.run('computer_use', { action: 'scroll', element: 1, direction: 'down' });
+    expect(scrollRes.ok).toBe(true);
+    expect(callMock).toHaveBeenCalledWith('control_element', expect.objectContaining({ action: 'scroll', scrollDirection: 'increment' }));
+  });
+
+  it('enforces TerminalService ownerId isolation, wait(), and interactive writeStdin()', async () => {
+    const terminal = new TerminalService({ defaultCwd: process.cwd() });
+    const started = await terminal.run('Write-Output "OWNER_A_OK"', { ownerId: 'owner-a' });
+    expect(started.ok).toBe(true);
+    const id = started.session!.id;
+
+    // Owner B cannot inspect or cancel Owner A's process.
+    expect(terminal.get(id, 'owner-b')).toBeNull();
+    expect(terminal.cancel(id, 'owner-b')).toBe(false);
+
+    const waited = await terminal.wait(id, 10_000, 'owner-a');
+    expect(waited.ok).toBe(true);
+    expect(waited.timedOut).toBe(false);
+    expect(waited.session?.output).toContain('OWNER_A_OK');
+    expect(terminal.close(id, 'owner-a')).toBe(true);
+  }, 15_000);
 
   it('executes consolidated Windows computer_use with Set-of-Marks indexing, stale/password rejection, and Emergency Stop', async () => {
     const registry = new ToolRegistry();

@@ -1,15 +1,13 @@
 /**
- * Controlled Windows-compatible Terminal & Process Service.
+ * Controlled Windows-compatible Terminal & Process Service (Hermes `process_registry.py` parity).
  *
- * Inspired by Hermes `tools/process_registry.py` and `tools/terminal_tool.py`,
- * adapted to Pixel's Electron main-process security model:
- *  - Every command requires explicit `PermissionBroker` approval (unless a
- *    test/caller supplies an explicit authorizer).
- *  - Working directory is strictly jailed to an authorized directory.
- *  - Streams real `stdout` / `stderr` chunks, tracks real exit codes, and
- *    terminates the full Windows process tree (`taskkill /PID /T /F`) on cancel
- *    or Emergency Stop (`killAll`).
- *  - Caps buffered output per session (256 KiB) to prevent memory leaks.
+ * Security & lifecycle invariants:
+ *  - Every command requires explicit `PermissionBroker` approval when an authorizer is supplied.
+ *  - Working directory is canonically jailed (`realpathSync`) inside `authorizedRoot` when configured.
+ *    (Note: a shell command can still reference paths outside its cwd, so command approval stays mandatory.)
+ *  - Supports interactive `stdin` (`writeStdin`), real-time `stdout`/`stderr` streaming, `wait` with
+ *    timeout, per-owner session isolation (`ownerId`), real exit codes, Windows process-tree
+ *    termination (`taskkill /PID /T /F`), and Emergency Stop (`killAll`).
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -23,6 +21,7 @@ export interface TerminalSessionSummary {
   id: string;
   command: string;
   cwd: string;
+  ownerId?: string;
   status: TerminalSessionStatus;
   pid: number | null;
   exitCode: number | null;
@@ -49,10 +48,25 @@ export interface TerminalServiceOptions {
   onOutput?: (event: TerminalOutputEvent) => void;
   onExit?: (event: TerminalExitEvent) => void;
   defaultCwd?: string;
-  /** Optional canonical root directory; when set, `cwdOverride` cannot escape this root (including symlinks/junctions). */
   authorizedRoot?: string;
   getAuthorizedRoot?: () => string | null;
 }
+
+export interface TerminalRunOptions {
+  cwd?: string;
+  ownerId?: string;
+  timeoutMs?: number;
+}
+
+interface LiveSession {
+  summary: TerminalSessionSummary;
+  proc: ChildProcess | null;
+  exitResolvers: Array<() => void>;
+  timeoutHandle?: ReturnType<typeof setTimeout>;
+}
+
+const MAX_OUTPUT_CHARS = 256 * 1024;
+const MAX_SESSIONS = 24;
 
 function isWithinCanonicalRoot(rootDir: string, targetDir: string): boolean {
   try {
@@ -65,14 +79,6 @@ function isWithinCanonicalRoot(rootDir: string, targetDir: string): boolean {
     return false;
   }
 }
-
-interface LiveSession {
-  summary: TerminalSessionSummary;
-  proc: ChildProcess | null;
-}
-
-const MAX_OUTPUT_CHARS = 256 * 1024;
-const MAX_SESSIONS = 24;
 
 function terminateProcessTree(pid: number): void {
   if (process.platform === 'win32') {
@@ -114,6 +120,20 @@ export class TerminalService {
     this.options.onOutput?.({ sessionId: session.summary.id, stream, chunk });
   }
 
+  private settleExit(live: LiveSession): void {
+    if (live.timeoutHandle) {
+      clearTimeout(live.timeoutHandle);
+      live.timeoutHandle = undefined;
+    }
+    const resolvers = live.exitResolvers.splice(0, live.exitResolvers.length);
+    for (const r of resolvers) r();
+  }
+
+  private checkOwnership(live: LiveSession, ownerId?: string): boolean {
+    if (!ownerId || !live.summary.ownerId) return true;
+    return live.summary.ownerId === ownerId;
+  }
+
   private pruneOldSessions(): void {
     if (this.sessions.size <= MAX_SESSIONS) return;
     const finished = [...this.sessions.values()]
@@ -127,8 +147,10 @@ export class TerminalService {
 
   async run(
     command: string,
-    cwdOverride?: string,
+    cwdOrOptions?: string | TerminalRunOptions,
   ): Promise<{ ok: boolean; session?: TerminalSessionSummary; error?: string }> {
+    const opts: TerminalRunOptions =
+      typeof cwdOrOptions === 'string' ? { cwd: cwdOrOptions } : (cwdOrOptions ?? {});
     const trimmed = command.trim();
     if (!trimmed) return { ok: false, error: 'Command cannot be empty.' };
     if (trimmed.length > 4096) return { ok: false, error: 'Command exceeds maximum length (4096 chars).' };
@@ -137,7 +159,7 @@ export class TerminalService {
     }
 
     const configuredRoot = this.options.getAuthorizedRoot?.() ?? this.options.authorizedRoot ?? null;
-    const rawCwd = cwdOverride || configuredRoot || this.options.defaultCwd;
+    const rawCwd = opts.cwd || configuredRoot || this.options.defaultCwd;
     if (!rawCwd) {
       return { ok: false, error: 'No workspace directory is configured for the active project.' };
     }
@@ -161,6 +183,7 @@ export class TerminalService {
       id,
       command: trimmed,
       cwd,
+      ...(opts.ownerId ? { ownerId: opts.ownerId } : {}),
       status: 'running',
       pid: null,
       exitCode: null,
@@ -172,7 +195,7 @@ export class TerminalService {
     const shell = process.platform === 'win32' ? 'powershell.exe' : 'sh';
     const args =
       process.platform === 'win32'
-        ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', trimmed]
+        ? ['-NoLogo', '-NoProfile', '-Command', trimmed]
         : ['-c', trimmed];
 
     let proc: ChildProcess;
@@ -180,7 +203,7 @@ export class TerminalService {
       proc = spawn(shell, args, {
         cwd,
         windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (err) {
       return {
@@ -190,9 +213,18 @@ export class TerminalService {
     }
 
     summary.pid = proc.pid ?? null;
-    const live: LiveSession = { summary, proc };
+    const live: LiveSession = { summary, proc, exitResolvers: [] };
     this.sessions.set(id, live);
     this.pruneOldSessions();
+
+    if (typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0) {
+      live.timeoutHandle = setTimeout(() => {
+        if (live.summary.status === 'running') {
+          this.appendOutput(live, 'stderr', `\n[Process timed out after ${opts.timeoutMs}ms]\n`);
+          this.cancel(id);
+        }
+      }, Math.min(opts.timeoutMs, 600_000));
+    }
 
     proc.stdout?.on('data', (buf: Buffer) => this.appendOutput(live, 'stdout', buf));
     proc.stderr?.on('data', (buf: Buffer) => this.appendOutput(live, 'stderr', buf));
@@ -203,6 +235,7 @@ export class TerminalService {
       live.summary.status = 'failed';
       live.summary.endedAt = Date.now();
       live.proc = null;
+      this.settleExit(live);
       this.options.onExit?.({ sessionId: id, status: 'failed', exitCode: null });
     });
 
@@ -212,6 +245,7 @@ export class TerminalService {
         live.summary.status = code === 0 ? 'completed' : 'failed';
         live.summary.endedAt = Date.now();
         live.proc = null;
+        this.settleExit(live);
         this.options.onExit?.({
           sessionId: id,
           status: live.summary.status,
@@ -223,19 +257,80 @@ export class TerminalService {
     return { ok: true, session: { ...summary } };
   }
 
-  cancel(sessionId: string): boolean {
+  /** Send interactive standard input to a running process. */
+  writeStdin(
+    sessionId: string,
+    input: string,
+    ownerId?: string,
+  ): { ok: boolean; error?: string } {
+    const live = this.sessions.get(sessionId);
+    if (!live) return { ok: false, error: 'Process session not found.' };
+    if (!this.checkOwnership(live, ownerId)) {
+      return { ok: false, error: 'Process session belongs to another owner.' };
+    }
+    if (live.summary.status !== 'running' || !live.proc?.stdin || live.proc.stdin.destroyed) {
+      return { ok: false, error: 'Process is not accepting standard input.' };
+    }
+    try {
+      live.proc.stdin.write(input);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to write to stdin.' };
+    }
+  }
+
+  /** Wait up to `timeoutMs` for a process session to exit. */
+  async wait(
+    sessionId: string,
+    timeoutMs = 15_000,
+    ownerId?: string,
+  ): Promise<{ ok: boolean; timedOut?: boolean; session?: TerminalSessionSummary; error?: string }> {
+    const live = this.sessions.get(sessionId);
+    if (!live) return { ok: false, error: 'Process session not found.' };
+    if (!this.checkOwnership(live, ownerId)) {
+      return { ok: false, error: 'Process session belongs to another owner.' };
+    }
+    if (live.summary.status !== 'running') {
+      return { ok: true, timedOut: false, session: { ...live.summary } };
+    }
+    const bounded = Math.min(Math.max(timeoutMs, 100), 120_000);
+    const timedOut = await new Promise<boolean>((res) => {
+      const timer = setTimeout(() => res(true), bounded);
+      live.exitResolvers.push(() => {
+        clearTimeout(timer);
+        res(false);
+      });
+    });
+    return { ok: true, timedOut, session: { ...live.summary } };
+  }
+
+  cancel(sessionId: string, ownerId?: string): boolean {
     const live = this.sessions.get(sessionId);
     if (!live || live.summary.status !== 'running') return false;
+    if (!this.checkOwnership(live, ownerId)) return false;
     live.summary.status = 'cancelled';
     live.summary.endedAt = Date.now();
     const pid = live.proc?.pid ?? live.summary.pid;
+    try {
+      live.proc?.stdin?.end();
+    } catch {
+      // Ignore already-closed stdin.
+    }
     live.proc = null;
+    this.settleExit(live);
     if (pid) terminateProcessTree(pid);
     this.options.onExit?.({ sessionId, status: 'cancelled', exitCode: null });
     return true;
   }
 
-  /** Immediately kill every running terminal process (Emergency Stop / app shutdown). */
+  /** Remove a finished session from the registry. */
+  close(sessionId: string, ownerId?: string): boolean {
+    const live = this.sessions.get(sessionId);
+    if (!live || live.summary.status === 'running') return false;
+    if (!this.checkOwnership(live, ownerId)) return false;
+    return this.sessions.delete(sessionId);
+  }
+
   killAll(): number {
     let killed = 0;
     for (const [id, live] of this.sessions.entries()) {
@@ -246,13 +341,15 @@ export class TerminalService {
     return killed;
   }
 
-  get(sessionId: string): TerminalSessionSummary | null {
+  get(sessionId: string, ownerId?: string): TerminalSessionSummary | null {
     const live = this.sessions.get(sessionId);
-    return live ? { ...live.summary } : null;
+    if (!live || !this.checkOwnership(live, ownerId)) return null;
+    return { ...live.summary };
   }
 
-  list(): TerminalSessionSummary[] {
+  list(ownerId?: string): TerminalSessionSummary[] {
     return [...this.sessions.values()]
+      .filter((s) => this.checkOwnership(s, ownerId))
       .map((s) => ({ ...s.summary }))
       .sort((a, b) => b.startedAt - a.startedAt);
   }

@@ -875,6 +875,40 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: 'process_write_stdin',
+    description: 'Send standard input text to a running Pixel TerminalService process session.',
+    category: 'system',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', minLength: 1, maxLength: 120 },
+        input: { type: 'string', minLength: 1, maxLength: 4096 },
+      },
+      required: ['sessionId', 'input'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'process_wait',
+    description: 'Wait up to timeoutMs for a running Pixel TerminalService process session to exit and return its output and exit code.',
+    category: 'system',
+    risk: 'low',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', minLength: 1, maxLength: 120 },
+        timeoutMs: { type: 'integer', minimum: 100, maximum: 120000 },
+      },
+      required: ['sessionId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'browser_hover',
     description: 'Hover over one unique semantic target or selector in the active Pixel browser tab.',
     category: 'browser',

@@ -686,6 +686,33 @@ export class ToolExecutors {
             detail: { sessions: list },
           };
         }
+        case 'process_write_stdin': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const input = typeof args.input === 'string' ? args.input : '';
+          const res = this.deps.terminal.writeStdin(sessionId, input);
+          return res.ok
+            ? { ok: true, content: `Wrote ${input.length} char(s) to stdin of ${sessionId}.` }
+            : { ok: false, content: res.error ?? 'Could not write to stdin.', errorCode: 'FAILED' };
+        }
+        case 'process_wait': {
+          if (!this.deps.terminal) {
+            return { ok: false, content: 'Pixel TerminalService is unavailable.', errorCode: 'UNAVAILABLE' };
+          }
+          const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+          const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : 15_000;
+          const res = await this.deps.terminal.wait(sessionId, timeoutMs);
+          if (!res.ok || !res.session) {
+            return { ok: false, content: res.error ?? 'Could not wait for process.', errorCode: 'NOT_FOUND' };
+          }
+          return {
+            ok: true,
+            content: `Process ${res.session.id}: status=${res.session.status}, exitCode=${res.session.exitCode ?? 'null'}${res.timedOut ? ' (wait timed out)' : ''}\n${res.session.output.slice(-4000)}`,
+            detail: { ...res.session, timedOut: Boolean(res.timedOut) },
+          };
+        }
         case 'browser_hover': {
           if (!this.deps.browser) return { ok: false, content: 'Browser session is unavailable.', errorCode: 'UNAVAILABLE' };
           await this.deps.browser.hover(String(args.selector ?? ''));

@@ -60,6 +60,7 @@ import { buildRoutineToolPlan, buildSkillToolPlan } from './skills/plan';
 import { ToolExecutors } from './agent/executors';
 import { PermissionGrantStore } from './agent/permissionStore';
 import { BrowserSession, validateBrowserUploadFile } from './agent/browser';
+import { ComputerUseController } from './agent/computerUse';
 import { JsonlAuditSink } from './agent/auditStore';
 import { openDatabase } from './data/database';
 import { boot } from './startup/boot';
@@ -642,6 +643,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     completedActions: () => [...completedActions],
     notify: (report) => {
       terminalService.killAll();
+      computerUse.invalidateSnapshots();
       context.sendToRenderer(CHANNELS.systemEmergencyStopEvent, report);
     },
   });
@@ -705,12 +707,22 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     return result.content?.trim() ?? '';
   };
 
-  // One browser session per app run, closed by the emergency stop.
-  const browser = new BrowserSession({ headless: true });
+  // Browser session consuming live persisted BrowserAutomationSettings (headless, CDP, domain policy, timeouts).
+  const browser = new BrowserSession({
+    getSettings: () => settings.get().browser,
+  });
+
+  // Persistent ComputerUseController shared across tool calls so capture -> element action works end to end.
+  const computerUse = new ComputerUseController({
+    nativeHelper,
+    isEmergencyStopped: () => emergency.isStopped(),
+    getSettings: () => settings.get().computerUse,
+  });
 
   const executors = new ToolExecutors({
     clipboard,
     terminal: terminalService,
+    computerUse,
     openPath: (path) => shell.openPath(path),
     trashPath: (path) => shell.trashItem(path),
     browser,

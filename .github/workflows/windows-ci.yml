@@ -98,7 +98,7 @@ jobs:
               $expectedHash = '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a'
               Write-Warning "Chocolatey provisioning failed; using the official NSIS $fallbackVersion SourceForge release with pinned SHA-256 verification."
               try {
-                Invoke-WebRequest -Uri $fallbackUrl -OutFile $fallbackPath -MaximumRedirection 10
+                Invoke-WebRequest -Uri $fallbackUrl -OutFile $fallbackPath -UserAgent 'curl/8.0.0' -MaximumRedirection 10
                 $actualHash = (Get-FileHash -LiteralPath $fallbackPath -Algorithm SHA256).Hash.ToLowerInvariant()
                 if ($actualHash -ne $expectedHash) { throw "Official NSIS $fallbackVersion checksum mismatch: $actualHash" }
                 $installer = Start-Process -FilePath $fallbackPath -ArgumentList '/S' -Wait -PassThru
