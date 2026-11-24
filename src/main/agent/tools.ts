@@ -874,6 +874,82 @@ export const BUILTIN_TOOLS: readonly ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'browser_hover',
+    description: 'Hover over one unique semantic target or selector in the active Pixel browser tab.',
+    category: 'browser',
+    risk: 'low',
+    requiresApproval: true,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+      },
+      required: ['selector'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_select_option',
+    description: 'Select an option value in a unique <select> dropdown in the active Pixel browser tab.',
+    category: 'browser',
+    risk: 'medium',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        value: { type: 'string', minLength: 1, maxLength: 300 },
+      },
+      required: ['selector', 'value'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browser_wait_for_element',
+    description: 'Wait for a selector to become visible in the active Pixel browser tab.',
+    category: 'browser',
+    risk: 'low',
+    requiresApproval: false,
+    changesState: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', minLength: 1, maxLength: 300 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 30000 },
+      },
+      required: ['selector'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'computer_use',
+    description: 'Consolidated Windows computer-use tool (Hermes parity) backed by Pixel UI Automation and Set-of-Marks element indexing. Prefer capture(mode="som") followed by element index targeting; refuses password fields and honors Emergency Stop.',
+    category: 'input',
+    risk: 'high',
+    requiresApproval: true,
+    changesState: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list_windows', 'capture', 'click', 'double_click', 'right_click', 'type', 'set_value', 'key', 'scroll', 'wait', 'verify'],
+        },
+        mode: { type: 'string', enum: ['som', 'vision', 'ax'] },
+        windowId: { type: 'string', minLength: 1, maxLength: 64 },
+        element: { type: 'integer', minimum: 1, maximum: 500 },
+        text: { type: 'string', maxLength: 2000 },
+        key: { type: 'string', maxLength: 64 },
+        durationMs: { type: 'integer', minimum: 50, maximum: 10000 },
+        expected: { type: 'string', maxLength: 500 },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 export class ToolRegistry {

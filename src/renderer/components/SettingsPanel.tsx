@@ -671,6 +671,71 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </select>
           </Row>
           <p className="px-1 text-[10px] leading-snug text-[var(--color-ink-dim)]">Explicit search requests open in your default browser.</p>
+          <Toggle
+            label="Headless browser mode"
+            hint="Run managed Playwright Chromium headlessly (turn off to see the browser window)."
+            checked={settings.browser?.headless !== false}
+            onChange={(value) => onPatch({ browser: { headless: value } })}
+          />
+          <Row label="CDP endpoint (optional)">
+            <input
+              aria-label="CDP endpoint URL"
+              type="text"
+              value={settings.browser?.cdpEndpoint ?? ''}
+              onChange={(event) => onPatch({ browser: { cdpEndpoint: event.target.value } })}
+              placeholder="http://127.0.0.1:9222"
+              className="no-drag w-[190px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+            />
+          </Row>
+          <Row label="Browser idle timeout (s)">
+            <input
+              aria-label="Browser idle timeout seconds"
+              type="number"
+              min={30}
+              max={3600}
+              value={settings.browser?.inactivityTimeoutSec ?? 300}
+              onChange={(event) => {
+                const parsed = Number.parseInt(event.target.value, 10);
+                if (Number.isFinite(parsed)) void onPatch({ browser: { inactivityTimeoutSec: Math.min(3600, Math.max(30, parsed)) } });
+              }}
+              className="no-drag w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+            />
+          </Row>
+          <Toggle
+            label="Use real browser profile (opt-in)"
+            hint="Explicitly consent to snapshotting your local Chromium profile into a Pixel-owned copy. Revoking deletes all copied snapshots."
+            checked={settings.browser?.realProfileConsent === true}
+            onChange={(value) => onPatch({ browser: { realProfileConsent: value } })}
+          />
+          <Toggle
+            label="Allow private/local URLs"
+            hint="Permit localhost/LAN navigation (cloud metadata endpoints remain unconditionally blocked)."
+            checked={settings.browser?.allowPrivateNetwork === true}
+            onChange={(value) => onPatch({ browser: { allowPrivateNetwork: value } })}
+          />
+          <Row label="Computer-use capture mode">
+            <select
+              aria-label="Computer-use capture mode"
+              value={settings.computerUse?.captureMode ?? 'som'}
+              onChange={(event) => onPatch({ computerUse: { captureMode: event.target.value as 'som' | 'vision' | 'ax' } })}
+              className="no-drag max-w-[190px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="som">Set-of-Marks (SoM + AX)</option>
+              <option value="ax">Accessibility tree only</option>
+              <option value="vision">Vision screenshot</option>
+            </select>
+          </Row>
+          <Row label="Desktop interaction policy">
+            <select
+              aria-label="Desktop interaction policy"
+              value={settings.computerUse?.interactionPolicy ?? 'background_first'}
+              onChange={(event) => onPatch({ computerUse: { interactionPolicy: event.target.value as 'background_first' | 'ask_before_foreground' } })}
+              className="no-drag max-w-[190px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[10.5px] text-[var(--color-ink-soft)]"
+            >
+              <option value="background_first">Background UIA first</option>
+              <option value="ask_before_foreground">Ask before foreground</option>
+            </select>
+          </Row>
         </Group>
 
         <Group icon={Mic} title="Voice" category="voice">

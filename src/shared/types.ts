@@ -511,6 +511,36 @@ export interface DisplayPreferences {
   muteSounds: boolean;
 }
 
+export interface BrowserAutomationSettings {
+  /** Browser execution mode. Matches Hermes `browser.headless`. */
+  headless: boolean;
+  /** Optional explicit CDP endpoint (loopback HTTP/WS or HTTPS/WSS). Matches Hermes `browser.cdp_endpoint`. */
+  cdpEndpoint: string;
+  /** Idle inactivity timeout in seconds (30–3600, default 300). Matches Hermes `browser.inactivity_timeout`. */
+  inactivityTimeoutSec: number;
+  /** Per-command timeout in seconds (5–180, default 30). Matches Hermes `browser.command_timeout`. */
+  commandTimeoutSec: number;
+  /** Explicit user opt-in for snapshotting a local Chromium profile. Matches Hermes `browser.use_real_profile`. */
+  realProfileConsent: boolean;
+  /** Selected stable Chromium browser id when realProfileConsent is enabled. */
+  selectedBrowserId: 'chrome' | 'edge' | 'brave' | '';
+  /** Permit private/loopback browsing (cloud metadata endpoints remain unconditionally blocked). Matches Hermes `browser.allow_private_urls`. */
+  allowPrivateNetwork: boolean;
+  /** Optional website denylist. */
+  blockedDomains: string[];
+  /** Optional website allowlist. */
+  allowedDomains: string[];
+}
+
+export interface ComputerUseSettings {
+  /** Default capture mode: Set-of-Marks (`som`), plain screenshot (`vision`), or AX-only (`ax`). */
+  captureMode: 'som' | 'vision' | 'ax';
+  /** Prefer non-disruptive background UIA whenever supported. */
+  interactionPolicy: 'background_first' | 'ask_before_foreground';
+  /** Require read-back/state verification after UI interactions. */
+  requireVerification: boolean;
+}
+
 export interface AppSettings {
   version: number;
   browserSearchProvider: SearchProvider;
@@ -520,6 +550,8 @@ export interface AppSettings {
   voice: VoiceSettings;
   privacy: PrivacySettings;
   display: DisplayPreferences;
+  browser: BrowserAutomationSettings;
+  computerUse: ComputerUseSettings;
   /** Global shortcut to summon/hide the assistant. */
   globalAccelerator: string;
   /** Global shortcut for emergency stop. */
@@ -610,6 +642,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
     reasoningCollapsed: true,
     hideCodeDiffs: false,
     muteSounds: false,
+  },
+  browser: {
+    headless: true,
+    cdpEndpoint: '',
+    inactivityTimeoutSec: 300,
+    commandTimeoutSec: 30,
+    realProfileConsent: false,
+    selectedBrowserId: '',
+    allowPrivateNetwork: false,
+    blockedDomains: [],
+    allowedDomains: [],
+  },
+  computerUse: {
+    captureMode: 'som',
+    interactionPolicy: 'background_first',
+    requireVerification: true,
   },
   globalAccelerator: 'CommandOrControl+Shift+C',
   emergencyStopAccelerator: 'CommandOrControl+Shift+Escape',
@@ -797,6 +845,41 @@ export function mergeSettings(partial: unknown): AppSettings {
   base.display.reasoningCollapsed = base.display.reasoningCollapsed !== false;
   base.display.hideCodeDiffs = base.display.hideCodeDiffs === true;
   base.display.muteSounds = base.display.muteSounds === true;
+
+  // Stage 5: Browser & Computer-Use settings clamping and validation.
+  const rawBrowser = (partial as { browser?: Partial<BrowserAutomationSettings> } | undefined)?.browser;
+  base.browser = {
+    ...DEFAULT_SETTINGS.browser!,
+    ...(rawBrowser && typeof rawBrowser === 'object' ? rawBrowser : {}),
+  };
+  base.browser.headless = base.browser.headless !== false;
+  base.browser.cdpEndpoint = typeof base.browser.cdpEndpoint === 'string' ? base.browser.cdpEndpoint.trim().slice(0, 512) : '';
+  base.browser.inactivityTimeoutSec = Math.round(finiteWithin(base.browser.inactivityTimeoutSec, 30, 3600, 300));
+  base.browser.commandTimeoutSec = Math.round(finiteWithin(base.browser.commandTimeoutSec, 5, 180, 30));
+  base.browser.realProfileConsent = base.browser.realProfileConsent === true;
+  if (!['chrome', 'edge', 'brave', ''].includes(base.browser.selectedBrowserId)) {
+    base.browser.selectedBrowserId = '';
+  }
+  base.browser.allowPrivateNetwork = base.browser.allowPrivateNetwork === true;
+  base.browser.blockedDomains = Array.isArray(base.browser.blockedDomains)
+    ? base.browser.blockedDomains.filter((d): d is string => typeof d === 'string' && d.trim().length > 0).map((d) => d.trim().toLowerCase()).slice(0, 50)
+    : [];
+  base.browser.allowedDomains = Array.isArray(base.browser.allowedDomains)
+    ? base.browser.allowedDomains.filter((d): d is string => typeof d === 'string' && d.trim().length > 0).map((d) => d.trim().toLowerCase()).slice(0, 50)
+    : [];
+
+  const rawCu = (partial as { computerUse?: Partial<ComputerUseSettings> } | undefined)?.computerUse;
+  base.computerUse = {
+    ...DEFAULT_SETTINGS.computerUse!,
+    ...(rawCu && typeof rawCu === 'object' ? rawCu : {}),
+  };
+  if (!['som', 'vision', 'ax'].includes(base.computerUse.captureMode)) {
+    base.computerUse.captureMode = 'som';
+  }
+  if (!['background_first', 'ask_before_foreground'].includes(base.computerUse.interactionPolicy)) {
+    base.computerUse.interactionPolicy = 'background_first';
+  }
+  base.computerUse.requireVerification = base.computerUse.requireVerification !== false;
 
   return base;
 }

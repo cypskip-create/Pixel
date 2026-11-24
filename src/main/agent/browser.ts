@@ -59,6 +59,11 @@ interface PlaywrightLocator {
   isVisible(): Promise<boolean>;
   isEnabled(): Promise<boolean>;
   click(options?: { timeout?: number }): Promise<void>;
+  dblclick(options?: { timeout?: number }): Promise<void>;
+  hover(options?: { timeout?: number }): Promise<void>;
+  selectOption(value: string, options?: { timeout?: number }): Promise<string[]>;
+  waitFor(options?: { state?: 'visible' | 'hidden' | 'attached' | 'detached'; timeout?: number }): Promise<void>;
+  first(): PlaywrightLocator;
   fill(value: string, options?: { timeout?: number }): Promise<void>;
   press(key: string): Promise<void>;
   inputValue(options?: { timeout?: number }): Promise<string>;
@@ -427,6 +432,34 @@ export class BrowserSession {
     const locator = this.resolveTarget(page, target);
     await this.assertUniqueActionTarget(locator, 'press a key in');
     await locator.press(key);
+  }
+
+  async doubleClick(target: string | BrowserSemanticTarget): Promise<void> {
+    const page = await this.ensurePage();
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'double-click');
+    await locator.dblclick({ timeout: PAGE_TIMEOUT_MS });
+  }
+
+  async hover(target: string | BrowserSemanticTarget): Promise<void> {
+    const page = await this.ensurePage();
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'hover over');
+    await locator.hover({ timeout: PAGE_TIMEOUT_MS });
+  }
+
+  async selectOption(target: string | BrowserSemanticTarget, value: string): Promise<string[]> {
+    const page = await this.ensurePage();
+    const locator = this.resolveTarget(page, target);
+    await this.assertUniqueActionTarget(locator, 'select an option in');
+    return locator.selectOption(value, { timeout: PAGE_TIMEOUT_MS });
+  }
+
+  async waitForElement(target: string | BrowserSemanticTarget, timeoutMs?: number): Promise<boolean> {
+    const page = await this.ensurePage();
+    const locator = this.resolveTarget(page, target);
+    await locator.first().waitFor({ state: 'visible', timeout: Math.min(timeoutMs ?? PAGE_TIMEOUT_MS, 30_000) });
+    return true;
   }
 
   /** Select one explicitly approved file in a unique file input and verify its metadata. */

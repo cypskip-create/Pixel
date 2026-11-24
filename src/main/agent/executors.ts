@@ -31,6 +31,7 @@ import type { FileTools } from '../files/toolset';
 import type { GitTools } from '../git/toolset';
 import { terminateProcessTree } from '../services/process';
 import type { TerminalService } from '../services/terminalService';
+import { ComputerUseController, type ComputerUseRequest } from './computerUse';
 import { NativeHelperError } from '../services/nativeHelper';
 import type { FindElementsQuery, LastExternalWindowResult, NativeHelper, UiElement, WindowInfo } from '../services/nativeHelper';
 import { randomUUID } from 'node:crypto';
@@ -172,6 +173,8 @@ export interface ExecutorDeps {
   focusBoard?: () => void;
   /** Controlled Windows-compatible terminal/process backend (Hermes process_registry parity). */
   terminal?: TerminalService;
+  /** Consolidated Windows computer-use controller (Hermes computer_use parity). */
+  computerUse?: ComputerUseController;
 }
 
 export class ToolExecutors {
@@ -681,6 +684,36 @@ export class ToolExecutors {
               ? 'No terminal processes recorded.'
               : list.map((s) => `${s.id} [${s.status}] (exit=${s.exitCode ?? '—'}) $ ${s.command}`).join('\n'),
             detail: { sessions: list },
+          };
+        }
+        case 'browser_hover': {
+          if (!this.deps.browser) return { ok: false, content: 'Browser session is unavailable.', errorCode: 'UNAVAILABLE' };
+          await this.deps.browser.hover(String(args.selector ?? ''));
+          return { ok: true, content: `Hovered over "${String(args.selector ?? '')}".` };
+        }
+        case 'browser_select_option': {
+          if (!this.deps.browser) return { ok: false, content: 'Browser session is unavailable.', errorCode: 'UNAVAILABLE' };
+          const selected = await this.deps.browser.selectOption(String(args.selector ?? ''), String(args.value ?? ''));
+          return { ok: true, content: `Selected option(s): ${selected.join(', ') || String(args.value ?? '')}.` };
+        }
+        case 'browser_wait_for_element': {
+          if (!this.deps.browser) return { ok: false, content: 'Browser session is unavailable.', errorCode: 'UNAVAILABLE' };
+          await this.deps.browser.waitForElement(
+            String(args.selector ?? ''),
+            typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+          );
+          return { ok: true, content: `Element "${String(args.selector ?? '')}" is visible.` };
+        }
+        case 'computer_use': {
+          const controller =
+            this.deps.computerUse ??
+            new ComputerUseController({ nativeHelper: this.deps.nativeHelper });
+          const outcome = await controller.execute(args as unknown as ComputerUseRequest);
+          return {
+            ok: outcome.ok,
+            content: `[${outcome.interactionMode}] ${outcome.content}`,
+            ...(outcome.detail ? { detail: outcome.detail } : {}),
+            ...(!outcome.ok ? { errorCode: 'FAILED' } : {}),
           };
         }
         default:
