@@ -74,11 +74,11 @@ class Stage8ClosureTests(unittest.TestCase):
         self.assertEqual(len(PLATFORM_INVENTORY), 26)
         full = [p["id"] for p in PLATFORM_INVENTORY if p.get("supportLevel") == "full_adapter"]
         partial = [p["id"] for p in PLATFORM_INVENTORY if p.get("supportLevel") == "partial"]
-        self.assertCountEqual(full, ["telegram", "slack"])
-        self.assertCountEqual(partial, ["discord", "whatsapp_cloud", "matrix"])
+        self.assertCountEqual(full, ["telegram", "slack", "matrix", "email"])
+        self.assertCountEqual(partial, ["discord", "whatsapp_cloud"])
         email_entry = next(p for p in PLATFORM_INVENTORY if p["id"] == "email")
-        self.assertEqual(email_entry.get("supportLevel"), "outbound_only")
-        self.assertFalse(email_entry.get("supportsPolling"))
+        self.assertEqual(email_entry.get("supportLevel"), "full_adapter")
+        self.assertTrue(email_entry.get("supportsPolling"))
         for entry in PLATFORM_INVENTORY:
             self.assertIn(
                 entry.get("supportLevel"),

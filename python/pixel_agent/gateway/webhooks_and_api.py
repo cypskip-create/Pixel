@@ -29,6 +29,40 @@ def compute_hmac_sha256(secret: str, body: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
+class WebhookCoalescer:
+    """Coalesces burst webhook deliveries for the same (route_id, event) within a short window."""
+
+    def __init__(self, *, window_s: float = 5.0) -> None:
+        self._window_s = max(0.1, float(window_s))
+        self._recent: dict[str, float] = {}
+
+    def should_coalesce(self, route_id: str, event: str, *, now: Optional[float] = None) -> bool:
+        t = now if now is not None else time.time()
+        key = f"{route_id}:{event}"
+        prev = self._recent.get(key)
+        self._recent[key] = t
+        return prev is not None and (t - prev) < self._window_s
+
+
+class BotLoopGuard:
+    """Prevents runaway bot-to-bot message loops by bounding rapid consecutive turns per session."""
+
+    def __init__(self, *, max_turns: int = 8, window_s: float = 30.0) -> None:
+        self._max_turns = max(2, int(max_turns))
+        self._window_s = max(1.0, float(window_s))
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, session_id: str, *, now: Optional[float] = None) -> bool:
+        t = now if now is not None else time.time()
+        recent = [ts for ts in self._hits.get(session_id, []) if (t - ts) < self._window_s]
+        if len(recent) >= self._max_turns:
+            self._hits[session_id] = recent
+            return False
+        recent.append(t)
+        self._hits[session_id] = recent
+        return True
+
+
 class WebhookRegistry:
     """Manages webhook routes, HMAC verification, replay protection, rate limits & delivery history."""
 

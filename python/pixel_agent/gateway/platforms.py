@@ -83,10 +83,10 @@ def segment_text(text: str, max_chars: int) -> list[str]:
 PLATFORM_INVENTORY: tuple[dict[str, Any], ...] = (
     {"id": "telegram", "name": "Telegram", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4096, "auth": "bot_token", "supportsPolling": True, "supportsAttachments": True},
     {"id": "slack", "name": "Slack", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "matrix", "name": "Matrix", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 8000, "auth": "access_token", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "email", "name": "Email (SMTP/IMAP)", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 32000, "auth": "credentials", "supportsPolling": True, "supportsAttachments": False},
     {"id": "discord", "name": "Discord", "tier": "primary", "supportLevel": "partial", "maxChars": 2000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
     {"id": "whatsapp_cloud", "name": "WhatsApp Cloud", "tier": "primary", "supportLevel": "partial", "maxChars": 4096, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "matrix", "name": "Matrix", "tier": "primary", "supportLevel": "partial", "maxChars": 8000, "auth": "access_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "email", "name": "Email (SMTP Outbound)", "tier": "primary", "supportLevel": "outbound_only", "maxChars": 32000, "auth": "credentials", "supportsPolling": False, "supportsAttachments": False},
     {"id": "teams", "name": "Microsoft Teams", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "webhook_or_bot", "supportsPolling": False, "supportsAttachments": True},
     {"id": "google_chat", "name": "Google Chat", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "webhook_or_oauth", "supportsPolling": False, "supportsAttachments": False},
     {"id": "mattermost", "name": "Mattermost", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
@@ -592,6 +592,42 @@ class MatrixAdapter(BasePlatformAdapter):
                 )
         return super().parse_inbound(raw_payload)
 
+    def poll_sync(self, timeout_ms: int = 0) -> list[InboundMessage]:
+        """Poll Matrix `/_matrix/client/v3/sync` using persisted `next_batch` cursor."""
+        if not self.connected:
+            return []
+        hs = str(self.config["homeserverUrl"]).rstrip("/")
+        qs = f"timeout={max(0, min(int(timeout_ms), 30_000))}"
+        next_batch = getattr(self, "_next_batch", "")
+        if next_batch:
+            qs += f"&since={urllib.parse.quote(next_batch)}"
+        url = f"{hs}/_matrix/client/v3/sync?{qs}"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {str(self.config['accessToken']).strip()}"},
+            method="GET",
+        )
+        ssl_ctx = ssl.create_default_context() if url.startswith("https://") else None
+        try:
+            with urllib.request.urlopen(req, timeout=max(10.0, timeout_ms / 1000.0 + 10.0), context=ssl_ctx) as resp:
+                data = json.loads(resp.read(2_000_000).decode("utf-8", errors="replace"))
+        except Exception:
+            return []
+        if isinstance(data.get("next_batch"), str):
+            self._next_batch = data["next_batch"]
+        own_user = str((self.identity or {}).get("userId") or "")
+        messages: list[InboundMessage] = []
+        rooms = ((data.get("rooms") or {}).get("join") or {}) if isinstance(data.get("rooms"), dict) else {}
+        for room_id, room_data in rooms.items():
+            events = ((room_data.get("timeline") or {}).get("events") or []) if isinstance(room_data, dict) else []
+            for ev in events:
+                if not isinstance(ev, dict) or ev.get("sender") == own_user:
+                    continue
+                parsed = self.parse_inbound({**ev, "room_id": room_id})
+                if parsed is not None:
+                    messages.append(parsed)
+        return messages
+
     def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
         ok, err = self.validate_config()
         if not ok:
@@ -662,6 +698,64 @@ class EmailAdapter(BasePlatformAdapter):
         if not str(self.config.get("smtpHost") or "").strip() or not str(self.config.get("fromAddress") or "").strip():
             return False, "Email requires smtpHost and fromAddress."
         return True, None
+
+    def poll_imap(self, *, folder: str = "INBOX", limit: int = 10) -> list[InboundMessage]:
+        """Poll unread inbound emails via stdlib `imaplib` IMAP4_SSL."""
+        imap_host = str(self.config.get("imapHost") or "").strip()
+        user = str(self.config.get("username") or self.config.get("fromAddress") or "").strip()
+        password = str(self.config.get("password") or "").strip()
+        if not imap_host or not user or not password:
+            return []
+        import email
+        import imaplib
+
+        port = int(self.config.get("imapPort") or 993)
+        last_uid = int(getattr(self, "_last_imap_uid", 0))
+        messages: list[InboundMessage] = []
+        try:
+            with imaplib.IMAP4_SSL(imap_host, port) as client:
+                client.login(user, password)
+                client.select(folder)
+                typ, data = client.uid("search", None, "UNSEEN")
+                if typ != "OK" or not data or not data[0]:
+                    return []
+                uids = [int(u) for u in data[0].split() if u.isdigit() and int(u) > last_uid][-max(1, limit):]
+                for uid in uids:
+                    ftyp, fdata = client.uid("fetch", str(uid), "(RFC822)")
+                    if ftyp != "OK" or not fdata or not isinstance(fdata[0], tuple):
+                        continue
+                    msg_obj = email.message_from_bytes(fdata[0][1])
+                    sender = email.utils.parseaddr(msg_obj.get("From", ""))[1]
+                    subject = str(msg_obj.get("Subject") or "").strip()
+                    body = ""
+                    if msg_obj.is_multipart():
+                        for part in msg_obj.walk():
+                            if part.get_content_type() == "text/plain":
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body = payload.decode("utf-8", errors="replace").strip()
+                                    break
+                    else:
+                        payload = msg_obj.get_payload(decode=True)
+                        if payload:
+                            body = payload.decode("utf-8", errors="replace").strip()
+                    text = f"{subject}\n{body}".strip() if subject else body
+                    if sender and text:
+                        messages.append(
+                            InboundMessage(
+                                message_id=f"email_uid_{uid}",
+                                platform="email",
+                                account_id=sender,
+                                chat_id=sender,
+                                text=text[: self.max_chars],
+                            )
+                        )
+                    if uid > last_uid:
+                        last_uid = uid
+            self._last_imap_uid = last_uid
+            return messages
+        except Exception:
+            return []
 
     def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
         ok, err = self.validate_config()

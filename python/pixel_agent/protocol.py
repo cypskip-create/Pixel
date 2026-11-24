@@ -20,6 +20,14 @@ from .plugin_manager import PluginManager
 from .providers import ProviderConfig
 from .voice import exchange_gpt_live_sdp_offer, synthesize_cloud, transcribe_cloud
 from .workspace_services import WorkspaceServices
+from .context_engine import ContextEngine
+from .prompt_builder import PromptAssemblyInput, PromptBuilder
+from .security.approval_analyzer import analyze_command_risk
+from .toolsets import TOOLSET_CATALOG, resolve_toolset_tools
+from .cron_tools import list_automation_blueprints, scan_scheduled_prompt
+from .media_pipeline import multimodal_provider_catalog
+from .tools.todo import TodoManager
+from .mcp_health import McpHealthController
 
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # 4 MiB guard against unbounded frame memory
 
@@ -45,6 +53,10 @@ class PixelAgentProtocolServer:
         self._plugins: Optional[PluginManager] = None
         self._gateway: Optional[GatewayService] = None
         self._workspace: Optional[WorkspaceServices] = None
+        self._context_engine = ContextEngine()
+        self._prompt_builder = PromptBuilder()
+        self._todos = TodoManager()
+        self._mcp_health = McpHealthController()
         self._gateway_provider_config: Optional[ProviderConfig] = None
         self._gateway_tools: list[dict[str, Any]] = []
 
@@ -793,6 +805,74 @@ class PixelAgentProtocolServer:
         if msg_type == "session_import.confirm":
             res = self._workspace_services().confirm_session_import(str(params.get("digest") or ""))
             self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        # Phase 1-8 Python-first RPCs
+        if msg_type == "context.pin":
+            res = self._context_engine.pin(str(params.get("id") or ""), str(params.get("label") or ""), str(params.get("content") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "context.unpin":
+            res = self._context_engine.unpin(str(params.get("id") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "context.breakdown":
+            msgs = params.get("messages") if isinstance(params.get("messages"), list) else []
+            res = self._context_engine.breakdown(msgs, max_context_tokens=int(params.get("maxContextTokens") or 32_000))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "prompt.build":
+            built = self._prompt_builder.build(
+                PromptAssemblyInput(
+                    mode=str(params.get("mode") or "standard"),
+                    soul_text=str(params.get("soulText") or ""),
+                    profile_name=str(params.get("profileName") or "Default"),
+                    profile_instructions=str(params.get("profileInstructions") or ""),
+                    frozen_memory_snapshot=str(params.get("memorySnapshot") or ""),
+                    skill_index=str(params.get("skillIndex") or ""),
+                )
+            )
+            self.send({"id": req_id, "ok": True, "result": built.to_dict()})
+            return True
+
+        if msg_type == "security.analyze_command":
+            res = analyze_command_risk(str(params.get("command") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "toolsets.catalog":
+            self.send({"id": req_id, "ok": True, "result": {"toolsets": TOOLSET_CATALOG}})
+            return True
+
+        if msg_type == "cron.blueprints":
+            self.send({"id": req_id, "ok": True, "result": {"blueprints": list_automation_blueprints()}})
+            return True
+
+        if msg_type == "cron.scan_prompt":
+            res = scan_scheduled_prompt(str(params.get("prompt") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "media.catalog":
+            self.send({"id": req_id, "ok": True, "result": multimodal_provider_catalog()})
+            return True
+
+        if msg_type == "todo.write":
+            items = params.get("items") if isinstance(params.get("items"), list) else []
+            res = self._todos.write(str(params.get("sessionId") or "default"), items)
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "todo.read":
+            res = self._todos.read(str(params.get("sessionId") or "default"))
+            self.send({"id": req_id, "ok": True, "result": {"items": res}})
+            return True
+
+        if msg_type == "mcp.health":
+            self.send({"id": req_id, "ok": True, "result": {"servers": self._mcp_health.snapshot()}})
             return True
 
         if msg_type == "shutdown":
