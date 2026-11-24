@@ -57,6 +57,16 @@ const WorkspaceLibrary = lazy(() => import('@/components/WorkspaceLibrary').then
 const WorkspaceTasks = lazy(() => import('@/components/WorkspaceTasks').then((module) => ({ default: module.WorkspaceTasks })));
 const ProductivityPanel = lazy(() => import('@/components/ProductivityPanel').then((module) => ({ default: module.ProductivityPanel })));
 const PixelBoard = lazy(() => import('@/components/PixelBoard').then((module) => ({ default: module.PixelBoard })));
+const WorkspacePluginManager = lazy(() => import('@/components/WorkspacePluginManager').then((module) => ({ default: module.WorkspacePluginManager })));
+const CommandCenterPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.CommandCenterPage })));
+const ProfilesPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.ProfilesPage })));
+const AgentsPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.AgentsPage })));
+const ArtifactsPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.ArtifactsPage })));
+const CronPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.CronPage })));
+const StarmapPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.StarmapPage })));
+const SessionImportPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.SessionImportPage })));
+const DedicatedMessagingPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.DedicatedMessagingPage })));
+const DedicatedWebhooksPage = lazy(() => import('@/components/Stage9Destinations').then((module) => ({ default: module.DedicatedWebhooksPage })));
 
 export function Workspace(): React.JSX.Element {
   const bridge = useBridge();
@@ -836,10 +846,20 @@ export function Workspace(): React.JSX.Element {
       { id: 'toggle-preview', group: 'Workspace', label: 'Open contextual preview pane', onSelect: () => toggleRightRail('preview') },
       { id: 'toggle-terminal', group: 'Workspace', label: 'Toggle integrated terminal', shortcut: 'Ctrl+`', onSelect: () => toggleRightRail('terminal') },
       { id: 'toggle-sidebar', group: 'Workspace', label: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar', shortcut: 'Ctrl+B', onSelect: () => setSidebarCollapsed((v) => !v) },
+      { id: 'nav-command-center', group: 'Navigation', label: 'Open Command Center', onSelect: () => openWorkspaceDestination('command-center') },
       { id: 'nav-projects', group: 'Navigation', label: 'Open Projects', onSelect: () => openWorkspaceDestination('projects') },
       { id: 'nav-tasks', group: 'Navigation', label: 'Open Running Tasks & Activity', onSelect: () => openWorkspaceDestination('tasks') },
       { id: 'nav-board', group: 'Navigation', label: 'Open Pixel Board', onSelect: () => openWorkspaceDestination('board') },
       { id: 'nav-library', group: 'Navigation', label: 'Open Document Library', onSelect: () => openWorkspaceDestination('library') },
+      { id: 'nav-capabilities', group: 'Navigation', label: 'Open Capabilities & Plugins', onSelect: () => openWorkspaceDestination('capabilities') },
+      { id: 'nav-messaging', group: 'Navigation', label: 'Open Messaging & Pairing', onSelect: () => openWorkspaceDestination('messaging') },
+      { id: 'nav-webhooks', group: 'Navigation', label: 'Open Webhooks', onSelect: () => openWorkspaceDestination('webhooks') },
+      { id: 'nav-artifacts', group: 'Navigation', label: 'Open Artifacts', onSelect: () => openWorkspaceDestination('artifacts') },
+      { id: 'nav-cron', group: 'Navigation', label: 'Open Schedules & Cron', onSelect: () => openWorkspaceDestination('cron') },
+      { id: 'nav-profiles', group: 'Navigation', label: 'Open Profiles', onSelect: () => openWorkspaceDestination('profiles') },
+      { id: 'nav-agents', group: 'Navigation', label: 'Open Agents & Delegation', onSelect: () => openWorkspaceDestination('agents') },
+      { id: 'nav-starmap', group: 'Navigation', label: 'Open Starmap', onSelect: () => openWorkspaceDestination('starmap') },
+      { id: 'nav-session-import', group: 'Navigation', label: 'Open Session Import', onSelect: () => openWorkspaceDestination('session-import') },
       { id: 'nav-notes', group: 'Navigation', label: 'Open Notes & Planning', onSelect: () => openWorkspaceDestination('notes') },
       { id: 'nav-plugins', group: 'Navigation', label: 'Open Plugins & MCP', onSelect: () => openWorkspaceDestination('plugins') },
       { id: 'nav-skills', group: 'Navigation', label: 'Open Skills & Routines', onSelect: () => openWorkspaceDestination('skills') },
@@ -868,8 +888,27 @@ export function Workspace(): React.JSX.Element {
   }, [createSessionTab, handleSelectModel, history, openConversation, openWorkspaceDestination, paneLayout.splitEnabled, sidebarCollapsed, toggleRightRail, toggleSplitPane]);
 
   const viewTitle: Record<WorkspaceView, string> = {
-    chat: 'Workspace', projects: 'Projects', library: 'Library', tasks: 'Activity', notes: 'Notes & Planning',
-    skills: 'Skills & Routines', memory: 'Memory', tools: 'Tools', plugins: 'Plugins', board: 'Pixel Board', settings: 'Settings',
+    chat: 'Workspace',
+    'command-center': 'Command Center',
+    projects: 'Projects',
+    library: 'Library',
+    artifacts: 'Artifacts',
+    tasks: 'Activity',
+    cron: 'Schedules & Cron',
+    notes: 'Notes & Planning',
+    skills: 'Skills & Routines',
+    memory: 'Memory',
+    tools: 'Tools',
+    plugins: 'Plugins',
+    capabilities: 'Capabilities',
+    messaging: 'Messaging & Pairing',
+    webhooks: 'Webhooks',
+    profiles: 'Profiles',
+    agents: 'Agents & Delegation',
+    starmap: 'Starmap',
+    'session-import': 'Import Session',
+    board: 'Pixel Board',
+    settings: 'Settings',
   };
   const handlePluginChange = useCallback(async (
     action: PluginLifecycleAction,
@@ -1122,9 +1161,19 @@ export function Workspace(): React.JSX.Element {
           </div>
           </div> : null}
 
+          {view === 'command-center' ? <Suspense fallback={<WorkspacePanelLoading />}><CommandCenterPage onOpenConversation={(id) => void openConversation(id)} /></Suspense> : null}
           {view === 'projects' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceProjects projects={projects} draft={projectDraft} setDraft={setProjectDraft} onSelect={async (name) => { if (bridge.kind !== 'ready') return; try { await bridge.bridge.memory.setActiveProject(name); setHistory(await bridge.bridge.history.list({limit:50})); setView('chat'); } catch { setNotice('Pixel could not switch projects while a task is running.'); } }} /></Suspense> : null}
           {view === 'library' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceLibrary documents={libraryDocuments} loading={libraryLoading} onRefresh={() => void refreshLibrary()} onIndexFolder={indexLibraryFolder} onRead={readLibraryDocument} onOpen={openLibraryDocument} onOpenFolder={openLibraryFolder} /></Suspense> : null}
+          {view === 'artifacts' ? <Suspense fallback={<WorkspacePanelLoading />}><ArtifactsPage projectId={currentProject?.id} /></Suspense> : null}
           {view === 'tasks' ? <Suspense fallback={<WorkspacePanelLoading />}><WorkspaceTasks tasks={tasks} audit={audit} projectName={currentProject?.name} onAction={taskAction} onContinue={(id) => { if (bridge.kind === 'ready') void bridge.bridge.tasks.continueAfterHandoff(id).catch(() => setNotice('Pixel could not continue that handoff.')); }} onRecord={async (id) => { if (bridge.kind !== 'ready') return; try { const skill = await bridge.bridge.skills.recordTask(id); setNotice(`Draft “${skill.name}” saved for review.`); setSettingsInitialPage('skills'); openSettings(); } catch (cause) { setNotice(cause instanceof Error ? cause.message : 'Pixel could not record that task.'); } }} /></Suspense> : null}
+          {view === 'cron' ? <Suspense fallback={<WorkspacePanelLoading />}><CronPage /></Suspense> : null}
+          {view === 'capabilities' ? <Suspense fallback={<WorkspacePanelLoading />}><section className="workspace-page" aria-label="Capabilities"><div className="workspace-page-heading"><h1>Capabilities, Plugins &amp; Toolsets</h1><p>Manage Python plugins, MCP servers, Skills Hub, and active toolsets.</p></div><WorkspacePluginManager plugins={plugins} onChange={handlePluginChange} /></section></Suspense> : null}
+          {view === 'messaging' ? <Suspense fallback={<WorkspacePanelLoading />}><DedicatedMessagingPage /></Suspense> : null}
+          {view === 'webhooks' ? <Suspense fallback={<WorkspacePanelLoading />}><DedicatedWebhooksPage /></Suspense> : null}
+          {view === 'profiles' ? <Suspense fallback={<WorkspacePanelLoading />}><ProfilesPage /></Suspense> : null}
+          {view === 'agents' ? <Suspense fallback={<WorkspacePanelLoading />}><AgentsPage /></Suspense> : null}
+          {view === 'starmap' ? <Suspense fallback={<WorkspacePanelLoading />}><StarmapPage /></Suspense> : null}
+          {view === 'session-import' ? <Suspense fallback={<WorkspacePanelLoading />}><SessionImportPage /></Suspense> : null}
           {view === 'notes' ? <Suspense fallback={<WorkspacePanelLoading />}><ProductivityPanel /></Suspense> : null}
           {view === 'board' ? <Suspense fallback={<WorkspacePanelLoading />}><PixelBoard emergencyStopped={stopped} /></Suspense> : null}
           {view === 'settings' ? <div className="workspace-settings"><Suspense fallback={<WorkspacePanelLoading />}><SettingsPanel settings={settings} displays={displays} onPatch={patch} onRequestMode={chooseMode} onClose={returnFromSettings} hasApiKey={hasApiKey} onSaveApiKey={saveApiKey} onRemoveApiKey={removeApiKey} onTestConnection={testApiKeyConnection} error={settingsError} saving={saving} workspaceLayout initialPage={settingsInitialPage} tools={tools} plugins={plugins} onPluginChange={handlePluginChange} /></Suspense></div> : null}

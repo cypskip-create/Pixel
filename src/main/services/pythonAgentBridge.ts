@@ -152,6 +152,7 @@ export class PythonAgentBridge {
   private readonly crashLogPath: string | null;
   private readonly pluginDataDir: string | null;
   private readonly gatewayDataDir: string | null;
+  private readonly workspaceDataDir: string | null;
   private readonly parentStartMarker = `${process.pid}:${Date.now()}`;
   private proc: ChildProcessWithoutNullStreams | null = null;
   private currentOwnership: PythonAgentOwnershipEntry | null = null;
@@ -168,6 +169,7 @@ export class PythonAgentBridge {
     crashLogPath?: string;
     pluginDataDir?: string;
     gatewayDataDir?: string;
+    workspaceDataDir?: string;
   } = {}) {
     this.pythonExecutable = options.pythonExecutable ?? process.env.PIXEL_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
     this.scriptPath = options.scriptPath ?? join(process.cwd(), 'python', 'agent_service.py');
@@ -176,6 +178,7 @@ export class PythonAgentBridge {
     this.crashLogPath = options.crashLogPath ?? null;
     this.pluginDataDir = options.pluginDataDir ?? null;
     this.gatewayDataDir = options.gatewayDataDir ?? null;
+    this.workspaceDataDir = options.workspaceDataDir ?? null;
   }
 
   getHealth(): { running: boolean; pid: number | null; instanceId: string | null; recentStderr: string[] } {
@@ -241,6 +244,7 @@ export class PythonAgentBridge {
     if (this.crashLogPath) env.PIXEL_AGENT_CRASH_LOG = this.crashLogPath;
     if (this.pluginDataDir) env.PIXEL_PLUGIN_DATA_DIR = this.pluginDataDir;
     if (this.gatewayDataDir) env.PIXEL_GATEWAY_DATA_DIR = this.gatewayDataDir;
+    if (this.workspaceDataDir) env.PIXEL_WORKSPACE_DATA_DIR = this.workspaceDataDir;
 
     const child = spawn(this.pythonExecutable, ['-u', this.scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -686,6 +690,58 @@ export class PythonAgentBridge {
 
   gatewayWebhookHistory(limit = 50): Promise<Array<Record<string, unknown>>> {
     return this.request('gateway.webhook_history', { limit });
+  }
+
+  gatewayConfigureAgent(input: { provider?: Record<string, unknown>; tools?: Array<Record<string, unknown>> }): Promise<{ configured: boolean; toolCount: number }> {
+    return this.request('gateway.configure_agent', input);
+  }
+
+  gatewayStartPolling(intervalSec = 1.0): Promise<{ ok: boolean; polling?: boolean; error?: string }> {
+    return this.request('gateway.start_polling', { intervalSec });
+  }
+
+  profilesList(): Promise<{ ok: boolean; activeProfileId: string; profiles: Array<Record<string, unknown>> }> {
+    return this.request('profiles.list');
+  }
+
+  profilesCreate(input: { name: string; description?: string; instructions?: string; providerOverride?: string; modelOverride?: string }): Promise<Record<string, unknown>> {
+    return this.request('profiles.create', input);
+  }
+
+  profilesSwitch(profileId: string): Promise<Record<string, unknown>> {
+    return this.request('profiles.switch', { profileId });
+  }
+
+  profilesUpdate(profileId: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('profiles.update', { profileId, patch });
+  }
+
+  profilesDelete(profileId: string): Promise<Record<string, unknown>> {
+    return this.request('profiles.delete', { profileId });
+  }
+
+  artifactsList(input: { profileId?: string; projectId?: string; kind?: string; query?: string } = {}): Promise<Array<Record<string, unknown>>> {
+    return this.request('artifacts.list', input);
+  }
+
+  artifactsRegister(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('artifacts.register', input);
+  }
+
+  artifactsDelete(artifactId: string): Promise<Record<string, unknown>> {
+    return this.request('artifacts.delete', { artifactId });
+  }
+
+  starmapBuild(input: { memories: Array<Record<string, unknown>>; skills: Array<Record<string, unknown>>; sessions: Array<Record<string, unknown>>; profileId?: string; projectId?: string }): Promise<Record<string, unknown>> {
+    return this.request('starmap.build', input);
+  }
+
+  sessionImportPreview(rawText: string, format = 'json'): Promise<Record<string, unknown>> {
+    return this.request('session_import.preview', { rawText, format });
+  }
+
+  sessionImportCommit(rawText: string, format = 'json'): Promise<Record<string, unknown>> {
+    return this.request('session_import.commit', { rawText, format });
   }
 
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {

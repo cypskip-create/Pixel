@@ -1816,6 +1816,25 @@ export interface CypsBridge {
     webhookDelete(routeId: string): Promise<Record<string, unknown>>;
     webhookHistory(limit?: number): Promise<Array<Record<string, unknown>>>;
   };
+  profiles?: {
+    list(): Promise<{ ok: boolean; activeProfileId: string; profiles: Array<Record<string, unknown>> }>;
+    create(input: { name: string; description?: string; instructions?: string; providerOverride?: string; modelOverride?: string }): Promise<Record<string, unknown>>;
+    switch(profileId: string): Promise<Record<string, unknown>>;
+    update(profileId: string, patch: Record<string, unknown>): Promise<Record<string, unknown>>;
+    delete(profileId: string): Promise<Record<string, unknown>>;
+  };
+  artifacts?: {
+    list(input?: { profileId?: string; projectId?: string; kind?: string; query?: string }): Promise<Array<Record<string, unknown>>>;
+    register(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+    delete(artifactId: string): Promise<Record<string, unknown>>;
+  };
+  starmap?: {
+    build(): Promise<Record<string, unknown>>;
+  };
+  sessionImport?: {
+    preview(rawText: string, format?: string): Promise<Record<string, unknown>>;
+    commit(rawText: string, format?: string): Promise<Record<string, unknown>>;
+  };
   proceduralSkills?: {
     list(): Promise<ProceduralSkillView[]>;
     createDraft(markdown: string): Promise<ProceduralSkillView>;

@@ -811,6 +811,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     crashLogPath: join(app.getPath('userData'), 'logs', 'python-agent-crash.log'),
     pluginDataDir: join(app.getPath('userData'), 'python-plugins'),
     gatewayDataDir: join(app.getPath('userData'), 'gateway'),
+    workspaceDataDir: join(app.getPath('userData'), 'workspace-stage9'),
   });
 
   const pythonRunner = new PythonAgentRunner({
@@ -2206,6 +2207,21 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
 
   registerHandler(CHANNELS.gatewayStart, async (_event, host?: string, port?: number) => {
     if (emergency.isStopped()) return { ok: false, running: false, error: 'Emergency Stop is active.' };
+    // Push active provider & tool schemas into Python Gateway so remote turns use the real Python agent.
+    const cfg = settings.get();
+    const prov = cfg.provider;
+    await pythonAgentBridge.gatewayConfigureAgent({
+      provider: {
+        provider: prov.provider,
+        model: prov.primaryModel,
+        baseUrl: prov.baseUrl,
+        apiKey: settings.getApiKey() ?? '',
+        temperature: prov.temperature,
+        maxTokens: prov.maxTokens,
+        timeoutMs: prov.requestTimeoutMs,
+      },
+      tools: toolRegistry.schemasFor('agent').map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
+    }).catch(() => undefined);
     return pythonAgentBridge.gatewayStart({
       host: typeof host === 'string' && host.trim() ? host.trim() : '127.0.0.1',
       port: typeof port === 'number' ? port : 0,
@@ -2274,6 +2290,100 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   registerHandler(CHANNELS.gatewayWebhookHistory, async (_event, limit = 50) =>
     pythonAgentBridge.gatewayWebhookHistory(typeof limit === 'number' ? limit : 50),
   );
+
+  registerHandler(CHANNELS.profilesList, async () => {
+    try {
+      return await pythonAgentBridge.profilesList();
+    } catch {
+      return { ok: true, activeProfileId: 'default', profiles: [] };
+    }
+  });
+
+  registerHandler(CHANNELS.profilesCreate, async (_event, input: { name: string; description?: string; instructions?: string; providerOverride?: string; modelOverride?: string }) =>
+    pythonAgentBridge.profilesCreate(input ?? { name: '' }),
+  );
+
+  registerHandler(CHANNELS.profilesSwitch, async (_event, profileId: string) =>
+    pythonAgentBridge.profilesSwitch(typeof profileId === 'string' ? profileId : 'default'),
+  );
+
+  registerHandler(CHANNELS.profilesUpdate, async (_event, profileId: string, patch: Record<string, unknown>) =>
+    pythonAgentBridge.profilesUpdate(typeof profileId === 'string' ? profileId : 'default', patch && typeof patch === 'object' ? patch : {}),
+  );
+
+  registerHandler(CHANNELS.profilesDelete, async (_event, profileId: string) =>
+    pythonAgentBridge.profilesDelete(typeof profileId === 'string' ? profileId : ''),
+  );
+
+  registerHandler(CHANNELS.artifactsList, async (_event, input?: { profileId?: string; projectId?: string; kind?: string; query?: string }) => {
+    try {
+      return await pythonAgentBridge.artifactsList(input ?? {});
+    } catch {
+      return [];
+    }
+  });
+
+  registerHandler(CHANNELS.artifactsRegister, async (_event, input: Record<string, unknown>) =>
+    pythonAgentBridge.artifactsRegister(input && typeof input === 'object' ? input : {}),
+  );
+
+  registerHandler(CHANNELS.artifactsDelete, async (_event, artifactId: string) =>
+    pythonAgentBridge.artifactsDelete(typeof artifactId === 'string' ? artifactId : ''),
+  );
+
+  registerHandler(CHANNELS.starmapBuild, async () => {
+    const activeProject = projectId();
+    const memories = memoryStore.list({ projectId: activeProject, limit: 100 }).map((m) => ({
+      id: m.id,
+      content: m.content,
+      projectId: activeProject,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+    }));
+    const skills = skillStore.list(activeProject).map((s) => ({
+      id: s.id,
+      name: s.name,
+      status: s.status,
+      projectId: activeProject,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
+    const sessions = history.list({ projectId: activeProject, limit: 100 }).map((c) => ({
+      id: c.id,
+      title: c.title,
+      projectId: activeProject,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    }));
+    return pythonAgentBridge.starmapBuild({
+      memories,
+      skills,
+      sessions,
+      projectId: activeProject,
+    });
+  });
+
+  registerHandler(CHANNELS.sessionImportPreview, async (_event, rawText: string, format = 'json') =>
+    pythonAgentBridge.sessionImportPreview(typeof rawText === 'string' ? rawText : '', typeof format === 'string' ? format : 'json'),
+  );
+
+  registerHandler(CHANNELS.sessionImportCommit, async (_event, rawText: string, format = 'json') => {
+    const res = await pythonAgentBridge.sessionImportCommit(typeof rawText === 'string' ? rawText : '', typeof format === 'string' ? format : 'json');
+    if (res.ok && Array.isArray(res.sessions)) {
+      for (const s of res.sessions as Array<{ title?: string; messages?: Array<{ role?: string; content?: string }> }>) {
+        const conv = HistoryStore.newConversation(s.title || 'Imported session');
+        conv.projectId = projectId();
+        conv.messages = (Array.isArray(s.messages) ? s.messages : []).map((m, idx) => ({
+          id: `imp-${Date.now()}-${idx}`,
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: String(m.content ?? ''),
+          createdAt: Date.now() + idx,
+        }));
+        history.save(conv);
+      }
+    }
+    return res;
+  });
 
   registerHandler(CHANNELS.browserSessions, () => browserManager.list());
 

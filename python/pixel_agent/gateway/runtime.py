@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -30,6 +31,7 @@ from .platforms import (
     InboundMessage,
     OutboundMessage,
     PLATFORM_INVENTORY,
+    TelegramAdapter,
     create_platform_adapter,
 )
 from .webhooks_and_api import GatewayHttpServer, WebhookRegistry
@@ -57,6 +59,10 @@ class GatewayService:
         self._delivery_ledger: list[dict[str, Any]] = []
         self._approvals: dict[str, dict[str, Any]] = {}
         self._webhook_events: list[dict[str, Any]] = []
+        self._available_tools: list[str] = []
+        self._telegram_last_update_id: int = 0
+        self._poll_stop_event = threading.Event()
+        self._poll_thread: Optional[threading.Thread] = None
         self._http_server: Optional[GatewayHttpServer] = None
         self._running = False
         self._emergency_stopped = False
@@ -70,17 +76,66 @@ class GatewayService:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 self.pairing.load_state(data.get("pairing") or {})
+                self._telegram_last_update_id = int(data.get("telegramLastUpdateId") or 0)
+                if isinstance(data.get("deliveryLedger"), list):
+                    self._delivery_ledger = list(data["deliveryLedger"][-100:])
+                if isinstance(data.get("webhookRoutes"), list):
+                    for r in data["webhookRoutes"]:
+                        if isinstance(r, dict) and r.get("id"):
+                            self.webhooks._routes[str(r["id"])] = dict(r)
         except Exception:
             pass
 
     def _save_state(self) -> None:
         payload = {
-            "version": 1,
+            "version": 2,
             "pairing": self.pairing.export_state(),
+            "telegramLastUpdateId": self._telegram_last_update_id,
+            "deliveryLedger": self._delivery_ledger[-100:],
+            "webhookRoutes": self.webhooks.list_routes(),  # Secrets are never written to plaintext JSON
         }
         tmp = self.state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.state_path)
+
+    def set_available_tools(self, tool_names: list[str]) -> None:
+        self._available_tools = [str(t) for t in tool_names if str(t).strip()]
+
+    def start_telegram_polling(self, *, interval_s: float = 1.0) -> dict[str, Any]:
+        adapter = self._adapters.get("telegram")
+        if not isinstance(adapter, TelegramAdapter) or not adapter.connected:
+            return {"ok": False, "error": "Telegram adapter must be connected before starting polling."}
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            return {"ok": True, "polling": True}
+        adapter._last_update_id = max(adapter._last_update_id, self._telegram_last_update_id)
+        self._poll_stop_event.clear()
+
+        def _poll_loop() -> None:
+            backoff = max(0.05, interval_s)
+            while not self._poll_stop_event.is_set() and not self._emergency_stopped:
+                try:
+                    updates = adapter.poll_updates(timeout_s=0)
+                    if adapter._last_update_id > self._telegram_last_update_id:
+                        self._telegram_last_update_id = adapter._last_update_id
+                        self._save_state()
+                    for msg in updates:
+                        if self._poll_stop_event.is_set() or self._emergency_stopped:
+                            break
+                        self.ingest_inbound("telegram", msg.to_dict(), available_tools=self._available_tools)
+                    backoff = max(0.05, interval_s)
+                except Exception:
+                    backoff = min(backoff * 2.0, 30.0)
+                self._poll_stop_event.wait(timeout=backoff)
+
+        self._poll_thread = threading.Thread(target=_poll_loop, name="pixel-tg-poll", daemon=True)
+        self._poll_thread.start()
+        return {"ok": True, "polling": True}
+
+    def stop_telegram_polling(self) -> None:
+        self._poll_stop_event.set()
+        if self._poll_thread is not None and self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=2.0)
+        self._poll_thread = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -105,11 +160,13 @@ class GatewayService:
 
     def stop(self) -> dict[str, Any]:
         self._running = False
+        self.stop_telegram_polling()
         if self._http_server is not None:
             self._http_server.stop()
             self._http_server = None
         for adapter in self._adapters.values():
             adapter.disconnect()
+        self._save_state()
         return {"ok": True, "running": False}
 
     def emergency_stop(self) -> dict[str, Any]:
@@ -253,15 +310,26 @@ class GatewayService:
         }
 
         if msg.platform in self._adapters and self._adapters[msg.platform].connected and reply_text:
-            send_res = self._adapters[msg.platform].send_message(
-                OutboundMessage(platform=msg.platform, chat_id=msg.chat_id, text=reply_text, reply_to=msg.message_id)
-            )
+            attempts = 0
+            max_attempts = 3
+            send_res: dict[str, Any] = {"ok": False, "error": "Not attempted"}
+            while attempts < max_attempts and not self._emergency_stopped:
+                attempts += 1
+                send_res = self._adapters[msg.platform].send_message(
+                    OutboundMessage(platform=msg.platform, chat_id=msg.chat_id, text=reply_text, reply_to=msg.message_id)
+                )
+                if send_res.get("ok"):
+                    break
+                if attempts < max_attempts:
+                    time.sleep(min(0.05 * attempts, 0.5))
+            delivery_record["attempts"] = attempts
             delivery_record["status"] = "delivery_confirmed" if send_res.get("ok") else "delivery_failed"
             delivery_record["detail"] = send_res
         else:
             delivery_record["status"] = "delivery_pending_adapter"
 
         self._delivery_ledger.append(delivery_record)
+        self._save_state()
         return {
             "ok": True,
             "session": session_record,
@@ -298,7 +366,14 @@ class GatewayService:
         self._approvals[aid] = rec
         return dict(rec)
 
-    def resolve_approval(self, approval_id: str, *, approved: bool, actor_account_id: str) -> dict[str, Any]:
+    def resolve_approval(
+        self,
+        approval_id: str,
+        *,
+        approved: bool,
+        actor_account_id: str,
+        actor_platform: Optional[str] = None,
+    ) -> dict[str, Any]:
         rec = self._approvals.get(approval_id)
         if not rec:
             return {"ok": False, "error": "Approval request not found."}
@@ -307,8 +382,11 @@ class GatewayService:
         if time.time() > rec["expiresAt"]:
             rec["status"] = "expired"
             return {"ok": False, "error": "Approval request expired."}
-        if actor_account_id != "local-owner" and actor_account_id != rec["accountId"]:
-            return {"ok": False, "error": "Actor identity does not match authorized approval owner."}
+        if actor_account_id != "local-owner":
+            if actor_account_id != rec["accountId"]:
+                return {"ok": False, "error": "Actor identity does not match authorized approval owner."}
+            if actor_platform is not None and actor_platform.strip().lower() != rec["platform"]:
+                return {"ok": False, "error": "Actor platform does not match bound approval platform."}
         rec["status"] = "approved" if approved else "rejected"
         return {"ok": True, "approval": dict(rec)}
 
@@ -324,12 +402,14 @@ class GatewayService:
                 last_text = str(m.get("content") or "")
                 break
         session_id = f"dev:{device['id']}:{device['projectId']}"
+        allowed_tools = self.pairing.allowed_tools_for_user(device, self._available_tools)
         self._sessions[session_id] = {
             "sessionId": session_id,
             "platform": "remote_api",
             "accountId": device["id"],
             "projectId": device["projectId"],
             "scopes": list(device["scopes"]),
+            "allowedTools": allowed_tools,
             "lastMessageAt": time.time(),
         }
         if self._agent_dispatch:
@@ -337,7 +417,7 @@ class GatewayService:
                 "sessionId": session_id,
                 "ownerId": session_id,
                 "projectId": device["projectId"],
-                "allowedTools": [],
+                "allowedTools": allowed_tools,
                 "message": {"text": last_text, "platform": "remote_api", "accountId": device["id"]},
             })
             reply = str(out.get("content") or "")
@@ -347,6 +427,7 @@ class GatewayService:
             "ok": True,
             "id": f"chatcmpl_{secrets.token_hex(6)}",
             "object": "chat.completion",
+            "allowedTools": allowed_tools,
             "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
         }
 

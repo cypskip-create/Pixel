@@ -19,6 +19,7 @@ from .multimodal import annotate_som_png_base64, assert_vision_capable_model, ge
 from .plugin_manager import PluginManager
 from .providers import ProviderConfig
 from .voice import exchange_gpt_live_sdp_offer, synthesize_cloud, transcribe_cloud
+from .workspace_services import WorkspaceServices
 
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # 4 MiB guard against unbounded frame memory
 
@@ -43,15 +44,67 @@ class PixelAgentProtocolServer:
         self._shutting_down = False
         self._plugins: Optional[PluginManager] = None
         self._gateway: Optional[GatewayService] = None
+        self._workspace: Optional[WorkspaceServices] = None
+        self._gateway_provider_config: Optional[ProviderConfig] = None
+        self._gateway_tools: list[dict[str, Any]] = []
 
     def _plugin_manager(self) -> PluginManager:
         if self._plugins is None:
             self._plugins = PluginManager()
         return self._plugins
 
+    def _workspace_services(self) -> WorkspaceServices:
+        if self._workspace is None:
+            self._workspace = WorkspaceServices()
+        return self._workspace
+
+    def _dispatch_gateway_turn(self, turn_input: dict[str, Any]) -> dict[str, Any]:
+        """Production Gateway -> primary Python `run_agent_turn` dispatcher."""
+        project_id = str(turn_input.get("projectId") or "default")
+        if self._gateway_provider_config is None:
+            return {
+                "ok": False,
+                "content": f"No model provider configured for remote gateway execution (project={project_id}). Configure a provider in Pixel Settings.",
+            }
+        req_id = f"gw_{int(time.time() * 1000)}_{os.getpid()}"
+        cancel_ev = threading.Event()
+        with self._state_lock:
+            self._active_turns[req_id] = cancel_ev
+        try:
+            pm = self._plugin_manager()
+            raw_allowed = turn_input.get("allowedTools")
+            explicit_allowlist = [str(x) for x in raw_allowed] if isinstance(raw_allowed, list) else []
+            effective_tools = pm.filter_tools(self._gateway_tools, explicit_allowlist=explicit_allowlist)
+            msg_obj = turn_input.get("message") if isinstance(turn_input.get("message"), dict) else {}
+            user_text = str(msg_obj.get("text") or "").strip()
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"You are Pixel answering an authorized remote request for project '{project_id}'.",
+                },
+                {"role": "user", "content": user_text},
+            ]
+            result = run_agent_turn(
+                request_id=req_id,
+                messages=messages,
+                tools=effective_tools,
+                provider_config=self._gateway_provider_config,
+                budget=IterationBudget(max_iterations=6, max_tool_calls=12),
+                cancel_event=cancel_ev,
+                emit=self.send,
+                request_tool_execution=lambda cid, nm, ag, ts: self._request_tool(req_id, cid, nm, ag, ts),
+                tool_timeout_s=30.0,
+                hook_dispatcher=lambda ev, pl: pm.dispatch_hook(ev, pl),
+                tool_policy_check=lambda nm: pm.is_tool_allowed(nm, explicit_allowlist=explicit_allowlist),
+            )
+            return {"ok": bool(result.get("ok")), "content": str(result.get("content") or "")}
+        finally:
+            with self._state_lock:
+                self._active_turns.pop(req_id, None)
+
     def _gateway_service(self) -> GatewayService:
         if self._gateway is None:
-            self._gateway = GatewayService()
+            self._gateway = GatewayService(agent_dispatch=self._dispatch_gateway_turn)
         return self._gateway
 
     def send(self, payload: dict[str, Any]) -> None:
@@ -603,6 +656,120 @@ class PixelAgentProtocolServer:
 
         if msg_type == "gateway.webhook_history":
             self.send({"id": req_id, "ok": True, "result": self._gateway_service().webhooks.list_history(int(params.get("limit", 50)))})
+            return True
+
+        if msg_type == "gateway.configure_agent":
+            prov_raw = params.get("provider") if isinstance(params.get("provider"), dict) else {}
+            if prov_raw.get("model"):
+                self._gateway_provider_config = ProviderConfig(
+                    provider=str(prov_raw.get("provider") or "deepseek"),
+                    model=str(prov_raw.get("model") or "deepseek-flash"),
+                    base_url=str(prov_raw.get("baseUrl") or ""),
+                    api_key=prov_raw.get("apiKey") if isinstance(prov_raw.get("apiKey"), str) else None,
+                    temperature=float(prov_raw.get("temperature", 1.0)),
+                    max_tokens=int(prov_raw.get("maxTokens", 4096)),
+                    timeout_ms=int(prov_raw.get("timeoutMs", 60_000)),
+                )
+            raw_tools = params.get("tools") if isinstance(params.get("tools"), list) else []
+            self._gateway_tools = [t for t in raw_tools if isinstance(t, dict) and t.get("name")]
+            self._gateway_service().set_available_tools([str(t["name"]) for t in self._gateway_tools])
+            self.send({"id": req_id, "ok": True, "result": {"configured": True, "toolCount": len(self._gateway_tools)}})
+            return True
+
+        if msg_type == "gateway.start_polling":
+            res = self._gateway_service().start_telegram_polling(interval_s=float(params.get("intervalSec", 1.0)))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "profiles.list":
+            self.send({"id": req_id, "ok": True, "result": self._workspace_services().list_profiles()})
+            return True
+
+        if msg_type == "profiles.create":
+            res = self._workspace_services().create_profile(
+                str(params.get("name") or ""),
+                description=str(params.get("description") or ""),
+                instructions=str(params.get("instructions") or ""),
+                provider_override=str(params.get("providerOverride") or ""),
+                model_override=str(params.get("modelOverride") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "profiles.switch":
+            res = self._workspace_services().switch_profile(str(params.get("profileId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "profiles.update":
+            res = self._workspace_services().update_profile(
+                str(params.get("profileId") or ""),
+                params.get("patch") if isinstance(params.get("patch"), dict) else {},
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "profiles.delete":
+            res = self._workspace_services().delete_profile(str(params.get("profileId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "artifacts.list":
+            res = self._workspace_services().list_artifacts(
+                profile_id=params.get("profileId") if isinstance(params.get("profileId"), str) else None,
+                project_id=params.get("projectId") if isinstance(params.get("projectId"), str) else None,
+                kind=params.get("kind") if isinstance(params.get("kind"), str) else None,
+                query=str(params.get("query") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "artifacts.register":
+            res = self._workspace_services().register_artifact(
+                kind=str(params.get("kind") or "file"),
+                name=str(params.get("name") or "Untitled"),
+                mime_type=str(params.get("mimeType") or "application/octet-stream"),
+                file_path=str(params.get("filePath") or ""),
+                project_id=str(params.get("projectId") or "default"),
+                profile_id=params.get("profileId") if isinstance(params.get("profileId"), str) else None,
+                session_id=str(params.get("sessionId") or ""),
+                task_id=str(params.get("taskId") or ""),
+                size_bytes=int(params.get("sizeBytes") or 0),
+                preview_text=str(params.get("previewText") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "artifacts.delete":
+            res = self._workspace_services().delete_artifact(str(params.get("artifactId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "starmap.build":
+            res = self._workspace_services().build_starmap(
+                memories=params.get("memories") if isinstance(params.get("memories"), list) else [],
+                skills=params.get("skills") if isinstance(params.get("skills"), list) else [],
+                sessions=params.get("sessions") if isinstance(params.get("sessions"), list) else [],
+                profile_id=params.get("profileId") if isinstance(params.get("profileId"), str) else None,
+                project_id=params.get("projectId") if isinstance(params.get("projectId"), str) else None,
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "session_import.preview":
+            res = self._workspace_services().preview_session_import(
+                str(params.get("rawText") or ""),
+                format_hint=str(params.get("format") or "json"),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "session_import.commit":
+            res = self._workspace_services().commit_session_import(
+                str(params.get("rawText") or ""),
+                format_hint=str(params.get("format") or "json"),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
             return True
 
         if msg_type == "shutdown":

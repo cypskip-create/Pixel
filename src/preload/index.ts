@@ -381,6 +381,31 @@ const bridge: CypsBridge = {
     webhookHistory: (limit = 50) => ipcRenderer.invoke(CH.gatewayWebhookHistory, limit),
   },
 
+  profiles: {
+    list: () => ipcRenderer.invoke(CH.profilesList),
+    create: (input: { name: string; description?: string; instructions?: string; providerOverride?: string; modelOverride?: string }) =>
+      ipcRenderer.invoke(CH.profilesCreate, input),
+    switch: (profileId: string) => ipcRenderer.invoke(CH.profilesSwitch, profileId),
+    update: (profileId: string, patch: Record<string, unknown>) => ipcRenderer.invoke(CH.profilesUpdate, profileId, patch),
+    delete: (profileId: string) => ipcRenderer.invoke(CH.profilesDelete, profileId),
+  },
+
+  artifacts: {
+    list: (input?: { profileId?: string; projectId?: string; kind?: string; query?: string }) =>
+      ipcRenderer.invoke(CH.artifactsList, input),
+    register: (input: Record<string, unknown>) => ipcRenderer.invoke(CH.artifactsRegister, input),
+    delete: (artifactId: string) => ipcRenderer.invoke(CH.artifactsDelete, artifactId),
+  },
+
+  starmap: {
+    build: () => ipcRenderer.invoke(CH.starmapBuild),
+  },
+
+  sessionImport: {
+    preview: (rawText: string, format = 'json') => ipcRenderer.invoke(CH.sessionImportPreview, rawText, format),
+    commit: (rawText: string, format = 'json') => ipcRenderer.invoke(CH.sessionImportCommit, rawText, format),
+  },
+
   proceduralSkills: {
     list: () => ipcRenderer.invoke(CH.proceduralSkillsList) as Promise<import('../shared/types').ProceduralSkillView[]>,
     createDraft: (markdown: string) =>

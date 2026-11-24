@@ -107,13 +107,6 @@ class WebhookRegistry:
         if len(body) > MAX_HTTP_BODY_BYTES:
             return {"ok": False, "status": 413, "error": "Webhook payload exceeds 1 MiB limit."}
 
-        # Rate limiting
-        hits = [ts for ts in self._rate_hits.get(route_id, []) if t - ts < 60.0]
-        if len(hits) >= int(route["rateLimitPerMin"]):
-            return {"ok": False, "status": 429, "error": "Webhook rate limit exceeded."}
-        hits.append(t)
-        self._rate_hits[route_id] = hits
-
         lower_headers = {k.lower(): v for k, v in headers.items()}
         sig_header = (
             lower_headers.get("x-pixel-signature-256")
@@ -124,24 +117,32 @@ class WebhookRegistry:
         if sig_header.lower().startswith("sha256="):
             sig_header = sig_header[7:].strip()
 
+        # Verify HMAC-SHA256 signature BEFORE consuming route rate-limit quota so spoofed floods cannot DoS valid deliveries.
         expected = compute_hmac_sha256(self._secrets.get(route_id, ""), body)
         if not sig_header or not hmac.compare_digest(expected, sig_header.lower()):
             self._record({"routeId": route_id, "at": t, "ok": False, "reason": "invalid_signature"})
             return {"ok": False, "status": 401, "error": "Invalid webhook HMAC-SHA256 signature."}
 
-        # Replay protection via delivery ID
+        # Rate limiting (only on authenticated deliveries)
+        hits = [ts for ts in self._rate_hits.get(route_id, []) if t - ts < 60.0]
+        if len(hits) >= int(route["rateLimitPerMin"]):
+            return {"ok": False, "status": 429, "error": "Webhook rate limit exceeded."}
+        hits.append(t)
+        self._rate_hits[route_id] = hits
+
+        # Replay protection scoped strictly to (route_id, delivery_id)
         delivery_id = (
             lower_headers.get("x-pixel-delivery")
             or lower_headers.get("x-github-delivery")
             or hashlib.sha256(body).hexdigest()[:24]
         ).strip()
-        # Prune old delivery IDs > 1 hour
+        scoped_delivery_key = f"{route_id}:{delivery_id}"
         for did in [k for k, ts in self._seen_deliveries.items() if t - ts > 3600.0]:
             self._seen_deliveries.pop(did, None)
-        if delivery_id in self._seen_deliveries:
+        if scoped_delivery_key in self._seen_deliveries:
             self._record({"routeId": route_id, "deliveryId": delivery_id, "at": t, "ok": False, "reason": "replay"})
             return {"ok": False, "status": 409, "error": "Duplicate webhook delivery rejected (replay protection)."}
-        self._seen_deliveries[delivery_id] = t
+        self._seen_deliveries[scoped_delivery_key] = t
 
         event_name = (lower_headers.get("x-pixel-event") or lower_headers.get("x-github-event") or "webhook").strip()
         filters = route.get("eventFilters") or []
@@ -238,7 +239,12 @@ class GatewayHttpServer:
                     if not dev:
                         self._send_json(401, {"ok": False, "error": "Unauthorized: valid paired device bearer token required."})
                         return
-                    self._send_json(200, {"ok": True, "device": dev["id"], "sessions": parent.on_list_sessions()})
+                    all_sessions = parent.on_list_sessions()
+                    scoped = [
+                        s for s in all_sessions
+                        if s.get("accountId") == dev["id"] and s.get("projectId") == dev["projectId"]
+                    ]
+                    self._send_json(200, {"ok": True, "device": dev["id"], "projectId": dev["projectId"], "sessions": scoped})
                     return
                 self._send_json(404, {"ok": False, "error": "Not found."})
 

@@ -1,17 +1,55 @@
 import { useState, type FormEvent } from 'react';
 import {
-  Activity, Check, FileText, FolderKanban, FolderOpen, LayoutGrid, MessageSquare,
-  PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings, Trash2, X,
+  Activity, Bot, Check, Clock, Compass, FileText, FolderKanban, FolderOpen, Layers, LayoutGrid, MessageSquare,
+  PanelLeftClose, PanelLeftOpen, Pencil, Plus, Puzzle, Radio, Search, Settings, Share2, Trash2, Upload, User, Webhook, X,
 } from 'lucide-react';
 import type { ConversationSummary, ProjectView } from '@shared/types';
 
-export type WorkspaceView = 'chat' | 'projects' | 'library' | 'tasks' | 'notes' | 'skills' | 'memory' | 'tools' | 'plugins' | 'board' | 'settings';
+export type WorkspaceView =
+  | 'chat'
+  | 'command-center'
+  | 'projects'
+  | 'library'
+  | 'artifacts'
+  | 'tasks'
+  | 'cron'
+  | 'notes'
+  | 'skills'
+  | 'memory'
+  | 'tools'
+  | 'plugins'
+  | 'capabilities'
+  | 'messaging'
+  | 'webhooks'
+  | 'profiles'
+  | 'agents'
+  | 'starmap'
+  | 'session-import'
+  | 'board'
+  | 'settings';
 
-const NAV_ITEMS: Array<{ id: 'projects' | 'library' | 'board' | 'tasks'; label: string; icon: typeof FolderKanban }> = [
+const NAV_ITEMS: Array<{ id: 'command-center' | 'projects' | 'library' | 'board' | 'tasks'; label: string; icon: typeof FolderKanban }> = [
+  { id: 'command-center', label: 'Command Center', icon: Compass },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'library', label: 'Library', icon: FolderOpen },
   { id: 'board', label: 'Pixel Board', icon: LayoutGrid },
   { id: 'tasks', label: 'Running Tasks', icon: Activity },
+];
+
+const DESKTOP_DESTINATIONS: Array<{
+  id: 'capabilities' | 'messaging' | 'webhooks' | 'artifacts' | 'cron' | 'profiles' | 'agents' | 'starmap' | 'session-import';
+  label: string;
+  icon: typeof FolderKanban;
+}> = [
+  { id: 'capabilities', label: 'Capabilities', icon: Puzzle },
+  { id: 'messaging', label: 'Messaging', icon: Radio },
+  { id: 'webhooks', label: 'Webhooks', icon: Webhook },
+  { id: 'artifacts', label: 'Artifacts', icon: Layers },
+  { id: 'cron', label: 'Schedules', icon: Clock },
+  { id: 'profiles', label: 'Profiles', icon: User },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'starmap', label: 'Starmap', icon: Share2 },
+  { id: 'session-import', label: 'Import Session', icon: Upload },
 ];
 
 interface WorkspaceSidebarProps {
@@ -98,6 +136,24 @@ export function WorkspaceSidebar({
           >
             <Icon size={15} aria-hidden="true" /><span>{label}</span>
             {id === 'tasks' && activeTaskCount > 0 ? <span className="workspace-nav-count">{activeTaskCount}</span> : null}
+          </button>
+        ))}
+      </nav>
+
+      <div className="workspace-sidebar-divider" aria-hidden="true" />
+
+      <nav className="workspace-sidebar-nav" aria-label="Desktop destinations">
+        {DESKTOP_DESTINATIONS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className={`workspace-nav-item ${view === id ? 'is-active' : ''}`}
+            aria-label={label}
+            aria-current={view === id ? 'page' : undefined}
+            onClick={() => onViewChange(id)}
+            title={label}
+          >
+            <Icon size={15} aria-hidden="true" /><span>{label}</span>
           </button>
         ))}
       </nav>

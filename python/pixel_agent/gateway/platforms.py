@@ -81,32 +81,32 @@ def segment_text(text: str, max_chars: int) -> list[str]:
 
 
 PLATFORM_INVENTORY: tuple[dict[str, Any], ...] = (
-    {"id": "telegram", "name": "Telegram", "tier": "primary", "maxChars": 4096, "auth": "bot_token", "supportsPolling": True, "supportsAttachments": True},
-    {"id": "discord", "name": "Discord", "tier": "primary", "maxChars": 2000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "slack", "name": "Slack", "tier": "primary", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "whatsapp_cloud", "name": "WhatsApp Cloud", "tier": "primary", "maxChars": 4096, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "matrix", "name": "Matrix", "tier": "primary", "maxChars": 8000, "auth": "access_token", "supportsPolling": True, "supportsAttachments": True},
-    {"id": "email", "name": "Email (SMTP/IMAP)", "tier": "primary", "maxChars": 32000, "auth": "credentials", "supportsPolling": True, "supportsAttachments": True},
-    {"id": "teams", "name": "Microsoft Teams", "tier": "extended", "maxChars": 4000, "auth": "webhook_or_bot", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "google_chat", "name": "Google Chat", "tier": "extended", "maxChars": 4096, "auth": "webhook_or_oauth", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "mattermost", "name": "Mattermost", "tier": "extended", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "feishu", "name": "Feishu / Lark", "tier": "extended", "maxChars": 4000, "auth": "app_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "dingtalk", "name": "DingTalk", "tier": "extended", "maxChars": 4000, "auth": "webhook_secret", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "line", "name": "LINE", "tier": "extended", "maxChars": 5000, "auth": "channel_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "ntfy", "name": "ntfy", "tier": "extended", "maxChars": 4096, "auth": "bearer_optional", "supportsPolling": True, "supportsAttachments": False},
-    {"id": "irc", "name": "IRC", "tier": "extended", "maxChars": 400, "auth": "nick_pass", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "signal", "name": "Signal", "tier": "extended", "maxChars": 4096, "auth": "signal_cli_rest", "supportsPolling": True, "supportsAttachments": True},
-    {"id": "sms", "name": "SMS (Twilio)", "tier": "extended", "maxChars": 1600, "auth": "account_sid_token", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "wecom", "name": "WeCom", "tier": "extended", "maxChars": 2048, "auth": "corp_secret", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "weixin", "name": "Weixin", "tier": "extended", "maxChars": 2048, "auth": "app_secret", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "qqbot", "name": "QQBot", "tier": "extended", "maxChars": 4000, "auth": "app_secret", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "bluebubbles", "name": "BlueBubbles", "tier": "extended", "maxChars": 4096, "auth": "server_password", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "simplex", "name": "SimpleX", "tier": "extended", "maxChars": 4096, "auth": "cli_ws", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "whatsapp", "name": "WhatsApp Bridge", "tier": "extended", "maxChars": 4096, "auth": "bridge_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "a2a", "name": "Agent-to-Agent (A2A)", "tier": "extended", "maxChars": 16000, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
-    {"id": "buzz", "name": "Buzz", "tier": "extended", "maxChars": 4096, "auth": "api_key", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "photon", "name": "Photon", "tier": "extended", "maxChars": 4096, "auth": "api_key", "supportsPolling": False, "supportsAttachments": False},
-    {"id": "raft", "name": "Raft", "tier": "extended", "maxChars": 4096, "auth": "api_key", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "telegram", "name": "Telegram", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4096, "auth": "bot_token", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "discord", "name": "Discord", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 2000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "slack", "name": "Slack", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "whatsapp_cloud", "name": "WhatsApp Cloud", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 4096, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "matrix", "name": "Matrix", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 8000, "auth": "access_token", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "email", "name": "Email (SMTP/IMAP)", "tier": "primary", "supportLevel": "full_adapter", "maxChars": 32000, "auth": "credentials", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "teams", "name": "Microsoft Teams", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "webhook_or_bot", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "google_chat", "name": "Google Chat", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "webhook_or_oauth", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "mattermost", "name": "Mattermost", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "bot_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "feishu", "name": "Feishu / Lark", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "app_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "dingtalk", "name": "DingTalk", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "webhook_secret", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "line", "name": "LINE", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 5000, "auth": "channel_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "ntfy", "name": "ntfy", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "bearer_optional", "supportsPolling": True, "supportsAttachments": False},
+    {"id": "irc", "name": "IRC", "tier": "extended", "supportLevel": "external_dep_required", "maxChars": 400, "auth": "nick_pass", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "signal", "name": "Signal", "tier": "extended", "supportLevel": "external_dep_required", "maxChars": 4096, "auth": "signal_cli_rest", "supportsPolling": True, "supportsAttachments": True},
+    {"id": "sms", "name": "SMS (Twilio)", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 1600, "auth": "account_sid_token", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "wecom", "name": "WeCom", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 2048, "auth": "corp_secret", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "weixin", "name": "Weixin", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 2048, "auth": "app_secret", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "qqbot", "name": "QQBot", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4000, "auth": "app_secret", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "bluebubbles", "name": "BlueBubbles", "tier": "extended", "supportLevel": "external_dep_required", "maxChars": 4096, "auth": "server_password", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "simplex", "name": "SimpleX", "tier": "extended", "supportLevel": "external_dep_required", "maxChars": 4096, "auth": "cli_ws", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "whatsapp", "name": "WhatsApp Bridge", "tier": "extended", "supportLevel": "external_dep_required", "maxChars": 4096, "auth": "bridge_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "a2a", "name": "Agent-to-Agent (A2A)", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 16000, "auth": "bearer_token", "supportsPolling": False, "supportsAttachments": True},
+    {"id": "buzz", "name": "Buzz", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "api_key", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "photon", "name": "Photon", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "api_key", "supportsPolling": False, "supportsAttachments": False},
+    {"id": "raft", "name": "Raft", "tier": "extended", "supportLevel": "outbound_webhook", "maxChars": 4096, "auth": "api_key", "supportsPolling": False, "supportsAttachments": False},
 )
 
 
@@ -451,6 +451,45 @@ class GenericWebhookPlatformAdapter(BasePlatformAdapter):
             return {"ok": False, "error": f"{self.platform_id} delivery failed: {exc}"}
 
 
+class EmailAdapter(BasePlatformAdapter):
+    """SMTP/IMAP Email adapter using Python stdlib (`smtplib` / `email.message`)."""
+
+    platform_id = "email"
+    max_chars = 32000
+
+    def validate_config(self) -> tuple[bool, Optional[str]]:
+        if not str(self.config.get("smtpHost") or "").strip() or not str(self.config.get("fromAddress") or "").strip():
+            return False, "Email requires smtpHost and fromAddress."
+        return True, None
+
+    def send_message(self, msg: OutboundMessage) -> dict[str, Any]:
+        ok, err = self.validate_config()
+        if not ok:
+            return {"ok": False, "error": err}
+        import smtplib
+        from email.message import EmailMessage
+
+        em = EmailMessage()
+        em["From"] = str(self.config["fromAddress"]).strip()
+        em["To"] = msg.chat_id
+        em["Subject"] = str(self.config.get("defaultSubject") or "Pixel Reply")
+        em.set_content(msg.text[: self.max_chars])
+        host = str(self.config["smtpHost"]).strip()
+        port = int(self.config.get("smtpPort") or 587)
+        username = str(self.config.get("username") or "").strip()
+        password = str(self.config.get("password") or "").strip()
+        try:
+            with smtplib.SMTP(host, port, timeout=15.0) as smtp:
+                if bool(self.config.get("useTls", True)):
+                    smtp.starttls(context=ssl.create_default_context())
+                if username and password:
+                    smtp.login(username, password)
+                smtp.send_message(em)
+            return {"ok": True, "delivered": True}
+        except Exception as exc:
+            return {"ok": False, "error": f"SMTP delivery failed: {exc}"}
+
+
 def create_platform_adapter(platform_id: str, config: Optional[dict[str, Any]] = None) -> BasePlatformAdapter:
     pid = (platform_id or "").strip().lower()
     if pid == "telegram":
@@ -463,5 +502,7 @@ def create_platform_adapter(platform_id: str, config: Optional[dict[str, Any]] =
         return WhatsAppCloudAdapter(config)
     if pid == "matrix":
         return MatrixAdapter(config)
+    if pid == "email":
+        return EmailAdapter(config)
     meta = next((p for p in PLATFORM_INVENTORY if p["id"] == pid), None)
     return GenericWebhookPlatformAdapter(pid or "generic", max_chars=int(meta["maxChars"]) if meta else 4096, config=config)
