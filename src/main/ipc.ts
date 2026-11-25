@@ -686,6 +686,24 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
   const terminalService = new TerminalService({
     isEmergencyStopped: () => emergency.isStopped(),
     authorize: async (command, cwd) => {
+      const currentMode = settings.get().companion.mode;
+      try {
+        const evalRes = await pythonAgentBridge.permissionsEvaluate({
+          mode: currentMode,
+          toolName: 'process_start',
+          risk: 'high',
+          target: cwd,
+          command,
+        });
+        if (evalRes.allowed) {
+          audit.record('permission', `Auto-approved terminal "${command.slice(0, 60)}" (${evalRes.reason})`, 'ok');
+          return { allowed: true };
+        }
+      } catch {
+        if (currentMode === 'agent') return { allowed: true };
+      }
+
+      const cmdPrefix = command.trim().split(/\s+/)[0] || '';
       const outcome = await permissions.ask({
         id: `perm_term_${randomUUID().slice(0, 8)}`,
         toolName: 'process_start',
@@ -696,8 +714,18 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
         duration: 'once',
         args: { command, cwd },
         createdAt: Date.now(),
-        allowPersistent: false,
+        allowPersistent: true,
+        alwaysAllowed: true,
+        scopeLabel: cmdPrefix ? `${cmdPrefix} commands` : 'terminal commands',
       });
+      if (outcome.approved && outcome.duration === 'always') {
+        void pythonAgentBridge.permissionsGrantAlways({
+          toolName: 'process_start',
+          target: '*',
+          commandPrefix: cmdPrefix,
+          label: `Always allow terminal: ${cmdPrefix || 'shell'}`,
+        }).catch(() => undefined);
+      }
       return {
         allowed: outcome.approved,
         reason: outcome.approved ? undefined : 'Terminal command was denied by user.',

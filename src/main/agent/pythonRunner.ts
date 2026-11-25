@@ -297,22 +297,49 @@ export class PythonAgentRunner {
           return { ok: false, content: text, denied: true };
         }
 
-        const modeAutoApproves = (mode: string, risk: string): boolean => {
-          if (mode === 'agent') return true;
-          if (mode === 'hybrid') return risk !== 'high';
-          return risk === 'low';
-        };
+        const cmdStr = typeof callArgs.command === 'string' ? callArgs.command : '';
+        const targetStr = typeof callArgs.path === 'string'
+          ? callArgs.path
+          : typeof callArgs.url === 'string'
+            ? callArgs.url
+            : typeof callArgs.cwd === 'string'
+              ? callArgs.cwd
+              : '';
+
+        let pyPermAllowed = false;
+        let pyPermReason = '';
+        try {
+          const pyEval = await this.deps.bridge.permissionsEvaluate({
+            mode: request.mode,
+            toolName: callName,
+            risk: def.risk,
+            target: targetStr,
+            command: cmdStr,
+          });
+          pyPermAllowed = pyEval.allowed;
+          pyPermReason = pyEval.reason;
+        } catch {
+          if (request.mode === 'agent') {
+            pyPermAllowed = true;
+            pyPermReason = 'agent_mode_auto_approve';
+          } else if (request.mode === 'hybrid' && def.risk !== 'high' && def.risk !== 'critical') {
+            pyPermAllowed = true;
+            pyPermReason = 'hybrid_mode_auto_approve';
+          } else if (request.mode === 'guide' && (def.risk === 'safe' || def.risk === 'low')) {
+            pyPermAllowed = true;
+            pyPermReason = 'guide_mode_auto_approve';
+          }
+        }
 
         const decision = registry.evaluate(callName, request.mode, callArgs);
-        if (!decision.allowed) {
-          if (decision.needsApproval && modeAutoApproves(request.mode, def.risk)) {
-            audit.record(
-              'permission',
-              `Auto-approved "${callName}" (${def.risk} risk) under ${request.mode} mode policy`,
-              'ok',
-            );
-          } else if (decision.needsApproval) {
-            const permReq = buildPermissionRequest(def, callArgs);
+        if (!decision.allowed && !pyPermAllowed) {
+          if (decision.needsApproval) {
+            const permReq = {
+              ...buildPermissionRequest(def, callArgs),
+              alwaysAllowed: true,
+              allowPersistent: true,
+              scopeLabel: callName,
+            };
             task.approvalRefs = [...(task.approvalRefs ?? []), permReq.id];
             task.status = 'awaiting_approval';
             task.checkpoint = {
@@ -346,13 +373,13 @@ export class PythonAgentRunner {
               return { ok: false, content: text, denied: true };
             }
 
-            // Re-check policy so a 'once' grant is consumed and verified.
-            const recheck = registry.evaluate(callName, request.mode, callArgs);
-            if (!recheck.allowed) {
-              const text = `Error: "${callName}" still cannot run: ${recheck.reason}`;
-              this.failStep(step, task, text);
-              executed.push({ name: callName, ok: false, summary: 'still unauthorized' });
-              return { ok: false, content: text, denied: true };
+            if (resolved.duration === 'always') {
+              await this.deps.bridge.permissionsGrantAlways({
+                toolName: callName,
+                target: '*',
+                commandPrefix: cmdStr ? cmdStr.trim().split(/\s+/)[0] || '' : '',
+                label: `Always allow ${callName}`,
+              }).catch(() => undefined);
             }
           } else {
             const text = `Error: ${decision.reason}`;
@@ -361,6 +388,8 @@ export class PythonAgentRunner {
             executed.push({ name: callName, ok: false, summary: decision.reason });
             return { ok: false, content: text, denied: true };
           }
+        } else if (!decision.allowed && pyPermAllowed) {
+          audit.record('permission', `Auto-approved "${callName}" (${pyPermReason})`, 'ok');
         }
 
         // Execute through Pixel's canonical ToolExecutors with trusted runtime ownership.

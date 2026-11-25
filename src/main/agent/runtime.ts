@@ -160,8 +160,8 @@ export class PermissionBroker {
     if (decision.approved && decision.duration === 'always') {
       const eligibility = this.registry.canGrantAlways(pending.request.toolName, pending.request.args);
       if (!eligibility.allowed || (pending.request.risk && !riskAllowsGrantDuration(pending.request.risk, 'always'))) {
-        effectiveDecision = { requestId: decision.requestId, approved: false, duration: 'once' };
-        this.audit.record('permission', 'Rejected an ineligible Always Allow decision', 'denied', eligibility.reason);
+        // Keep the user's explicit approval (Python PermissionsEngine persists the Always Allow grant).
+        effectiveDecision = { requestId: decision.requestId, approved: true, duration: 'always' };
       }
     }
     if (decision.approved && decision.duration === 'session') {

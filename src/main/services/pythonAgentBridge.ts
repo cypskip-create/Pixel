@@ -788,6 +788,53 @@ export class PythonAgentBridge {
     return this.request('drawing.map_coord', input);
   }
 
+  permissionsEvaluate(input: {
+    mode: string;
+    toolName: string;
+    risk: string;
+    target?: string;
+    command?: string;
+  }): Promise<{
+    allowed: boolean;
+    needsApproval: boolean;
+    alwaysAllowed: boolean;
+    reason: string;
+    grantId?: string;
+  }> {
+    return this.request('permissions.evaluate', input);
+  }
+
+  permissionsGrantAlways(input: {
+    toolName: string;
+    target?: string;
+    commandPrefix?: string;
+    label?: string;
+  }): Promise<{ ok: boolean; duplicate?: boolean; grant?: Record<string, unknown> }> {
+    return this.request('permissions.grant_always', input);
+  }
+
+  permissionsListGrants(): Promise<{ grants: Array<Record<string, unknown>> }> {
+    return this.request('permissions.list_grants', {});
+  }
+
+  permissionsRevokeGrant(grantId: string): Promise<{ ok: boolean; revoked: boolean }> {
+    return this.request('permissions.revoke_grant', { grantId });
+  }
+
+  memoryHermesTool(input: {
+    action: string;
+    target?: string;
+    content?: string;
+    old_text?: string;
+    profileId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.request('memory.hermes_tool', input);
+  }
+
+  memoryHermesList(profileId = 'default'): Promise<Record<string, unknown>> {
+    return this.request('memory.hermes_list', { profileId });
+  }
+
   runTurn(options: PythonTurnStartOptions): Promise<PythonTurnCompleteResult> {
     const child = this.ensureStarted();
     return new Promise<PythonTurnCompleteResult>((resolve) => {

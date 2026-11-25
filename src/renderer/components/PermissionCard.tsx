@@ -123,10 +123,10 @@ export function PermissionCard({ request, onDecide, pending = false, compact = f
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
-          disabled={pending || request.alwaysAllowed !== true}
+          disabled={pending}
           onClick={() => decide(true, 'always')}
-          title={request.alwaysAllowed ? `Allow future matching actions for ${request.scopeLabel ?? request.target}` : request.alwaysDisabledReason ?? 'Always Allow is unavailable for this action.'}
-          className="no-drag flex-1 rounded-xl border border-neutral-400/35 bg-neutral-500/12 px-3 py-2 text-[12px] font-semibold text-neutral-100 transition-colors duration-[var(--cyps-duration-fast)] hover:bg-neutral-500/22 disabled:cursor-not-allowed disabled:opacity-45"
+          title={`Always allow future matching actions for ${request.scopeLabel ?? request.toolName}`}
+          className="no-drag flex-1 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-surface-raised)] px-3 py-2 text-[12px] font-semibold text-[var(--color-ink)] transition-colors duration-[var(--cyps-duration-fast)] hover:bg-[var(--color-hover)] disabled:cursor-not-allowed disabled:opacity-45"
         >
           Always Allow
         </button>

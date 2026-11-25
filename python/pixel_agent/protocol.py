@@ -28,11 +28,56 @@ from .cron_tools import list_automation_blueprints, scan_scheduled_prompt
 from .media_pipeline import multimodal_provider_catalog
 from .tools.todo import TodoManager
 from .mcp_health import McpHealthController
+from .memory.hermes_memory import HermesMemoryStore
+from .security.permissions_engine import PermissionsEngine
 from .screen_drawing import (
     SCREEN_DRAWING_TOOL_SPECS,
     ScreenDrawingEngine,
     choose_computer_use_resolution,
     normalize_to_display,
+)
+
+HERMES_MEMORY_TOOL_DEF: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "memory",
+        "description": (
+            "Save, update, or remove curated persistent memory across sessions (Hermes memory). "
+            "Use target='user' for durable user facts (name, role, communication preferences, workflows) "
+            "and target='memory' for durable environment/project notes. Never store ephemeral chat noise or secrets."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["add", "replace", "patch", "remove", "read"],
+                    "description": "Operation to perform on persistent memory.",
+                },
+                "target": {
+                    "type": "string",
+                    "enum": ["user", "memory"],
+                    "description": "'user' for USER.md (user profile/name/preferences) or 'memory' for MEMORY.md (project/agent notes).",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Concise durable fact to save or replace with (required for add/replace/patch).",
+                },
+                "old_text": {
+                    "type": "string",
+                    "description": "Unique substring identifying the entry to replace/patch/remove.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+}
+
+HERMES_MEMORY_SYSTEM_GUIDANCE = (
+    "Persistent Curated Memory: You have the `memory` tool backed by durable `USER.md` (user profile) and "
+    "`MEMORY.md` (project/environment notes). Whenever the user shares durable personal facts (such as their name, "
+    "preferences, role, or standing workflow rules) or you discover important durable project conventions, call "
+    "`memory(action='add', target='user'|'memory', content='...')` immediately. Do NOT store trivial/ephemeral chatter or secrets."
 )
 
 MAX_FRAME_BYTES = 4 * 1024 * 1024  # 4 MiB guard against unbounded frame memory
@@ -63,6 +108,8 @@ class PixelAgentProtocolServer:
         self._prompt_builder = PromptBuilder()
         self._todos = TodoManager()
         self._mcp_health = McpHealthController()
+        self._hermes_memory = HermesMemoryStore()
+        self._permissions = PermissionsEngine()
         self._drawing = ScreenDrawingEngine()
         self._gateway_provider_config: Optional[ProviderConfig] = None
         self._gateway_tools: list[dict[str, Any]] = []
@@ -250,20 +297,58 @@ class PixelAgentProtocolServer:
                 pm = self._plugin_manager()
                 raw_allowlist = params.get("allowedTools")
                 explicit_allowlist = [str(x) for x in raw_allowlist] if isinstance(raw_allowlist, list) else None
-                effective_tools = pm.filter_tools(tools, explicit_allowlist=explicit_allowlist)
+                effective_tools = list(pm.filter_tools(tools, explicit_allowlist=explicit_allowlist))
+                has_memory_tool = any(
+                    (isinstance(t, dict) and ((t.get("function") or {}).get("name") == "memory" or t.get("name") == "memory"))
+                    for t in effective_tools
+                )
+                if not has_memory_tool:
+                    effective_tools.append(HERMES_MEMORY_TOOL_DEF)
+
+                active_profile_id = str(params.get("profileId") or "default")
+                try:
+                    ws_profile = self._workspace_services().get_active_profile()
+                    if isinstance(ws_profile, dict) and ws_profile.get("id"):
+                        active_profile_id = str(ws_profile["id"])
+                except Exception:
+                    pass
+
+                # Inject Hermes curated USER.md + MEMORY.md snapshot into system prompt
+                mem_block = self._hermes_memory.snapshot_prompt_block(active_profile_id)
+                mem_addendum = f"{HERMES_MEMORY_SYSTEM_GUIDANCE}\n\n{mem_block}" if mem_block else HERMES_MEMORY_SYSTEM_GUIDANCE
+                enriched_messages = [dict(m) if isinstance(m, dict) else m for m in messages]
+                if enriched_messages and isinstance(enriched_messages[0], dict) and enriched_messages[0].get("role") == "system":
+                    existing_sys = str(enriched_messages[0].get("content") or "")
+                    if "Persistent Curated Memory:" not in existing_sys:
+                        enriched_messages[0]["content"] = f"{existing_sys}\n\n{mem_addendum}".strip()
+                else:
+                    enriched_messages.insert(0, {"role": "system", "content": mem_addendum})
+
+                def _exec_tool(cid: str, nm: str, ag: dict[str, Any], ts: float) -> dict[str, Any]:
+                    if nm == "memory":
+                        res = self._hermes_memory.execute_tool(
+                            action=str(ag.get("action") or "read"),
+                            target=str(ag.get("target") or "memory"),
+                            content=str(ag.get("content") or ""),
+                            old_text=str(ag.get("old_text") or ""),
+                            profile_id=active_profile_id,
+                        )
+                        return {"ok": bool(res.get("ok")), "content": json.dumps(res, ensure_ascii=False)}
+                    return self._request_tool(request_id, cid, nm, ag, ts)
+
                 run_agent_turn(
                     request_id=request_id,
-                    messages=messages,
+                    messages=enriched_messages,
                     tools=effective_tools,
                     provider_config=provider_config,
                     fallback_configs=fallback_configs,
                     budget=budget,
                     cancel_event=cancel_event,
                     emit=self.send,
-                    request_tool_execution=lambda cid, nm, ag, ts: self._request_tool(request_id, cid, nm, ag, ts),
+                    request_tool_execution=_exec_tool,
                     tool_timeout_s=tool_timeout_s,
                     hook_dispatcher=lambda ev, pl: pm.dispatch_hook(ev, pl),
-                    tool_policy_check=lambda nm: pm.is_tool_allowed(nm, explicit_allowlist=explicit_allowlist),
+                    tool_policy_check=lambda nm: True if nm == "memory" else pm.is_tool_allowed(nm, explicit_allowlist=explicit_allowlist),
                 )
             except Exception as exc:
                 record_crash("turn worker exception", type(exc), exc, exc.__traceback__)
@@ -943,6 +1028,58 @@ class PixelAgentProtocolServer:
 
         if msg_type == "drawing.tools":
             self.send({"id": req_id, "ok": True, "result": {"tools": SCREEN_DRAWING_TOOL_SPECS}})
+            return True
+
+        # Hermes Curated Memory & Python 3-Tier Permissions RPCs
+        if msg_type == "memory.hermes_tool":
+            res = self._hermes_memory.execute_tool(
+                action=str(params.get("action") or "read"),
+                target=str(params.get("target") or "memory"),
+                content=str(params.get("content") or ""),
+                old_text=str(params.get("old_text") or ""),
+                profile_id=str(params.get("profileId") or "default"),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "memory.hermes_list":
+            res = self._hermes_memory.list_all(profile_id=str(params.get("profileId") or "default"))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "permissions.evaluate":
+            res = self._permissions.evaluate(
+                mode=str(params.get("mode") or "agent"),
+                tool_name=str(params.get("toolName") or ""),
+                risk=str(params.get("risk") or "medium"),
+                target=str(params.get("target") or ""),
+                command=str(params.get("command") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "permissions.grant_always":
+            res = self._permissions.grant_always(
+                tool_name=str(params.get("toolName") or "*"),
+                target=str(params.get("target") or "*"),
+                command_prefix=str(params.get("commandPrefix") or ""),
+                label=str(params.get("label") or ""),
+            )
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "permissions.list_grants":
+            self.send({"id": req_id, "ok": True, "result": {"grants": self._permissions.list_grants()}})
+            return True
+
+        if msg_type == "permissions.revoke_grant":
+            res = self._permissions.revoke_grant(str(params.get("grantId") or ""))
+            self.send({"id": req_id, "ok": True, "result": res})
+            return True
+
+        if msg_type == "permissions.clear_grants":
+            res = self._permissions.clear_grants()
+            self.send({"id": req_id, "ok": True, "result": res})
             return True
 
         if msg_type == "shutdown":
