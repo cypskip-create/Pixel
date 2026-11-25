@@ -880,13 +880,10 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
     fallbackToTypescript: (opts) => agent.run(opts),
   });
 
-  const isAgentBusy = (): boolean => agent.isRunning || pythonRunner.isRunning;
+  const isAgentBusy = (): boolean => pythonRunner.isRunning;
 
-  const resolveRuntimeEngine = (): 'typescript' | 'python' => {
-    const envOverride = process.env.PIXEL_AGENT_RUNTIME?.trim().toLowerCase();
-    if (envOverride === 'python' || envOverride === 'typescript') return envOverride;
-    return settings.get().agent?.runtimeEngine === 'typescript' ? 'typescript' : 'python';
-  };
+  // Python-only agentic runtime: TypeScript agentic fallback removed.
+  const resolveRuntimeEngine = (): 'python' => 'python';
 
   const startPushToTalk = (): void => {
     if (activePtt) return;
@@ -1589,7 +1586,7 @@ export async function registerIpcHandlers(context: IpcContext): Promise<{
       temperature: current.provider.temperature,
       maxTokens: current.provider.maxTokens,
     };
-    const activeRunner = resolveRuntimeEngine() === 'python' ? pythonRunner : agent;
+    const activeRunner = resolveRuntimeEngine() === 'python' ? pythonRunner : pythonRunner;
     void activeRunner.run(runOptions).then((result) => {
       if (!current.privacy.automaticMemory || !hasVerifiedTaskOutcome(result.task)) return;
       const verified = result.task.steps.filter((step) => step.status === 'verified').slice(0, 2);

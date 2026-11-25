@@ -17,6 +17,8 @@ interface WorkspaceComposerProps {
   onToggleListening: () => void;
   listening: boolean;
   onNotice: (message: string) => void;
+  /** Optional compact thinking animation placed beside the Send/Stop button on the right. */
+  thinkingSlot?: React.ReactNode;
 }
 
 const MAX_ATTACHMENTS = 4;
@@ -25,7 +27,7 @@ const MAX_COMPOSER_HEIGHT = 160;
 export function WorkspaceComposer({
   draft, onDraftChange, onSubmit, onStop, streaming, disabled, attachments,
   onAttach, onRemoveAttachment, onAttachScreenshot, onToggleListening,
-  listening, onNotice,
+  listening, onNotice, thinkingSlot,
 }: WorkspaceComposerProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -119,15 +121,18 @@ export function WorkspaceComposer({
           <span id="workspace-composer-hint" className="sr-only">Enter sends. Shift plus Enter inserts a new line.</span>
         </div>
 
-        {streaming ? (
-          <button type="button" className="workspace-stop-button" onClick={onStop}>
-            <Square size={13} aria-hidden="true" /> Stop
-          </button>
-        ) : (
-          <button type="button" aria-label="Send message" title="Send" className="workspace-send-button" onClick={onSubmit} disabled={disabled || !hasContent}>
-            <ArrowUp size={17} aria-hidden="true" />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {thinkingSlot ?? null}
+          {streaming ? (
+            <button type="button" className="workspace-stop-button" onClick={onStop}>
+              <Square size={13} aria-hidden="true" /> Stop
+            </button>
+          ) : (
+            <button type="button" aria-label="Send message" title="Send" className="workspace-send-button" onClick={onSubmit} disabled={disabled || !hasContent}>
+              <ArrowUp size={17} aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
 
       <input

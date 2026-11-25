@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { AssistantState, ImageAttachment, Mode } from '@shared/types';
 import { getModeDescriptor } from '@shared/types';
-import { PixelMark } from '@/components/PixelMark';
+import { ThinkingParticleCore } from '@/components/ThinkingParticleCore';
 import { IconButton } from '@/components/IconButton';
 import { ModeSwitcher } from '@/components/ModeSwitcher';
 import { truncate } from '@/lib/format';
@@ -144,8 +144,8 @@ export function InputBar(props: InputBarProps) {
   return (
     <section
       aria-label="Pixel input"
-      style={{ width: BAR_WIDTH }}
-      className="pixel-surface-raised animate-slide-down relative flex flex-col gap-2 rounded-[var(--cyps-radius)] p-2.5"
+      style={{ width: BAR_WIDTH - 16 }}
+      className="relative flex flex-col gap-2 rounded-xl bg-transparent p-1.5"
     >
       {attachments.length > 0 ? (
         <ul className="flex flex-wrap gap-1.5 px-1" aria-label="Attached images">
@@ -176,9 +176,9 @@ export function InputBar(props: InputBarProps) {
       ) : null}
 
       <div className="flex items-end gap-2">
-        {/* The brand stays constant; the state label remains explicit and accessible. */}
+        {/* Thinking particle blob indicator replacing the legacy P mark. */}
         <div className="no-drag flex shrink-0 items-center pb-0.5 pl-0.5" data-state={state} title={`Pixel is ${state}`}>
-          <PixelMark size={22} />
+          <ThinkingParticleCore compact size={28} reducedMotion={!busy && state === 'idle'} label={`Pixel is ${state}`} />
         </div>
 
         <textarea

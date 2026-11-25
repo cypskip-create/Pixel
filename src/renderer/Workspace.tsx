@@ -18,7 +18,6 @@ import { MarkdownMessage } from '@/components/MarkdownMessage';
 import { PermissionCard } from '@/components/PermissionCard';
 import { PixelMark } from '@/components/PixelMark';
 import { AsciiSharkBackground } from '@/components/AsciiSharkBackground';
-import { DynamicIslandHorseCanvas } from '@/components/DynamicIslandHorseCanvas';
 import { ThinkingParticleCore } from '@/components/ThinkingParticleCore';
 import { InteractiveTerminalView } from '@/components/InteractiveTerminalView';
 import { BotCreatorPanel } from '@/components/BotCreatorPanel';
@@ -1041,17 +1040,6 @@ export function Workspace(): React.JSX.Element {
               hasTaskDetails={activeTask !== null}
               onOpenTaskDetails={() => setContextOpen(true)}
             />
-            {activeTask !== null || chat.streaming ? (
-              <div className="flex justify-center pt-2" data-testid="workspace-dynamic-island">
-                <div className="flex w-[328px] flex-col items-center gap-1 overflow-hidden rounded-[26px] border border-[var(--color-border-strong)] bg-[#000000] px-3.5 py-2">
-                  <div className="flex w-full items-center justify-between font-mono text-[10px] text-[var(--color-ink-muted)]">
-                    <span className="truncate">{activeTask?.title || 'Running in background…'}</span>
-                    <span className="text-[var(--color-accent)]">LIVE</span>
-                  </div>
-                  <DynamicIslandHorseCanvas running reducedMotion={settings.companion.reducedMotion} width={296} height={64} />
-                </div>
-              </div>
-            ) : null}
             {pendingApproval}
             {activeTask ? <WorkspaceTaskActivity task={activeTask} onOpenDetails={() => setContextOpen(true)} /> : null}
             {recentOutcome ? (() => {
@@ -1062,7 +1050,7 @@ export function Workspace(): React.JSX.Element {
                 <button type="button" aria-label="Dismiss task result" onClick={() => setRecentOutcome(null)}><X size={14} /></button>
               </div>;
             })() : null}
-            {chat.messages.length === 0 && !chat.streaming && draft.trim().length === 0 ? (
+            {chat.messages.length === 0 && !chat.streaming ? (
               <div className="relative flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-12" data-testid="workspace-centered-hero">
                 <div className="flex w-full max-w-[660px] flex-col items-center gap-6 rounded-3xl bg-[var(--color-app-bg)]/85 px-6 py-7">
                   <h2 className="text-4xl font-light tracking-tight text-[var(--color-ink)]">what&apos;s on your mind?</h2>
@@ -1121,17 +1109,8 @@ export function Workspace(): React.JSX.Element {
                       <div className="min-w-0 flex-1">
                         <div className="workspace-message-meta">
                           <span>Pixel</span>
-                          <span className="text-neutral-200">{chat.model ?? 'Thinking'}</span>
+                          <span className="text-neutral-200">{chat.model ?? 'Working'}</span>
                         </div>
-                        {!chat.content ? (
-                          <div className="my-2">
-                            <ThinkingParticleCore
-                              size={52}
-                              reducedMotion={settings.companion.reducedMotion}
-                              label={chat.reasoning ? 'Thinking & reasoning…' : 'Thinking…'}
-                            />
-                          </div>
-                        ) : null}
                         {chat.reasoning ? <details className="workspace-reasoning" open={settings.display?.reasoningCollapsed === false}><summary>Reasoning details</summary><p>{chat.reasoning}</p></details> : null}
                         {chat.content ? <MarkdownMessage text={chat.content} /> : null}
                       </div>
@@ -1160,6 +1139,16 @@ export function Workspace(): React.JSX.Element {
                   onToggleListening={() => void toggleVoice()}
                   listening={listening}
                   onNotice={setNotice}
+                  thinkingSlot={
+                    chat.streaming || activeTask !== null ? (
+                      <ThinkingParticleCore
+                        compact
+                        size={32}
+                        reducedMotion={settings.companion.reducedMotion}
+                        label={chat.reasoning ? 'Thinking & reasoning…' : 'Thinking…'}
+                      />
+                    ) : null
+                  }
                 />
               </>
             )}

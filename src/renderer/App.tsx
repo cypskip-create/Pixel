@@ -238,9 +238,26 @@ function Companion(): React.JSX.Element {
   /* ---------------------------- surface ---------------------------- */
 
   const islandExpanded = isDynamicIslandExpanded(island.state);
-  const bubbleVisible = islandExpanded && !historyOpen && (chat.showTranscript || chat.streaming || chat.content.length > 0 || chat.error !== null);
+  const bubbleVisible = islandExpanded && !historyOpen && (chat.streaming || chat.error !== null);
+  const wasStreamingRef = useRef(false);
   const hasActiveTask =
     task !== null && ['running', 'planning', 'pause_requested', 'awaiting_approval', 'awaiting_user', 'paused', 'blocked', 'cancelling'].includes(task.status);
+
+  // Auto-collapse and clear the Dynamic Island dropdown once a response finishes.
+  useEffect(() => {
+    if (chat.streaming) {
+      wasStreamingRef.current = true;
+      return;
+    }
+    if (wasStreamingRef.current && !hasActiveTask && permission === null) {
+      wasStreamingRef.current = false;
+      const timer = window.setTimeout(() => {
+        dispatchIsland({ type: 'CLOSE_CLICK' });
+      }, 2200);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [chat.streaming, hasActiveTask, permission, dispatchIsland]);
 
   useEffect(() => {
     dispatchIsland({
@@ -313,10 +330,20 @@ function Companion(): React.JSX.Element {
     if (bridge.kind !== 'ready') return;
     const api = bridge.bridge.permissions;
     if (typeof api.onRequest !== 'function') return;
-    return safeSubscribe<PermissionRequest>(api.onRequest, (request) => {
+    const unsubReq = safeSubscribe<PermissionRequest>(api.onRequest, (request) => {
       setPermission(request);
       setPermissionPending(false);
     });
+    const unsubRes = typeof api.onResolved === 'function'
+      ? safeSubscribe<string>(api.onResolved, (resolvedId) => {
+          setPermission((prev) => (prev && (!resolvedId || prev.id === resolvedId) ? null : prev));
+          setPermissionPending(false);
+        })
+      : () => undefined;
+    return () => {
+      unsubReq();
+      unsubRes();
+    };
   }, [bridge]);
 
   useEffect(() => {
@@ -948,7 +975,6 @@ function Companion(): React.JSX.Element {
           type="button"
           onClick={() => {
             openIsland();
-            void chat.revealTranscript();
           }}
           aria-label={pushToTalkState !== 'idle' ? pushToTalkLabel
             : `Open Pixel. ${island.state === 'RESPONSE_AVAILABLE' ? 'A response is ready. ' : ''}Mode: ${modeDescriptor.label}. ${modeDescriptor.summary}`}
@@ -1077,7 +1103,7 @@ function Companion(): React.JSX.Element {
               onNew={startNewConversation}
               onClose={closeHistory}
             />
-          ) : chat.showTranscript ? (
+          ) : chat.showTranscript && (chat.streaming || chat.error !== null) ? (
             <ConversationTranscript
               messages={chat.messages}
               content={chat.content}
@@ -1102,7 +1128,7 @@ function Companion(): React.JSX.Element {
           ) : null}
 
           {islandExpanded ? (
-            <div className="relative" data-layout-panel>
+            <div className="flex w-full max-w-[460px] flex-col gap-1.5 rounded-2xl border border-[var(--color-border-strong)] bg-[#090909] p-2" data-layout-panel>
               <InputBar
                 mode={mode}
                 state={assistantState}
@@ -1128,51 +1154,56 @@ function Companion(): React.JSX.Element {
                 autoFocus={island.state === 'CLICK_EXPANDED' && !historyOpen}
               />
 
-              <div className="mt-1.5 flex items-center justify-center gap-1 rounded-full bg-[#090909] px-3 py-1">
-                <button
-                  type="button"
-                  onClick={() => historyOpen ? closeHistory() : openHistory()}
-                  aria-label="Recent chats"
-                  aria-expanded={historyOpen}
-                  disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null || bridge.kind !== 'ready'}
-                  className={`grid size-6 place-items-center rounded-md focus-visible:ring-2 focus-visible:ring-neutral-400/70 disabled:opacity-40 ${historyOpen ? 'bg-neutral-300/12 text-neutral-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
-                >
-                  <History aria-hidden="true" className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={openWorkspace}
-                  aria-label="Open Pixel Workspace"
-                  className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-300/12 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
-                >
-                  <LayoutDashboard aria-hidden="true" className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={openSettings}
-                  aria-label="Pixel settings"
-                  className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)] focus-visible:ring-2 focus-visible:ring-neutral-400/70"
-                >
-                  <Settings aria-hidden="true" className="size-3.5" />
-                </button>
-                {busy ? (
+              <div className="flex items-center justify-between border-t border-[var(--color-border)] px-2 pt-1.5">
+                <span className="font-mono text-[10px] text-[var(--color-ink-dim)]">
+                  {modeDescriptor.label} · Python v2
+                </span>
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={chat.stop}
-                    aria-label="Stop answering"
-                    className="grid size-6 place-items-center rounded-md text-neutral-200 hover:bg-neutral-500/20 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
+                    onClick={() => historyOpen ? closeHistory() : openHistory()}
+                    aria-label="Recent chats"
+                    aria-expanded={historyOpen}
+                    disabled={chat.streaming || chat.historyLoading || hasActiveTask || permission !== null || bridge.kind !== 'ready'}
+                    className={`grid size-6 place-items-center rounded-md disabled:opacity-40 ${historyOpen ? 'bg-neutral-300/12 text-neutral-200' : 'text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]'}`}
                   >
-                    <Square aria-hidden="true" className="size-3" />
+                    <History aria-hidden="true" className="size-3.5" />
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={emergencyStop}
-                  aria-label="Emergency stop: block all further actions"
-                  className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-500/20 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-400/70"
-                >
-                  <ShieldAlert aria-hidden="true" className="size-3.5" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={openWorkspace}
+                    aria-label="Open Pixel Workspace"
+                    className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-300/12 hover:text-neutral-200"
+                  >
+                    <LayoutDashboard aria-hidden="true" className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openSettings}
+                    aria-label="Pixel settings"
+                    className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-white/10 hover:text-[var(--color-ink)]"
+                  >
+                    <Settings aria-hidden="true" className="size-3.5" />
+                  </button>
+                  {busy ? (
+                    <button
+                      type="button"
+                      onClick={chat.stop}
+                      aria-label="Stop answering"
+                      className="grid size-6 place-items-center rounded-md text-neutral-200 hover:bg-neutral-500/20"
+                    >
+                      <Square aria-hidden="true" className="size-3" />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={emergencyStop}
+                    aria-label="Emergency stop: block all further actions"
+                    className="grid size-6 place-items-center rounded-md text-[var(--color-ink-dim)] hover:bg-neutral-500/20 hover:text-neutral-200"
+                  >
+                    <ShieldAlert aria-hidden="true" className="size-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}

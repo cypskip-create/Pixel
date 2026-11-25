@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
 
 export interface ThinkingParticleCoreProps {
-  /** Pixel square dimension (default 76px). */
+  /** Pixel square dimension (default 76px, or 28-32px when compact). */
   size?: number;
   reducedMotion?: boolean;
   label?: string;
+  /** Compact inline blob mode (for composer send area & Dynamic Island). */
+  compact?: boolean;
 }
 
 interface Particle3D {
@@ -58,6 +60,7 @@ export function ThinkingParticleCore({
   size = 76,
   reducedMotion = false,
   label = 'Thinking…',
+  compact = false,
 }: ThinkingParticleCoreProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -141,6 +144,24 @@ export function ThinkingParticleCore({
       if (rafId) window.cancelAnimationFrame(rafId);
     };
   }, [size, reducedMotion]);
+
+  if (compact) {
+    return (
+      <div
+        data-testid="thinking-particle-core"
+        title={label}
+        aria-label={label}
+        className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--color-border-strong)] bg-[#090909]"
+        style={{ width: `${size}px`, height: `${size}px` }}
+      >
+        <canvas
+          ref={canvasRef}
+          aria-hidden="true"
+          style={{ width: `${size}px`, height: `${size}px`, display: 'block' }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div

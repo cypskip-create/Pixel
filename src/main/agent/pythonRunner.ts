@@ -297,9 +297,21 @@ export class PythonAgentRunner {
           return { ok: false, content: text, denied: true };
         }
 
+        const modeAutoApproves = (mode: string, risk: string): boolean => {
+          if (mode === 'agent') return true;
+          if (mode === 'hybrid') return risk !== 'high';
+          return risk === 'low';
+        };
+
         const decision = registry.evaluate(callName, request.mode, callArgs);
         if (!decision.allowed) {
-          if (decision.needsApproval) {
+          if (decision.needsApproval && modeAutoApproves(request.mode, def.risk)) {
+            audit.record(
+              'permission',
+              `Auto-approved "${callName}" (${def.risk} risk) under ${request.mode} mode policy`,
+              'ok',
+            );
+          } else if (decision.needsApproval) {
             const permReq = buildPermissionRequest(def, callArgs);
             task.approvalRefs = [...(task.approvalRefs ?? []), permReq.id];
             task.status = 'awaiting_approval';

@@ -820,15 +820,10 @@ export function HermesSettingsView(props: HermesSettingsViewProps): React.JSX.El
             {/* ==================== 4. WORKSPACE ==================== */}
             {category === 'workspace' ? (
               <div className="flex flex-col gap-6">
-                <HermesRow label="Primary Agent Runtime" hint="Python v2 is Pixel's primary authoritative backend.">
-                  <select
-                    value={settings.agent?.runtimeEngine ?? 'python'}
-                    onChange={(e) => onPatch({ agent: { runtimeEngine: e.target.value as 'python' | 'typescript' } })}
-                    className="w-[220px] rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-ink)]"
-                  >
-                    <option value="python">Python v2 (Recommended)</option>
-                    <option value="typescript">TypeScript Fallback</option>
-                  </select>
+                <HermesRow label="Primary Agent Runtime" hint="Python v2 (`pixel-agent-v2`) is Pixel's sole authoritative agentic workflow runtime.">
+                  <span className="rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3.5 py-2 font-mono text-xs text-[var(--color-ink)]">
+                    Python v2 (Active)
+                  </span>
                 </HermesRow>
                 <HermesRow label="Interactive Shell" hint="Default shell launched in Pixel's live PTY Terminal.">
                   <select
